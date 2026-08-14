@@ -1,7 +1,10 @@
 using Kairos.Api.Availability;
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Features.Integrations;
 using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
+using Kairos.Api.Integrations;
+using Kairos.Api.Integrations.Google;
 using Kairos.Api.Persistence;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Security;
@@ -39,6 +42,24 @@ builder.Services.AddSingleton(new SecretProtector(
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
 
+// Part A shipped no authentication and Pocket ID is Part C, so the operator routes under
+// /integrations are guarded by a shared token or by nothing at all. Read here, with every other
+// configuration key, and handed to the group rather than resolved somewhere deeper.
+const string adminTokenPath = "Integrations:AdminToken";
+var integrationAdminToken = builder.Configuration[adminTokenPath];
+
+builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
+
+// Registered twice, resolved once: the endpoints see an IIntegrationConnector and never a Google
+// type, while Part B's calendar work asks for the factory by name. One instance either way,
+// because the in-memory access token is only a cache if there is a single holder of it.
+builder.Services.AddSingleton<GoogleClientFactory>();
+builder.Services.AddSingleton<IIntegrationConnector>(
+    services => services.GetRequiredService<GoogleClientFactory>());
+
+// Scoped: it reads and writes through the request's DbContext.
+builder.Services.AddScoped<IntegrationCredentialStore>();
+
 // Scoped, not singleton: it reads the request's DbContext. SlotQuery takes IEnumerable<IBusySource>,
 // so Part B's calendar source is one more registration here and no change anywhere else.
 builder.Services.AddScoped<IBusySource, LocalBusySource>();
@@ -70,6 +91,19 @@ var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
+v1.MapIntegrations(integrationAdminToken);
+
+// Said out loud, once, at startup. An endpoint that hands out a consent URL and accepts the
+// callback that binds a calendar to this instance is not something to leave open quietly.
+if (string.IsNullOrEmpty(integrationAdminToken))
+{
+    app.Logger.LogWarning(
+        "{Path} is not set: the integration endpoints are unauthenticated. Set it to a random "
+        + "string and send it as the {Header} header, or keep this instance off the public "
+        + "internet until Part C ships real authentication.",
+        adminTokenPath,
+        IntegrationEndpoints.AdminTokenHeader);
+}
 
 // React owns client routing, so anything that is not an API route and not a file on disk is the
 // single page. Mapped last, so it can never shadow a route above it.
