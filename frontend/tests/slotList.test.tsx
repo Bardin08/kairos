@@ -3,11 +3,34 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Route, Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
-import { getSlots } from '../src/lib/api'
+import {
+  asApiError,
+  getLink,
+  getSlots,
+  REQUEST_ABORTED,
+  type ApiError,
+} from '../src/lib/api'
 import Book from '../src/pages/Book'
 
 // The invitee's zone, which every rendered time is in. Fixed here so an
 // assertion means the same thing on a laptop in Warsaw and in CI.
+// jsdom builds its DOMException in another realm, which is exactly the
+// condition the guard has to survive; this is the shape a real aborted fetch
+// rejects with.
+function abortError(): Error {
+  const error = new Error('The operation was aborted.')
+  error.name = 'AbortError'
+  return error
+}
+
+/** The ApiError a call rejected with, or null if it did not reject at all. */
+function failureOf(promise: Promise<unknown>): Promise<ApiError | null> {
+  return promise.then(
+    () => null,
+    (error: unknown) => asApiError(error),
+  )
+}
+
 const INVITEE_ZONE = 'UTC'
 process.env.TZ = INVITEE_ZONE
 
@@ -183,6 +206,16 @@ test('days with no times stay in the grid, marked unavailable', async () => {
   expect(days).toHaveLength(30)
   expect(days.filter((day) => day.getAttribute('data-state') === 'available')).toHaveLength(2)
   expect(days.filter((day) => day.getAttribute('data-state') === 'unavailable')).toHaveLength(28)
+
+  // A day that cannot be chosen is not a toggle. Giving every closed day an
+  // aria-pressed would announce twenty-eight unpressed buttons to a screen
+  // reader, and the stylesheet paints on that same attribute.
+  expect(
+    days.filter(
+      (day) =>
+        day.getAttribute('data-state') === 'unavailable' && day.hasAttribute('aria-pressed'),
+    ),
+  ).toHaveLength(0)
 })
 
 // Breaks if a lost race leaves the dead slot on screen, or if the explanation
@@ -371,6 +404,135 @@ test('the month opens on the organizer calendar, not the invitee one', async () 
     (screen.getByRole('button', { name: 'Previous month' }) as HTMLButtonElement).disabled,
   ).toBe(true)
   expect(screen.queryByRole('group', { name: 'September 2026' })).toBeNull()
+})
+
+// C2, the other direction. An invitee BEHIND the organizer is where the two
+// implementations diverge: measured against the invitee's calendar, Previous
+// comes back enabled and lets them page into a month the organizer has already
+// spent. The test above passes either way, so this is the one that holds the
+// floor honest.
+test('the month floor is the organizer today for an invitee behind them', async () => {
+  // 05:00Z on 1 September is still 19:00 on 31 August in Honolulu.
+  vi.setSystemTime(new Date('2026-09-01T05:00:00Z'))
+  process.env.TZ = 'Pacific/Honolulu'
+
+  stubFetch((url) => {
+    if (url.includes('/slots')) return { status: 200, body: ['2026-09-02T09:00:00Z'] }
+    return { status: 200, body: LINK }
+  })
+  renderBook()
+
+  // The organizer is on September, so September is the floor and August — a
+  // month they have finished — must not be reachable.
+  await screen.findByRole('group', { name: 'September 2026' })
+  expect(
+    (screen.getByRole('button', { name: 'Previous month' }) as HTMLButtonElement).disabled,
+  ).toBe(true)
+})
+
+// Breaks if the focus move is keyed on `activeDay` rather than on the invitee
+// asking for a day. `activeDay` is derived, so it also changes when the month
+// pages and when a duration closes the selected day — neither of which is a
+// request to go and read the times. Keyed on the value, a keyboard user paging
+// forward was thrown out of the month arrow on every single press.
+test('focus follows a day being chosen and nothing else', async () => {
+  // Range-aware, so paging the month genuinely changes which days carry times
+  // and therefore changes `activeDay` — the condition the old code keyed on.
+  stubFetch((url) => {
+    if (!url.includes('/slots')) return { status: 200, body: LINK }
+    const month = (/from=(\d{4}-\d{2})/.exec(url)?.[1] ?? '2026-09')
+    return {
+      status: 200,
+      body: url.includes('duration=50')
+        ? [`${month}-09T14:00:00Z`]
+        : [`${month}-07T09:00:00Z`, `${month}-07T09:30:00Z`, `${month}-08T09:00:00Z`],
+    }
+  })
+  renderBook()
+
+  await waitFor(() => expect(times()).toHaveLength(2))
+  const list = () => screen.getByRole('group', { name: 'Available times' }).parentElement
+
+  // Paging the month keeps the invitee on the control they are operating.
+  const next = screen.getByRole('button', { name: 'Next month' })
+  next.focus()
+  fireEvent.click(next)
+  await screen.findByRole('heading', { name: 'Wednesday 7 October' })
+  expect(document.activeElement).toBe(next)
+
+  // So does changing the duration, which also moves the day underneath.
+  const fifty = screen.getByRole('button', { name: '50 min' })
+  fifty.focus()
+  fireEvent.click(fifty)
+  await screen.findByRole('heading', { name: 'Friday 9 October' })
+  expect(document.activeElement).toBe(fifty)
+
+  // Choosing a day is the one thing that moves it.
+  const october = () =>
+    within(screen.getByRole('group', { name: 'October 2026' }))
+      .getAllByRole('button', { hidden: true })
+      .filter((day) => day.getAttribute('data-state') === 'available')
+  fireEvent.click(october()[0])
+  await waitFor(() => expect(document.activeElement).toBe(list()))
+})
+
+// Breaks if an abort is reported to an invitee as a failure. The guard is
+// matched on the error's name rather than `instanceof DOMException`, which is
+// realm-sensitive and reads false under this project's jsdom environment — so
+// this test is also what stops the guard silently reverting to untestable.
+test('a cancelled request is marked as cancelled, not as a dead network', async () => {
+  const controller = new AbortController()
+  vi.stubGlobal('fetch', (_input: RequestInfo | URL, init?: RequestInit) =>
+    Promise.reject(init?.signal?.aborted === true ? abortError() : new TypeError('failed')),
+  )
+
+  controller.abort()
+  const cancelled = await failureOf(getLink(SLUG, controller.signal))
+  expect(cancelled?.code).toBe(REQUEST_ABORTED)
+
+  const dead = await failureOf(getLink(SLUG))
+  expect(dead?.code).toBeNull()
+  expect(dead?.message).toContain('Could not reach the server')
+})
+
+// Breaks if the fall-back hour renders two different instants identically.
+// Note the trap: the collision belongs to the INVITEE's zone. The slot walk
+// emits each of the organizer's wall-clock times once, so an organizer-zone
+// test can never produce it — a Warsaw organizer's own fall-back Sunday yields
+// four distinct labels. A New York invitee reading that same Sunday does not.
+test('the fall-back hour separates two slots that share a clock time', async () => {
+  process.env.TZ = 'America/New_York'
+  vi.setSystemTime(new Date('2026-11-01T00:00:00Z'))
+
+  stubFetch((url) => {
+    if (url.includes('/slots')) {
+      // 01:00 and 01:30 New York happen twice on 1 November; these four
+      // instants are the two pairs.
+      return {
+        status: 200,
+        body: [
+          '2026-11-01T05:00:00Z',
+          '2026-11-01T05:30:00Z',
+          '2026-11-01T06:00:00Z',
+          '2026-11-01T06:30:00Z',
+        ],
+      }
+    }
+    return { status: 200, body: { ...LINK, timeZone: 'Europe/Warsaw' } }
+  })
+  renderBook()
+
+  await waitFor(() => expect(times()).toHaveLength(4))
+  const labels = times().map((slot) => slot.textContent)
+
+  expect(labels).toEqual([
+    '01:00 GMT-4',
+    '01:30 GMT-4',
+    '01:00 GMT-5',
+    '01:30 GMT-5',
+  ])
+  // Every button still says something different from every other one.
+  expect(new Set(labels).size).toBe(labels.length)
 })
 
 // Breaks if the two 400 shapes are conflated. A DataAnnotations failure has no
