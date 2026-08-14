@@ -493,7 +493,11 @@ frontend/coverage/
 npm-debug.log*
 
 # The SPA is built into the API's wwwroot; the build output is never committed.
-backend/src/Kairos.Api/wwwroot/
+# The directory itself stays un-ignored so the one source asset that lives there
+# can be negated back in — git will not re-include a file inside an ignored
+# directory, so this has to ignore the contents rather than the directory.
+backend/src/Kairos.Api/wwwroot/*
+!backend/src/Kairos.Api/wwwroot/kairos.css
 
 # SQLite database files, including the WAL sidecars
 *.db
