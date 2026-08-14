@@ -93,6 +93,28 @@ public class AvailabilityQueryTests
     }
 
     [Fact]
+    public async Task GetWindowsAsync_OverrideOnADayWithNoWeeklyRules_OpensThatDay()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context, Rule(MondayIso, NineAm, Noon));
+
+        // "I am free this one Sunday" — an override that adds a day rather than trimming one.
+        // Reading overrides only where rules already exist would drop it silently.
+        AddOverride(context, Sunday, TwoPm, FivePm);
+
+        var windows = await new AvailabilityQuery(context)
+            .GetWindowsAsync(PatternId, Monday, Sunday, TestContext.Current.CancellationToken);
+
+        LocalWindow[] expected =
+        [
+            new(Monday, new LocalTime(9, 0), new LocalTime(12, 0)),
+            new(Sunday, new LocalTime(14, 0), new LocalTime(17, 0)),
+        ];
+        windows.ShouldBe(expected);
+    }
+
+    [Fact]
     public async Task GetWindowsAsync_RuleRunsToMinute1440_ThrowsInsteadOfBuildingAnImpossibleTime()
     {
         using var database = new TestDatabase();
