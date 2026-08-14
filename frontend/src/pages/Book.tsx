@@ -33,6 +33,11 @@ import {
 // page's problem, not the slot column's.
 const CORRUPT_AVAILABILITY = 'pattern_invalid'
 
+// Both link routes answer this for a slug that resolves to nothing — including
+// a slug no link could ever have. Keyed on the code and never on the title:
+// the two routes word that sentence differently.
+const NO_SUCH_LINK = 'not_found'
+
 const NEXT_MONTH = 1
 const PREVIOUS_MONTH = -1
 const NOT_FOUND = 404
@@ -232,7 +237,7 @@ export default function Book() {
     if (linkError !== null) {
       return notice(
         'This link does not lead anywhere',
-        linkError.status === NOT_FOUND
+        linkError.code === NO_SUCH_LINK || linkError.status === NOT_FOUND
           ? 'Nothing is published at this address. Check the link you were sent, or ask whoever sent it for a new one.'
           : linkError.message,
       )
@@ -246,6 +251,16 @@ export default function Book() {
         )
       }
       return notice('Loading', 'Fetching this booking link.')
+    }
+
+    // The link read succeeded and the slots read says there is no such link, so
+    // it was taken down between the two. There is no day left to offer and no
+    // month worth paging to.
+    if (slotsError !== null && slotsError.code === NO_SUCH_LINK) {
+      return notice(
+        'This link stopped taking bookings',
+        'It was live when this page opened and is not any more. Ask whoever sent it to you for a new one.',
+      )
     }
 
     if (slotsError !== null && slotsError.code === CORRUPT_AVAILABILITY) {
