@@ -4,4 +4,8 @@
     <RootNamespace>Kairos.Api</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NodaTime" />
+  </ItemGroup>
+
 </Project>
