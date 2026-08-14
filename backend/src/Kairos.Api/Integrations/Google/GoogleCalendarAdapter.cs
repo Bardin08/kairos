@@ -1,9 +1,11 @@
+using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
 
 using Kairos.Api.Availability;
 using Kairos.Api.Persistence;
+using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 
 using Microsoft.EntityFrameworkCore;
@@ -18,26 +20,47 @@ using Settings = Kairos.Api.Persistence.Entities.Settings;
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
-/// The connected Google account's calendar as a second source of busy time, so a meeting booked
-/// anywhere else suppresses the slots it covers here. Registering it is the whole integration —
-/// <see cref="Kairos.Api.Availability.SlotQuery"/> already drains every <see cref="IBusySource"/>,
-/// and nothing in <c>Scheduling/</c> knows this type exists.
+/// The connected Google account's calendar, in all three jobs Kairos asks of it: what the
+/// organizer is already busy with, where a new meeting goes, and the Meet it is joined through.
+/// One class because it is one account and one client; three interfaces because they are three
+/// capabilities and a provider that only did one of them would implement only that one.
 /// </summary>
 /// <remarks>
-/// Freebusy rather than the events list: it is one call for the whole window, it needs no
-/// pagination, it expands recurrences server-side, and it returns intervals rather than events —
-/// which is all availability wants, and it means the titles and attendees of the organizer's
-/// private calendar never enter this process.
+/// Freebusy rather than the events list on the read side: it is one call for the whole window, it
+/// needs no pagination, it expands recurrences server-side, and it returns intervals rather than
+/// events — which is all availability wants, and it means the titles and attendees of the
+/// organizer's private calendar never enter this process.
+///
+/// The read path and the write path fail differently on purpose, and the catch below is scoped to
+/// the read alone. A freebusy call that fails is one source with no opinion. A calendar write that
+/// fails is a booking with no meeting, and swallowing that here would hide it from the one place
+/// built to record it — <see cref="CalendarSyncService"/>, which turns it into a
+/// <see cref="CalendarSyncState.Failed"/> row an operator can see.
 /// </remarks>
 public sealed class GoogleCalendarAdapter(
     GoogleClientFactory clients,
     KairosDbContext context,
-    ILogger<GoogleCalendarAdapter> logger) : IBusySource
+    ILogger<GoogleCalendarAdapter> logger) : IBusySource, ICalendarWriter, IConferenceCreator
 {
     /// <summary>The signed-in account's own calendar; its id is that account's address.</summary>
     private const string PrimaryCalendarId = "primary";
 
     private const string ApplicationName = "Kairos";
+
+    /// <summary>
+    /// Version 1 of the conference schema. Without it Google silently ignores
+    /// <c>ConferenceData</c> on an insert and returns an event with no Meet — the failure that
+    /// looks like a working integration.
+    /// </summary>
+    private const int ConferenceDataVersion = 1;
+
+    /// <summary>Google Meet. The other solution keys are the retired Hangouts products.</summary>
+    private const string MeetSolution = "hangoutsMeet";
+
+    /// <summary>Of the entry points on a conference — the others are phone and SIP.</summary>
+    private const string VideoEntryPoint = "video";
+
+    public IntegrationProvider Provider => IntegrationProvider.Google;
 
     /// <summary>
     /// Every busy period Google reports over <paramref name="window"/>, each carrying the
@@ -66,11 +89,7 @@ public sealed class GoogleCalendarAdapter(
                 return [];
             }
 
-            using var service = new CalendarService(new BaseClientService.Initializer
-            {
-                HttpClientInitializer = credential,
-                ApplicationName = ApplicationName,
-            });
+            using var service = CreateService(credential);
 
             var response = await service.Freebusy
                 .Query(new FreeBusyRequest
@@ -110,6 +129,132 @@ public sealed class GoogleCalendarAdapter(
             return [];
         }
     }
+
+    public async Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
+        await clients.GetCredentialAsync(cancellationToken) is not null;
+
+    /// <summary>
+    /// The meeting, in the organizer's own calendar, with a Meet attached.
+    /// </summary>
+    /// <remarks>
+    /// Two idempotency keys, both the booking id, because Google offers two and they guard
+    /// different things. <c>CreateConferenceRequest.RequestId</c> makes the <em>conference</em>
+    /// idempotent: a retry presents the same id and Google returns the conference it already
+    /// minted rather than a second one. The event's own id makes the <em>event</em> idempotent:
+    /// a retry is refused as a duplicate instead of putting the same meeting in the calendar
+    /// twice. A UUID's hex is thirty-two characters drawn from 0-9a-f, and Google's event ids are
+    /// base32hex — lowercase a-v and 0-9, five to 1024 long — so the booking id is a legal event
+    /// id as it stands, and choosing it is also what lets
+    /// <see cref="CreateAsync"/> find this event again knowing only the booking.
+    /// </remarks>
+    public async Task<string> CreateEventAsync(
+        CalendarEventRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+
+        var body = new Event
+        {
+            Id = EventId(request.BookingId),
+            Summary = request.Title,
+            Description = request.Description,
+
+            // The offset-carrying overload, not the string one: an instant with its offset is
+            // unambiguous, so no time zone has to be named and none can be named wrongly.
+            Start = new EventDateTime { DateTimeDateTimeOffset = request.Start.ToDateTimeOffset() },
+            End = new EventDateTime { DateTimeDateTimeOffset = request.End.ToDateTimeOffset() },
+            Attendees =
+            [
+                new EventAttendee
+                {
+                    Email = request.AttendeeEmail,
+                    DisplayName = request.AttendeeName,
+                },
+            ],
+            ConferenceData = new ConferenceData
+            {
+                CreateRequest = new CreateConferenceRequest
+                {
+                    RequestId = request.BookingId.ToString(),
+                    ConferenceSolutionKey = new ConferenceSolutionKey { Type = MeetSolution },
+                },
+            },
+        };
+
+        var insert = service.Events.Insert(body, PrimaryCalendarId);
+        insert.ConferenceDataVersion = ConferenceDataVersion;
+
+        var created = await insert.ExecuteAsync(cancellationToken);
+        return created.Id;
+    }
+
+    public async Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken)
+    {
+        using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+        await service.Events.Delete(PrimaryCalendarId, externalEventId).ExecuteAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The Meet for this booking. A read rather than a write, and that is not a shortcut: with
+    /// Google, conferencing is requested as part of the event insert and provisioned
+    /// <em>asynchronously</em>, so the insert can come back with the request still pending and no
+    /// entry points on it. Re-reading the event is how the API documents finding out what the
+    /// conference turned into, and the deterministic event id from
+    /// <see cref="CreateEventAsync"/> is what makes it reachable from a booking id alone — no
+    /// state carried between the two calls, and no ordering hidden in a field.
+    /// </summary>
+    public async Task<ConferenceDetails> CreateAsync(
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+
+        var created = await service.Events
+            .Get(PrimaryCalendarId, EventId(bookingId))
+            .ExecuteAsync(cancellationToken);
+
+        var conference = created.ConferenceData
+            ?? throw new InvalidOperationException(
+                $"Google created the event for booking {bookingId} without conference data.");
+
+        var join = conference.EntryPoints?
+            .FirstOrDefault(entry => entry.EntryPointType == VideoEntryPoint)?.Uri;
+
+        if (string.IsNullOrEmpty(join))
+        {
+            // Almost always the pending case: provisioning had not finished when this read ran.
+            // Reported rather than retried — there is no retry loop to hang a poll off yet, and
+            // the caller already treats a missing conference as a meeting with no join link.
+            throw new InvalidOperationException(
+                $"Google returned no video entry point for booking {bookingId}; the conference "
+                + $"request is {conference.CreateRequest?.Status?.StatusCode ?? "absent"}.");
+        }
+
+        return new ConferenceDetails(conference.ConferenceId, new Uri(join));
+    }
+
+    /// <summary>
+    /// The booking id as Google spells an event id: thirty-two lowercase hex characters, which
+    /// is a strict subset of the base32hex alphabet the API requires.
+    /// </summary>
+    private static string EventId(Guid bookingId) => bookingId.ToString("N");
+
+    private static CalendarService CreateService(UserCredential credential) =>
+        new(new BaseClientService.Initializer
+        {
+            HttpClientInitializer = credential,
+            ApplicationName = ApplicationName,
+        });
+
+    /// <summary>
+    /// The write path's counterpart to the read path's null check. Null is still the ordinary
+    /// state of an unconnected instance, but a write asked to happen against no account has
+    /// nothing to return, so it throws and <see cref="CalendarSyncService"/> records it. Reaching
+    /// this means the account was disconnected between the connectivity check and the write.
+    /// </summary>
+    private async Task<UserCredential> RequireCredentialAsync(CancellationToken cancellationToken) =>
+        await clients.GetCredentialAsync(cancellationToken)
+        ?? throw new InvalidOperationException("No Google account is connected.");
 
     /// <summary>
     /// Over <c>Values</c> rather than the <c>primary</c> key: the response is keyed by the id that

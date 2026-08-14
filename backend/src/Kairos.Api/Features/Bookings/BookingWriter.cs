@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
+using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 
@@ -15,7 +16,7 @@ namespace Kairos.Api.Features.Bookings;
 /// The booking write. Everything else in the codebase may be wrong and be a bug; this being
 /// wrong is a double-booked calendar, so it is the one place that talks to SQLite directly.
 /// </summary>
-public sealed class BookingWriter(KairosDbContext context, IClock clock)
+public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxWriter outbox)
 {
     /// <summary>The slot conflicts with a confirmed booking. The only failure this returns.</summary>
     public const string SlotTakenReason = "slot_taken";
@@ -47,8 +48,14 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
     /// could never resolve it. BEGIN IMMEDIATE takes the write lock up front, which is what makes
     /// check-then-insert correct here. This is the only raw SQL in the codebase.
     /// </summary>
+    /// <param name="slug">
+    /// The link's public name, for the <c>booking.created</c> body. Passed in rather than looked
+    /// up because the caller resolved the link a moment ago and a second read inside the write
+    /// transaction would be the same fact fetched twice.
+    /// </param>
     public CreateBookingResult TryCreate(
         Guid linkId,
+        string slug,
         Instant start,
         Duration duration,
         BookerDetails booker,
@@ -84,6 +91,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
         // and ChangeTracker.Clear would discard whatever the caller was tracking.
         var started = false;
         Booking? pending = null;
+        OutboxMessage? announcement = null;
         try
         {
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
@@ -104,7 +112,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
 
             if (clashes > 0)
             {
-                Abandon(started, pending);
+                Abandon(started, pending, announcement);
                 return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
             }
 
@@ -137,6 +145,18 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
             };
 
             context.Bookings.Add(pending);
+
+            // Inside the transaction this method already owns, and before the one SaveChanges
+            // that carries the booking. That is the entire point of the outbox: the booking and
+            // the announcement of it are the same INSERT batch inside the same BEGIN IMMEDIATE,
+            // so there is no window in which one exists without the other — not a small window,
+            // none. Enqueued here rather than by the endpoint because the endpoint could only do
+            // it after the COMMIT, which is the dual write the pattern exists to delete.
+            announcement = outbox.Enqueue(
+                bookingId,
+                OutboxMessageType.BookingCreated,
+                BookingEventPayload.Created(bookingId, slug, start, duration).ToJson());
+
             context.SaveChanges();
             context.Database.ExecuteSqlRaw("COMMIT;");
 
@@ -145,12 +165,12 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
         catch (Exception exception) when (IsSlotAlreadyTaken(exception))
         {
             // The partial unique index fired — the backstop, not the mechanism.
-            Abandon(started, pending);
+            Abandon(started, pending, announcement);
             return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
         }
         catch
         {
-            Abandon(started, pending);
+            Abandon(started, pending, announcement);
             throw;
         }
         finally
@@ -174,14 +194,19 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
     /// Undoes what this call did, and nothing else. Both guards matter: a bare ROLLBACK after a
     /// BEGIN IMMEDIATE that never ran would discard a transaction the caller opened — the shape a
     /// reschedule takes — and clearing the change tracker wholesale would discard entities the
-    /// caller is holding. Left tracked, the two failed inserts would ride along on the caller's
-    /// next SaveChanges and re-insert the booking this method just refused.
+    /// caller is holding. Left tracked, the three failed inserts would ride along on the caller's
+    /// next SaveChanges and re-insert the booking this method just refused — and announce it.
     /// </summary>
-    private void Abandon(bool started, Booking? pending)
+    private void Abandon(bool started, Booking? pending, OutboxMessage? announcement)
     {
         if (started)
         {
             Rollback();
+        }
+
+        if (announcement is not null)
+        {
+            context.Entry(announcement).State = EntityState.Detached;
         }
 
         if (pending is null)

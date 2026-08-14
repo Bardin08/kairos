@@ -1,4 +1,5 @@
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 
@@ -53,10 +54,10 @@ public class BookingConcurrencyTests
             callers[slot] = new Thread(() =>
             {
                 using var context = database.CreateContext();
-                var writer = new BookingWriter(context, SystemClock.Instance);
+                var writer = Writer(context);
                 barrier.SignalAndWait();
                 results[slot] = writer.TryCreate(
-                    ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+                    ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
             });
             callers[slot].Start();
         }
@@ -90,16 +91,16 @@ public class BookingConcurrencyTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, NoMargin);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
-        writer.TryCreate(ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
 
         // Halfway into the consulting meeting, on the other link. Availability is one calendar,
         // not one calendar per link, so the second link may not sell the same half hour.
         var overlapping = MeetingStart + Duration.FromMinutes(SlotMinutes / 2);
         var result = writer.TryCreate(
-            MentorshipId, overlapping, SlotDuration, Booker, string.Empty, NoMargin);
+            MentorshipId, MentorshipSlug, overlapping, SlotDuration, Booker, string.Empty, NoMargin);
 
         result.Success.ShouldBeFalse();
         result.Reason.ShouldBe(BookingWriter.SlotTakenReason);
@@ -112,11 +113,11 @@ public class BookingConcurrencyTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, LargerMarginMinutes);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
         // 10:00-11:00 on the link that wants thirty minutes either side of itself.
         var existing = Duration.FromMinutes(MeetingMinutes);
-        writer.TryCreate(ConsultingId, MeetingStart, existing, Booker, string.Empty, LargerMarginMinutes)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, existing, Booker, string.Empty, LargerMarginMinutes)
             .Success.ShouldBeTrue();
 
         // Both margins are non-zero and unequal on purpose: with thirty against zero the maximum
@@ -125,11 +126,19 @@ public class BookingConcurrencyTests
         var insideTheLargerMargin = MeetingStart + existing + Duration.FromMinutes(SmallerMarginMinutes);
         var atTheLargerMargin = MeetingStart + existing + Duration.FromMinutes(LargerMarginMinutes);
 
-        writer.TryCreate(MentorshipId, insideTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
+        writer.TryCreate(MentorshipId, MentorshipSlug, insideTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
             .Reason.ShouldBe(BookingWriter.SlotTakenReason);
-        writer.TryCreate(MentorshipId, atTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
+        writer.TryCreate(MentorshipId, MentorshipSlug, atTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
             .Success.ShouldBeTrue();
     }
+
+    /// <summary>
+    /// The writer as the composition root builds it. The outbox writer is not a stand-in: the
+    /// booking and its announcement go in on one SaveChanges, so a test that left it out would
+    /// exercise a shorter INSERT batch than the application ever runs.
+    /// </summary>
+    private static BookingWriter Writer(KairosDbContext context) =>
+        new(context, SystemClock.Instance, new OutboxWriter(context, SystemClock.Instance));
 
     private static void Seed(KairosDbContext context, int consultingMarginMinutes)
     {
