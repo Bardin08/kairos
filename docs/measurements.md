@@ -2,12 +2,14 @@
 
 What Part A actually costs, and the evidence that its eleven acceptance conditions hold. Every number here was measured rather than estimated; where a measurement disagreed with an earlier one, the measurement is what is written down.
 
-Measured 2026-08-14 against `99c874a`, on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish. Reproducing this on the Raspberry Pi the app is meant to live on will move the memory figure and nothing else — see condition 10.
+Measured 2026-08-14 on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish. Reproducing this on the Raspberry Pi the app is meant to live on will move the memory figure and nothing else — see condition 10.
+
+Conditions 2, 3, 4, 7, 9, 10 and 11 were measured against `99c874a`. Conditions 1, 5, 6 and 8 were re-measured against `223079b`, which changed how the booking page derives dates and grew the bundle; the figures below are the later ones.
 
 ## Headline
 
 ```
-bundle          68.8 kB gzipped   (budget 76.8 kB)
+bundle          69.1 kB gzipped   (budget 76.8 kB)
 allocations      8.2 kB per month of slots   (budget 65.5 kB)
 idle RSS       159.2 MiB          (target under 100 Mi — MISSED, see below)
 verify.sh       16 checks, 0 failed
@@ -18,10 +20,12 @@ verify.sh       16 checks, 0 failed
 `bash scripts/bundle-budget.sh` is the only place the budget number lives, and it weighs everything the build writes into `wwwroot/assets/` — JavaScript and CSS alike.
 
 ```
-bundle-budget: 68789 bytes gzipped across 1 file(s), budget 76800
+bundle-budget: 69107 bytes gzipped across 1 file(s), budget 76800
 ```
 
-One file, because Vite emitted no CSS chunk: Kairos's stylesheet is the vendored `wwwroot/kairos.css`, which the API serves directly and which no build measures. 8,011 bytes of headroom. The React 19.2 shell alone was 61,641, so the two real pages, four components and three helpers cost roughly 7.1 kB gzipped between them.
+One file, because Vite emitted no CSS chunk: Kairos's stylesheet is the vendored `wwwroot/kairos.css`, which the API serves directly and which no build measures. 7,693 bytes of headroom. The React 19.2 shell alone was 61,641, so the two real pages, four components and three helpers cost roughly 7.5 kB gzipped between them.
+
+It was 68,789 at `99c874a`. The 318 bytes came from `223079b`, which added `zonedOffset()` and moved the booker's form state up into `Book`.
 
 ## Allocations
 
@@ -76,6 +80,12 @@ The organizer's 09:00 rendered as **04:00** in New York, and the control a week 
 ```
 
 Booked end to end through the page. The confirmation read `Monday 26 October, 04:00–04:25 · America/New_York`; the row stored is `2026-10-26 08:00:00`–`08:25:00` UTC, which is 09:00–09:25 Warsaw and 04:00–04:25 New York.
+
+**No slot in this range falls in a DST-repeated hour**, so nothing here carries an offset suffix. Warsaw's repeated hour is 02:00–03:00 on Sunday 25 October, and the pattern has no Sunday rule. Three further things the same re-run pinned down:
+
+- The month grid opens on the **organizer's** current month — `August 2026` with the invitee in `America/New_York` — and *Previous month* is disabled there.
+- Every surface names the same moment in the invitee's zone. With the invitee in `Asia/Tokyo`, where the organizer's last slot crosses midnight, the slot button reads `00:30 +1d`, the desktop line reads `Tuesday 27 October, 00:30–00:55` and the compact bar reads `Tue 27 Oct, 00:30`, while the column heading stays `Monday 26 October` — which is the organizer's day, and is the one thing on screen that is supposed to be. The two CTA surfaces are mutually exclusive: desktop at 1600px, bar at 420px, never both.
+- Ambiguous times are disambiguated. The slot walk emits each wall-clock time once, so an organizer in Warsaw never sees a collision on Warsaw's own fall-back day; the collision belongs to the invitee. With the invitee in `America/New_York` on 1 November — the day New York falls back — and the organizer offering 06:00–08:00 Warsaw, the column renders `01:00 GMT-4  01:30 GMT-4  01:00 GMT-5  01:30 GMT-5` rather than two identical pairs.
 
 ### 2. Cross-link margin — pass
 
@@ -155,7 +165,7 @@ Ascending lexicographically, every version nibble a 7. The inserts went through 
 
 ### 8. Bundle budget — pass
 
-68,789 bytes gzipped, budget 76,800. See above.
+69,107 bytes gzipped, budget 76,800. See above.
 
 ### 9. Allocation budget — pass
 
