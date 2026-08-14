@@ -15,6 +15,14 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
  */
 export const DATABASE_BUSY = 'database_busy'
 
+/**
+ * The app cancelled this request — a duration changed, a month turned, a
+ * component unmounted. Not a failure, and never something to render. It exists
+ * so a caller can tell "we called this off" apart from "the network is gone",
+ * which otherwise look identical from a catch block.
+ */
+export const REQUEST_ABORTED = 'request_aborted'
+
 /** One bookable event type, as the booking page needs it. */
 export type Link = {
   slug: string
@@ -86,15 +94,28 @@ export class ApiError extends Error {
 /**
  * Whatever a rejected call threw, as something with a status and a code.
  *
- * A `catch` here receives three different things: an ApiError this module
- * built, a TypeError from `fetch` when the network is not there, and a
- * SyntaxError if a 200 arrives with a body that is not JSON. The last two carry
- * messages written for a developer console, so they are replaced rather than
- * shown to an invitee. Status 0 is the marker for "the request never got an
- * answer" — no HTTP status exists for that.
+ * A `catch` here receives four different things: an ApiError this module built;
+ * a DOMException named AbortError when the app itself cancelled the request; a
+ * TypeError from `fetch` when the network is not there; and a SyntaxError if a
+ * 200 arrives with a body that is not JSON. The last three carry messages
+ * written for a developer console, so they are replaced rather than shown to an
+ * invitee.
+ *
+ * Status 0 means no HTTP status was reached — the request was cancelled, or it
+ * never got an answer. It does NOT mean the request failed to complete: a 200
+ * whose body is not JSON lands here too, having very much got an answer.
+ *
+ * An abort gets its own code because it is not a failure at all. Both callers
+ * check `signal.aborted` before they touch the result, so nothing leaks today,
+ * but this module is shared and the first caller to forget that guard would
+ * otherwise tell an invitee "could not reach the server" about a request the
+ * app cancelled on purpose.
  */
 export function asApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return new ApiError(0, REQUEST_ABORTED, 'The request was cancelled.')
+  }
   return new ApiError(0, null, 'Could not reach the server. Try again in a moment.')
 }
 
@@ -113,16 +134,18 @@ async function toError(response: Response): Promise<ApiError> {
     // A proxy error page, or an empty body. The status is all there is.
   }
 
-  // Delta-seconds, which is the only form this API sends. An HTTP-date is also
-  // legal in the header generally, so a non-numeric value is dropped rather
-  // than turned into NaN and rendered at somebody.
-  const seconds = Number(response.headers.get('Retry-After'))
+  // Delta-seconds, which is the only form this API sends. Matched as digits
+  // before it is converted, because `Number` also accepts an HTTP-date's
+  // neighbours — "12.5", "0x10", "1e3" — and the last of those would put "try
+  // again in 1000 seconds" in front of an invitee.
+  const header = response.headers.get('Retry-After') ?? ''
+  const seconds = /^\d+$/.test(header) ? Number(header) : 0
 
   return new ApiError(
     response.status,
     code,
     title || `The server answered ${response.status}.`,
-    Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+    seconds > 0 ? seconds : null,
   )
 }
 

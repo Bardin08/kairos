@@ -1,6 +1,6 @@
 import type { CSSProperties, Ref } from 'react'
 
-import { dayOffset, longDate, zonedTime } from '../lib/time'
+import { dayOffset, longDate, zonedOffset, zonedTime } from '../lib/time'
 
 // U+2212 MINUS SIGN, not a hyphen: it is the same width as the plus in a
 // tabular face, so a column carrying both does not step in and out.
@@ -13,6 +13,27 @@ function shift(offset: number): string {
 
 function counted(total: number): string {
   return total === 1 ? '1 time' : `${total} times`
+}
+
+/**
+ * The clock time for each slot, with the zone's offset added to any that would
+ * otherwise be indistinguishable.
+ *
+ * On the day a zone falls back, two instants an hour apart share a clock time —
+ * Warsaw 2026-10-25 renders both 00:30Z and 01:30Z as "02:30". Two identical
+ * buttons is the defect: the booking would be correct whichever is pressed,
+ * and the invitee would have no way of knowing which hour they got. Only the
+ * colliding pair is annotated, so the other 364 days keep a clean column.
+ */
+function labelled(slots: string[], zone: string): string[] {
+  const times = slots.map((instant) => zonedTime(instant, zone))
+
+  const seen = new Map<string, number>()
+  for (const time of times) seen.set(time, (seen.get(time) ?? 0) + 1)
+
+  return times.map((time, index) =>
+    (seen.get(time) ?? 0) > 1 ? `${time} ${zonedOffset(slots[index], zone)}` : time,
+  )
 }
 
 /**
@@ -50,6 +71,8 @@ export default function SlotList({
   onSelect: (start: string) => void
   ref: Ref<HTMLElement>
 }) {
+  const times = labelled(slots, zone)
+
   return (
     // Focus lands here when the day changes: on a server-rendered page the
     // navigation would have done it, and on an SPA nothing does unless it is
@@ -82,7 +105,7 @@ export default function SlotList({
             aria-pressed={start === selected}
             onClick={() => onSelect(start)}
           >
-            {zonedTime(start, zone)}
+            {times[index]}
             {shift(dayOffset(start, zone, day))}
           </button>
         ))}

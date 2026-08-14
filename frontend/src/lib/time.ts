@@ -89,6 +89,25 @@ export function zonedTime(instant: string, zone: string): string {
 }
 
 /**
+ * The zone's short offset at an instant — `GMT+2`, `GMT-4`.
+ *
+ * It exists for one hour a year. When a zone falls back, two different instants
+ * an hour apart render the same clock time: in Warsaw on 2026-10-25 both
+ * 00:30Z and 01:30Z are "02:30". The booking stays correct either way, because
+ * the instant is echoed to the server verbatim and the selection keys on it —
+ * but the invitee is shown two identical buttons and cannot tell which hour
+ * they are choosing. The offset is what separates them.
+ */
+export function zonedOffset(instant: string, zone: string): string {
+  const parts = formatter('offset', zone, {
+    hour: '2-digit',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(new Date(instant))
+
+  return part(parts, 'timeZoneName')
+}
+
+/**
  * How far the invitee's day is from the organizer's. A 17:00 Warsaw slot is
  * 00:00 the next day in Tokyo, and a slot list that renders it as plain 00:00
  * under a Monday heading has told the invitee the wrong day. Date keys sort

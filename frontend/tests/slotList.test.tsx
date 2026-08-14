@@ -8,7 +8,8 @@ import Book from '../src/pages/Book'
 
 // The invitee's zone, which every rendered time is in. Fixed here so an
 // assertion means the same thing on a laptop in Warsaw and in CI.
-process.env.TZ = 'UTC'
+const INVITEE_ZONE = 'UTC'
+process.env.TZ = INVITEE_ZONE
 
 const SLUG = 'consulting'
 const ORIGIN_LESS_MANAGE_PATH = '/manage/bdef4bc6'
@@ -79,12 +80,18 @@ function healthy(): Handler {
 }
 
 function renderBook() {
-  const { hook } = memoryLocation({ path: `/book/${SLUG}` })
+  const location = memoryLocation({ path: `/book/${SLUG}`, record: true })
   render(
-    <Router hook={hook}>
+    <Router hook={location.hook}>
       <Route path="/book/:slug" component={Book} />
     </Router>,
   )
+  return location
+}
+
+/** The pane the desktop commit action lives in, which has no accessible role. */
+function desktopCta(): string {
+  return document.querySelector('.desktop-cta')?.textContent ?? ''
 }
 
 function times(): HTMLElement[] {
@@ -115,6 +122,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Individual tests move the invitee's zone; nothing may inherit it.
+  process.env.TZ = INVITEE_ZONE
   cleanup()
   vi.useRealTimers()
   vi.unstubAllGlobals()
@@ -198,6 +207,13 @@ test('a 409 drops the slot and explains it beside the times', async () => {
   expect(alert.textContent).toContain('That time was taken.')
   expect(times()).toHaveLength(1)
   expect(times()[0].textContent).toBe('09:30')
+
+  // And the invitee did not also lose what they typed. The 503 branch promises
+  // exactly this in words; the more likely failure has to keep the same promise.
+  fireEvent.click(times()[0])
+  fireEvent.click(screen.getAllByRole('button', { name: 'Continue' })[0])
+  expect(((await screen.findByLabelText('Your name')) as HTMLInputElement).value).toBe('Vlad')
+  expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('v@example.com')
 })
 
 // Breaks if the one response that ever carries the manage token stops carrying
@@ -205,7 +221,7 @@ test('a 409 drops the slot and explains it beside the times', async () => {
 // nobody can cancel, forever.
 test('the manage token from the 201 lands in a URL the invitee can keep', async () => {
   const spy = stubFetch(healthy())
-  renderBook()
+  const location = renderBook()
 
   await waitFor(() => expect(times()).toHaveLength(2))
   await fillAndSubmit()
@@ -215,7 +231,10 @@ test('the manage token from the 201 lands in a URL the invitee can keep', async 
   )) as HTMLInputElement
 
   expect(field.value.endsWith(ORIGIN_LESS_MANAGE_PATH)).toBe(true)
-  expect(screen.getByRole('link', { name: 'Open it' }).getAttribute('href')).toBe(field.value)
+
+  // And the button beside it goes to the same place.
+  fireEvent.click(screen.getByRole('button', { name: 'Open it' }))
+  expect(location.history.at(-1)).toBe(ORIGIN_LESS_MANAGE_PATH)
 
   // And the instant went back exactly as it arrived — an offset form is refused.
   const created = spy.mock.calls.find((call) => String(call[0]).endsWith('/bookings'))
@@ -293,6 +312,64 @@ test('a link that stops existing mid-session takes the whole page', async () => 
   renderBook()
 
   await screen.findByRole('heading', { name: 'This link stopped taking bookings' })
+  expect(screen.queryByRole('group', { name: 'September 2026' })).toBeNull()
+})
+
+// C1. Breaks if any surface names the ORGANIZER's day beside the INVITEE's
+// clock. Every place the choice is stated has to agree: a desktop reader was
+// told "Monday 7 September, 01:00" for a time the slot's own +1d mark, the
+// phone bar and the very next screen all called Tuesday the 8th.
+test('every statement of the choice names the day in the invitee zone', async () => {
+  // Nine hours ahead of the organizer, so a late slot lands on the next day.
+  process.env.TZ = 'Asia/Tokyo'
+  stubFetch((url) => {
+    if (url.includes('/slots')) return { status: 200, body: ['2026-09-07T16:00:00Z'] }
+    return { status: 200, body: LINK }
+  })
+  renderBook()
+
+  await waitFor(() => expect(times()).toHaveLength(1))
+
+  // The organizer's Monday, which is what the grid and the heading are keyed on.
+  screen.getByRole('heading', { name: 'Monday 7 September' })
+  expect(times()[0].textContent).toBe('01:00 +1d')
+
+  fireEvent.click(times()[0])
+
+  expect(desktopCta()).toContain('Tuesday 8 September, 01:00–01:25')
+  expect(desktopCta()).not.toContain('Monday')
+
+  // The phone bar and the form summary state the same day as the desktop line.
+  expect(document.querySelector('.actionbar')?.textContent).toMatch(/Tue 8 Sep/)
+  fireEvent.click(screen.getAllByRole('button', { name: 'Continue' })[0])
+  expect((await screen.findByText(/Tuesday 8 September/)).textContent).toContain('01:00–01:25')
+})
+
+// C2. Breaks if the grid is anchored to the invitee's calendar. The month and
+// the from/to it requests are ORGANIZER dates, so an invitee ahead of the
+// organizer would open on the next month with Previous disabled and could
+// never reach the organizer's current — still entirely bookable — day.
+test('the month opens on the organizer calendar, not the invitee one', async () => {
+  // 2026-08-31 15:30Z is already 1 September in Tokyo; the organizer is on UTC
+  // and still has all of 31 August left.
+  vi.setSystemTime(new Date('2026-08-31T15:30:00Z'))
+  process.env.TZ = 'Asia/Tokyo'
+
+  const spy = stubFetch((url) => {
+    if (url.includes('/slots')) return { status: 200, body: ['2026-08-31T09:00:00Z'] }
+    return { status: 200, body: LINK }
+  })
+  renderBook()
+
+  await waitFor(() => expect(slotRequests(spy)).toHaveLength(1))
+  expect(slotRequests(spy)[0]).toContain('from=2026-08-01&to=2026-08-31')
+
+  await screen.findByRole('group', { name: 'August 2026' })
+  // August IS the organizer's current month, so it is correctly the floor —
+  // the defect was opening past it, not stopping at it.
+  expect(
+    (screen.getByRole('button', { name: 'Previous month' }) as HTMLButtonElement).disabled,
+  ).toBe(true)
   expect(screen.queryByRole('group', { name: 'September 2026' })).toBeNull()
 })
 

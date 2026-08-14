@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'wouter'
+import { useLocation, useParams } from 'wouter'
 
+import AlertIcon from '../components/AlertIcon'
 import BookingForm from '../components/BookingForm'
 import DurationPicker from '../components/DurationPicker'
 import MonthGrid from '../components/MonthGrid'
@@ -44,22 +45,6 @@ const NOT_FOUND = 404
 
 type Step = 'choose' | 'details' | 'done'
 
-function AlertIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7.5v5M12 16h.01" />
-    </svg>
-  )
-}
-
 function notice(title: string, body: string) {
   return (
     <div className="card card-lg card-pad card-narrow">
@@ -80,6 +65,7 @@ function notice(title: string, body: string) {
  */
 export default function Book() {
   const { slug = '' } = useParams()
+  const [, navigate] = useLocation()
 
   // Read once, at mount. A zone that changed mid-booking would silently move
   // every time on screen out from under a selection already made.
@@ -88,7 +74,14 @@ export default function Book() {
   const [link, setLink] = useState<Link | null>(null)
   const [linkError, setLinkError] = useState<ApiError | null>(null)
 
-  const [month, setMonth] = useState(() => startOfMonth(todayIn(zone)))
+  // Null until the link resolves, and deliberately not seeded from the
+  // invitee's calendar. The grid is keyed on the ORGANIZER's dates — that is
+  // what `from` and `to` mean to the slots endpoint — so opening on the
+  // invitee's month puts the two out of step by a day across the date line: an
+  // invitee in Tokyo at 00:30 on 1 September would open on September with
+  // Previous disabled, and the organizer's 31 August, still a whole working
+  // day, could never be reached.
+  const [month, setMonth] = useState<string | null>(null)
   const [duration, setDuration] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
 
@@ -103,7 +96,15 @@ export default function Book() {
   const [step, setStep] = useState<Step>('choose')
   const [booked, setBooked] = useState<Booking | null>(null)
 
+  // Lives here, not in the form. A 409 sends the invitee back to the times to
+  // choose again, which unmounts the form — and losing a typed name and email
+  // to a race they did not cause is a worse outcome than the lost slot. The
+  // 503 branch already promises "everything you typed is still here"; this is
+  // what makes the more likely failure keep the same promise.
+  const [details, setDetails] = useState({ name: '', email: '', notes: '' })
+
   const listRef = useRef<HTMLElement>(null)
+  const focusedDay = useRef<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -117,6 +118,9 @@ export default function Book() {
         // asymmetry someone later reads as "the abort is decorative".
         if (controller.signal.aborted) return
         setLink(loaded)
+        // The organizer's calendar, not the invitee's. This is the first moment
+        // that zone is known, which is why the month is not seeded above.
+        setMonth(startOfMonth(todayIn(loaded.timeZone)))
         // The link's own order, so the first entry is the one whoever
         // configured it put first — not the shortest.
         setDuration(loaded.durations[0] ?? null)
@@ -129,7 +133,7 @@ export default function Book() {
   }, [slug])
 
   useEffect(() => {
-    if (link === null || duration === null) return
+    if (link === null || duration === null || month === null) return
 
     // A month is at most 31 days, which is exactly the widest range the slots
     // endpoint answers for. One request per month, never one per day.
@@ -175,24 +179,48 @@ export default function Book() {
   // Derived rather than stored. A duration change can close the day that was
   // selected, and a fallback computed here cannot go stale the way a second
   // copy in state would.
-  const activeDay =
-    day !== null && grouped.byDay.has(day)
-      ? day
-      : (grouped.byDay.keys().next().value ?? null)
+  // Smallest key rather than the first inserted: date keys sort
+  // lexicographically, so this holds even if the endpoint ever stops returning
+  // instants in ascending order.
+  const earliestDay = [...grouped.byDay.keys()].reduce<string | null>(
+    (found, key) => (found === null || key < found ? key : found),
+    null,
+  )
+  const activeDay = day !== null && grouped.byDay.has(day) ? day : earliestDay
   const daySlots = activeDay === null ? [] : (grouped.byDay.get(activeDay) ?? [])
   const activeStart = start !== null && daySlots.includes(start) ? start : null
 
-  const atEarliestMonth = monthIndex(month) <= monthIndex(todayIn(zone))
+  // The organizer's today, for the same reason the month is. Measured against
+  // the invitee's, an invitee ahead of the organizer loses the organizer's
+  // current day and one behind can page back into a month already spent.
+  const atEarliestMonth =
+    link === null ||
+    month === null ||
+    monthIndex(month) <= monthIndex(todayIn(link.timeZone))
 
   function chooseDay(next: string) {
     setDay(next)
     setStart(null)
     setAnimate(true)
     setLost(null)
-    // The SPA's debt. A server-rendered page would have moved focus by
-    // navigating; here nothing does unless it is written.
-    listRef.current?.focus()
   }
+
+  // The SPA's debt: a server-rendered page would have moved focus by
+  // navigating, and here nothing does unless it is written. It runs after the
+  // commit rather than inside the click handler, because before the commit the
+  // section still carries the previous day's accessible name and a screen
+  // reader announces the day the invitee has just left.
+  useEffect(() => {
+    if (activeDay === null) return
+    // First paint is an arrival, not a move. Focus jumping into the list here
+    // would drop the reader past the title of the thing they opened.
+    if (focusedDay.current === null || focusedDay.current === activeDay) {
+      focusedDay.current = activeDay
+      return
+    }
+    focusedDay.current = activeDay
+    listRef.current?.focus()
+  }, [activeDay])
 
   function chooseDuration(next: number) {
     setDuration(next)
@@ -204,7 +232,7 @@ export default function Book() {
   }
 
   function changeMonth(delta: number) {
-    setMonth(shiftMonth(month, delta))
+    setMonth((current) => (current === null ? null : shiftMonth(current, delta)))
     setDay(null)
     setStart(null)
     setAnimate(true)
@@ -223,14 +251,20 @@ export default function Book() {
   const chosen =
     activeDay !== null && activeStart !== null && duration !== null
       ? {
-          long: `${longDate(activeDay)}, ${zonedTime(activeStart, zone)}–${zonedTime(endOf(activeStart, duration), zone)}`,
+          // Both halves in the INVITEE's calendar. Naming the organizer's day
+          // beside the invitee's clock is how a desktop reader was told
+          // "Monday 7 September, 01:00" for a slot the next screen, the phone
+          // bar and the slot's own `+1d` all called Tuesday the 8th.
+          long: `${longDate(zonedDate(activeStart, zone))}, ${zonedTime(activeStart, zone)}–${zonedTime(endOf(activeStart, duration), zone)}`,
           short: `${shortDate(zonedDate(activeStart, zone))}, ${zonedTime(activeStart, zone)}`,
         }
       : null
 
-  const manageUrl =
+  // The path is what the router navigates to; the absolute URL is what the
+  // invitee keeps. Both come off the one token this API will ever hand back.
+  const managePath =
     booked !== null && booked.manageToken !== null
-      ? `${window.location.origin}/manage/${encodeURIComponent(booked.manageToken)}`
+      ? `/manage/${encodeURIComponent(booked.manageToken)}`
       : null
 
   function body() {
@@ -243,8 +277,8 @@ export default function Book() {
       )
     }
 
-    if (link === null || duration === null) {
-      if (link !== null) {
+    if (link === null || duration === null || month === null) {
+      if (link !== null && duration === null) {
         return notice(
           'Not taking bookings yet',
           'This link has no meeting lengths configured, so there is nothing here to book.',
@@ -277,6 +311,8 @@ export default function Book() {
           start={activeStart}
           durationMinutes={duration}
           zone={zone}
+          details={details}
+          onDetails={setDetails}
           onBack={() => setStep('choose')}
           onBooked={(booking) => {
             setBooked(booking)
@@ -322,7 +358,7 @@ export default function Book() {
               server keeps a hash and cannot reissue it, so a booking whose
               token is not carried into a URL here can never be moved or
               cancelled by the person who made it. */}
-          {manageUrl === null ? (
+          {managePath === null ? (
             <p className="field-error mt-5" role="alert">
               <AlertIcon />
               This booking came back without its manage link, so it cannot be changed from here.
@@ -336,7 +372,7 @@ export default function Book() {
                   className="input"
                   id="manage-url"
                   readOnly
-                  value={manageUrl}
+                  value={window.location.origin + managePath}
                   onFocus={(event) => event.currentTarget.select()}
                 />
                 <p className="fine">
@@ -345,9 +381,17 @@ export default function Book() {
                 </p>
               </div>
               <div className="row gap-2 wrap mt-5">
-                <a className="btn" href={manageUrl}>
+                {/* A button rather than an anchor: kairos.css gives every <a> a
+                    text-decoration-thickness and resets it only for .wordmark,
+                    .nav a and .tabbar a, so `.btn` on an anchor renders
+                    underlined. The manage page reached the same conclusion. */}
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => navigate(managePath)}
+                >
                   Open it
-                </a>
+                </button>
               </div>
             </>
           )}
@@ -458,12 +502,12 @@ export default function Book() {
                 <p className="prose t-sm">Finding open times…</p>
               ) : activeDay === null ? (
                 <div className="empty">
-                  <p>
+                  <p className="numeric">
                     Nothing in {monthLabel(month)} has a gap long enough for {duration} minutes.
                     {link.durations.length > 1 ? ' A shorter meeting may fit.' : ''}
                   </p>
                   <button
-                    className="btn"
+                    className="btn numeric"
                     type="button"
                     onClick={() => changeMonth(NEXT_MONTH)}
                   >
