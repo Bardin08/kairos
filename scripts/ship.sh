@@ -5,7 +5,13 @@
 # Run it from anywhere in the repo: `bash scripts/ship.sh` from the root, or
 # `bash ../scripts/ship.sh` from backend/ or frontend/.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+
+# Assign first, then cd. `cd "$(git ...)"` discards the substitution's status —
+# only cd's own status is tested — and `cd ""` succeeds, so a git failure there
+# would silently leave the script running in the wrong directory.
+ROOT="$(git rev-parse --show-toplevel)"
+readonly ROOT
+cd "$ROOT"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 readonly BRANCH
@@ -33,18 +39,72 @@ CI_STATUS=green
 
 die() { printf 'ship: %s\n' "$1" >&2; exit 1; }
 
+# Run git, and make failure fatal, loud and attributed to the step that failed.
+#
+# `set -e` alone is not enough here. It dies with a bare git message and no idea
+# which step produced it, and it is suspended inside `if`/`while`/`&&` conditions
+# — which is exactly where a status gets lost. Worse, when a fetch fails the very
+# next commands succeed as no-ops: a rebase onto a stale origin/main reports
+# "up to date" and exits 0, and `git push --force-with-lease` with nothing to
+# push reports "Everything up-to-date" and exits 0. A swallowed fetch therefore
+# looks precisely like a clean rebase.
+git_or_die() {  # git_or_die <what-was-being-done> <git args...>
+  local what="$1"; shift
+  local output status=0
+  output="$(git "$@" 2>&1)" || status=$?
+  if [ "$status" -ne 0 ]; then
+    die "$what failed — 'git $*' exited $status: $(printf '%s' "$output" | tr '\n' ' ')"
+  fi
+  [ -z "$output" ] || printf '%s\n' "$output"
+}
+
+# Fetch origin/main and prove the fetch actually took.
+#
+# The exit code is not sufficient evidence on its own. When a fetch does not
+# update origin/main, every command after it succeeds as a no-op — the rebase
+# prints "Current branch is up to date" and exits 0, the force-push prints
+# "Everything up-to-date" and exits 0 — so a stale base is indistinguishable from
+# a clean rebase. The only honest test is whether the ref the fetch was supposed
+# to move now matches the remote.
+fetch_origin_main() {  # fetch_origin_main <what-was-being-done>
+  local what="$1" remote_tip local_tip
+  git_or_die "$what" fetch origin main
+
+  remote_tip="$(git ls-remote origin refs/heads/main)" \
+    || die "$what: could not read origin's main tip"
+  remote_tip="${remote_tip%%[[:space:]]*}"
+  local_tip="$(git rev-parse origin/main)"
+
+  if [ -n "$remote_tip" ] && [ "$remote_tip" != "$local_tip" ]; then
+    die "$what: the fetch did not take — origin/main is $local_tip here but $remote_tip on the remote. A refname containing a space breaks every fetch in this repository; look for a macOS duplicate such as 'refs/heads/main 2' under .git/refs and remove it."
+  fi
+}
+
 [ "$BRANCH" != "main" ] || die "refusing to ship from main; branch first"
 
 # Untracked files count as dirty. Every task in this plan adds new files, and one
 # forgotten `git add` would otherwise ship a pull request missing half the change
 # while this script honestly reported success.
+#
+# Computed before the test, not inside it: errexit is suspended in an `if`
+# condition, so a `git ls-files` that failed there would yield an empty string
+# and wave the dirty tree through.
+UNTRACKED="$(git ls-files --others --exclude-standard)"
+readonly UNTRACKED
 if ! git diff --quiet \
   || ! git diff --cached --quiet \
-  || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  || [ -n "$UNTRACKED" ]; then
   die "working tree is dirty (tracked edits, staged changes or untracked files); commit or stash first"
 fi
 
-git push --set-upstream origin "$BRANCH"
+# Pre-flight. A refname containing a space — the macOS duplicate artefact
+# "refs/heads/main 2" — makes every fetch in the repository fail while leaving
+# rebase and push exiting 0, so it is invisible until it has already cost a CI
+# run and it reads like a merge problem rather than a local one. One fetch up
+# front is the cheapest possible probe, and it warms origin/main besides.
+fetch_origin_main "pre-flight check"
+
+git_or_die "pushing $BRANCH" push --set-upstream origin "$BRANCH"
 
 if ! gh pr view --json number >/dev/null 2>&1; then
   gh pr create --fill
@@ -145,14 +205,25 @@ merge_blocker() {
 }
 
 rebase_onto_main() {
-  git fetch origin main
+  fetch_origin_main "fetching origin/main before rebasing #$PR"
+
+  # The rebase itself stays a plain conditional: a non-zero here is the expected
+  # "needs a human" answer, not an infrastructure failure, and it carries files.
   if ! git rebase origin/main; then
     local conflicting
     conflicting="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
     git rebase --abort || true
     die "#$PR does not rebase cleanly onto origin/main; conflicting files: ${conflicting:-unknown}; resolve by hand"
   fi
-  git push --force-with-lease
+
+  # Assert the rebase actually took. A rebase onto a stale origin/main exits 0
+  # having done nothing, so success is proved by the invariant rather than by
+  # the exit code: after rebasing, origin/main must be an ancestor of HEAD.
+  if ! git merge-base --is-ancestor origin/main HEAD; then
+    die "rebase of #$PR onto origin/main did not take — origin/main ($(git rev-parse --short origin/main)) is not an ancestor of HEAD ($(git rev-parse --short HEAD)); the working tree may be on a stale base"
+  fi
+
+  git_or_die "force-pushing the rebased $BRANCH" push --force-with-lease
 
   # GitHub takes a moment to attribute the pull request to the new head. Until it
   # does, `gh pr checks` still answers for the previous head, and the next merge
