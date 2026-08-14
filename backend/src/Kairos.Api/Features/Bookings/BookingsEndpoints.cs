@@ -1,0 +1,354 @@
+using System.ComponentModel.DataAnnotations;
+
+using Kairos.Api.Availability;
+using Kairos.Api.Persistence;
+using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Shared;
+
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.EntityFrameworkCore;
+
+using NodaTime;
+using NodaTime.Text;
+
+namespace Kairos.Api.Features.Bookings;
+
+public sealed record CreateBookingRequest
+{
+    [Required]
+    public required string Slug { get; init; }
+
+    /// <summary>One of the strings <c>GET /links/{slug}/slots</c> returned, verbatim.</summary>
+    [Required]
+    public required string Start { get; init; }
+
+    /// <summary>
+    /// Required here even though the slots read may omit it for a single-duration link: the
+    /// writer stores an end instant, and resolving the default a second time would be a copy of
+    /// the resolution <see cref="SlotQuery"/> already owns.
+    /// </summary>
+    [Range(MinDurationMinutes, MaxDurationMinutes)]
+    public required int DurationMinutes { get; init; }
+
+    [Required]
+    [StringLength(MaxNameLength)]
+    public required string Name { get; init; }
+
+    [Required]
+    [EmailAddress]
+    [StringLength(MaxEmailLength)]
+    public required string Email { get; init; }
+
+    /// <summary>The booker's IANA zone — the one they read the times in, not the organizer's.</summary>
+    [Required]
+    [StringLength(MaxTimeZoneLength)]
+    public required string TimeZone { get; init; }
+
+    [StringLength(MaxNotesLength)]
+    public string Notes { get; init; } = string.Empty;
+
+    private const int MinDurationMinutes = 1;
+    private const int MaxDurationMinutes = 1440;
+    private const int MaxNameLength = 200;
+    private const int MaxEmailLength = 320;
+    private const int MaxTimeZoneLength = 64;
+    private const int MaxNotesLength = 2000;
+}
+
+/// <summary>
+/// Where the meeting moves to. Its length does not change — a different duration is a different
+/// booking, and keeping it fixed is what lets the identifier stay the same.
+/// </summary>
+public sealed record RescheduleBookingRequest
+{
+    /// <summary>One of the strings <c>GET /links/{slug}/slots</c> returned, verbatim.</summary>
+    [Required]
+    public required string Start { get; init; }
+}
+
+/// <summary>
+/// One booking as every one of these endpoints answers it. <see cref="ManageToken"/> is non-null
+/// exactly once, in the 201 from create: after that only its hash exists, so nothing can hand it
+/// back a second time.
+/// </summary>
+public sealed record BookingResponse(
+    Guid Id,
+    string Slug,
+    string Start,
+    string End,
+    int DurationMinutes,
+    string Status,
+    int Sequence,
+    string Name,
+    string Email,
+    string TimeZone,
+    string Notes,
+    string? ManageToken);
+
+public static class BookingsEndpoints
+{
+    /// <summary>
+    /// The requested instant is not one the link offers — outside availability, inside minimum
+    /// notice, over the daily cap, or padded out by a neighbouring meeting's margin.
+    /// </summary>
+    public const string SlotUnavailableCode = "slot_unavailable";
+
+    public const string InstantInvalidCode = "instant_invalid";
+
+    public const string TimeZoneInvalidCode = "timezone_invalid";
+
+    public const string BookingCancelledCode = "booking_cancelled";
+
+    private const int SecondsPerMinute = 60;
+
+    public static RouteGroupBuilder MapBookings(this RouteGroupBuilder group)
+    {
+        group.MapPost("/bookings", CreateAsync).WithName("CreateBooking");
+        group.MapGet("/bookings/{token}", GetAsync).WithName("GetBooking");
+        group.MapPost("/bookings/{token}/cancel", CancelAsync).WithName("CancelBooking");
+        group.MapPost("/bookings/{token}/reschedule", RescheduleAsync).WithName("RescheduleBooking");
+        return group;
+    }
+
+    private static async Task<Created<BookingResponse>> CreateAsync(
+        CreateBookingRequest request,
+        KairosDbContext context,
+        SlotQuery slots,
+        BookingWriter writer,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        // Read once, used for the availability re-check below. The writer's own clock only stamps
+        // CreatedAt; minimum notice is measured from this instant alone, so the page's offer and
+        // this check cannot disagree about where the notice boundary sits.
+        var now = clock.GetCurrentInstant();
+        var start = ParseInstant(request.Start);
+        var bookerZone = ResolveZone(request.TimeZone);
+
+        var settings = await context.Settings.AsNoTracking()
+            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
+
+        await RequireOfferedAsync(
+            slots,
+            request.Slug,
+            request.DurationMinutes,
+            start,
+            now,
+            DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
+            cancellationToken);
+
+        // Reachable only because the line above resolved the same slug, so First rather than a
+        // second not-found branch that could never be taken.
+        var link = await context.Links.AsNoTracking()
+            .FirstAsync(candidate => candidate.Slug == request.Slug && candidate.Active, cancellationToken);
+
+        // The querying link's RESOLVED margin, and the seam this endpoint exists to keep tight:
+        // the read above and the write below must agree about it, or the page offers a slot the
+        // writer refuses. It is one null-coalesce rather than a copy of the limits resolution —
+        // the same expression LocalBusySource and the writer's own SQL use — and it becomes
+        // `limits.MarginMinutes` off the call above the moment SlotQuery returns its resolved
+        // Limits alongside the slots.
+        var result = writer.TryCreate(
+            link.Id,
+            start,
+            Duration.FromMinutes(request.DurationMinutes),
+            new BookerDetails(request.Name, request.Email, bookerZone),
+            request.Notes,
+            link.MarginMinutes ?? settings.MarginMinutes);
+
+        if (!result.Success)
+        {
+            throw DomainException.Conflict(
+                BookingWriter.SlotTakenReason, "That time was taken while this booking was being made.");
+        }
+
+        var booking = await LoadAsync(context, result.Id, cancellationToken);
+        return TypedResults.Created(
+            $"{ApiVersions.V1}/bookings/{result.ManageToken}", ToResponse(booking, result.ManageToken));
+    }
+
+    private static async Task<BookingResponse> GetAsync(
+        string token,
+        KairosDbContext context,
+        CancellationToken cancellationToken) =>
+        ToResponse(await FindAsync(context, token, cancellationToken), null);
+
+    /// <summary>
+    /// Idempotent: a manage link opened twice, or a double-clicked button, gets the same answer
+    /// rather than a 404 for a booking the caller can plainly see.
+    /// </summary>
+    private static async Task<BookingResponse> CancelAsync(
+        string token,
+        KairosDbContext context,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var booking = await FindAsync(context, token, cancellationToken);
+        if (booking.Status == BookingStatus.Confirmed)
+        {
+            booking.Status = BookingStatus.Cancelled;
+            booking.CancelledAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+            await context.SaveChangesAsync(cancellationToken);
+        }
+
+        return ToResponse(booking, null);
+    }
+
+    private static async Task<BookingResponse> RescheduleAsync(
+        string token,
+        RescheduleBookingRequest request,
+        KairosDbContext context,
+        SlotQuery slots,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.GetCurrentInstant();
+        var start = ParseInstant(request.Start);
+
+        var booking = await FindAsync(context, token, cancellationToken);
+        if (booking.Status != BookingStatus.Confirmed)
+        {
+            throw DomainException.Conflict(BookingCancelledCode, "A cancelled booking cannot be moved.");
+        }
+
+        var seconds = booking.EndUtc - booking.StartUtc;
+        var settings = await context.Settings.AsNoTracking()
+            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
+
+        // A confirmed booking blocks its own calendar, so it is released before the re-check —
+        // otherwise moving a meeting half an hour later is refused by the meeting being moved.
+        // Every path out of here puts the row back confirmed, including the failing ones.
+        booking.Status = BookingStatus.Cancelled;
+        booking.CancelledAt = now.ToUnixTimeSeconds();
+        await context.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await RequireOfferedAsync(
+                slots,
+                booking.Link.Slug,
+                (int)(seconds / SecondsPerMinute),
+                start,
+                now,
+                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
+                cancellationToken);
+        }
+        catch
+        {
+            await ConfirmAsync(context, booking, cancellationToken);
+            throw;
+        }
+
+        booking.StartUtc = start.ToUnixTimeSeconds();
+        booking.EndUtc = booking.StartUtc + seconds;
+
+        // The row is mutated rather than replaced: the identifier and the manage token belong to
+        // the meeting, not to the slot. Sequence is how Part B's .ics tells a calendar client
+        // that this is the same event at a new time instead of a second invitation.
+        booking.Sequence++;
+        await ConfirmAsync(context, booking, cancellationToken);
+
+        return ToResponse(booking, null);
+    }
+
+    /// <summary>
+    /// Availability, minimum notice and the daily cap enforced on write. <see cref="BookingWriter"/>
+    /// only refuses a clash with another confirmed booking, so without this a POST naming 03:00
+    /// on a Sunday would succeed against a calendar that never offered it.
+    /// </summary>
+    private static async Task RequireOfferedAsync(
+        SlotQuery slots,
+        string slug,
+        int durationMinutes,
+        Instant start,
+        Instant now,
+        DateTimeZone organizerZone,
+        CancellationToken cancellationToken)
+    {
+        var date = start.InZone(organizerZone).Date;
+        var offered = await slots.GetSlotsAsync(slug, durationMinutes, date, date, now, cancellationToken);
+        if (!offered.Contains(start))
+        {
+            throw DomainException.Conflict(SlotUnavailableCode, "That time is not available.");
+        }
+    }
+
+    private static Task ConfirmAsync(
+        KairosDbContext context,
+        Booking booking,
+        CancellationToken cancellationToken)
+    {
+        booking.Status = BookingStatus.Confirmed;
+        booking.CancelledAt = null;
+        return context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The manage token is never stored, so the lookup is by its hash against the unique index.
+    /// A token that matches nothing is a 404 whatever its shape — the same answer a real token
+    /// for a deleted booking would get, and one that tells a guesser nothing.
+    /// </summary>
+    private static async Task<Booking> FindAsync(
+        KairosDbContext context,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        var hash = BookingWriter.Hash(token);
+        return await Tracked(context)
+            .FirstOrDefaultAsync(booking => booking.ManageTokenHash == hash, cancellationToken)
+            ?? throw DomainException.NotFound("Booking");
+    }
+
+    private static Task<Booking> LoadAsync(
+        KairosDbContext context,
+        Guid id,
+        CancellationToken cancellationToken) =>
+        Tracked(context).SingleAsync(booking => booking.Id == id, cancellationToken);
+
+    private static IQueryable<Booking> Tracked(KairosDbContext context) =>
+        context.Bookings
+            .Include(booking => booking.Link)
+            .Include(booking => booking.Participants);
+
+    private static BookingResponse ToResponse(Booking booking, string? manageToken)
+    {
+        var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
+        var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
+        var end = Instant.FromUnixTimeSeconds(booking.EndUtc);
+
+        return new BookingResponse(
+            booking.Id,
+            booking.Link.Slug,
+            InstantPattern.ExtendedIso.Format(start),
+            InstantPattern.ExtendedIso.Format(end),
+            (int)(end - start).TotalMinutes,
+            booking.Status.ToString().ToLowerInvariant(),
+            booking.Sequence,
+            booker.Name,
+            booker.Email,
+            booker.TimeZoneId,
+            booking.Notes,
+            manageToken);
+    }
+
+    private static Instant ParseInstant(string value)
+    {
+        var parsed = InstantPattern.ExtendedIso.Parse(value);
+        if (!parsed.Success)
+        {
+            throw DomainException.Invalid(
+                InstantInvalidCode, "'start' must be a UTC instant, such as 2026-09-07T09:00:00Z.");
+        }
+
+        return parsed.Value;
+    }
+
+    /// <summary>
+    /// Canonicalised rather than trusted. The stored zone is what Part B's invitation is rendered
+    /// in, and a typo saved today is a mail that fails to build months later.
+    /// </summary>
+    private static string ResolveZone(string value) =>
+        DateTimeZoneProviders.Tzdb.GetZoneOrNull(value)?.Id
+        ?? throw DomainException.Invalid(
+            TimeZoneInvalidCode, "'timeZone' must be an IANA zone, such as Europe/Warsaw.");
+}
