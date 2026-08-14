@@ -112,7 +112,7 @@ test('cancel fires only after it is confirmed', async () => {
 test('a cancel the server was too busy to take leaves the meeting confirmed and the action armed', async () => {
   vi.mocked(getBooking).mockResolvedValue(confirmed)
   vi.mocked(cancelBooking).mockRejectedValue(
-    new ApiError(503, 'database_busy', 'The database was busy. Try again.'),
+    new ApiError(503, 'database_busy', 'The database was busy. Try again.', 5),
   )
 
   renderManage()
@@ -120,7 +120,8 @@ test('a cancel the server was too busy to take leaves the meeting confirmed and 
   fireEvent.click(await screen.findByRole('button', { name: /cancel meeting/i }))
   fireEvent.click(await screen.findByRole('button', { name: /yes, cancel it/i }))
 
-  expect(await screen.findByText(/server is busy and nothing was changed/i)).toBeTruthy()
+  // The wait is the server's own Retry-After, quoted rather than invented.
+  expect(await screen.findByText(/busy and nothing was changed\. Try again in 5 seconds/i)).toBeTruthy()
   // Nothing happened, so the page must not claim otherwise, and the only
   // action it has must still be reachable. A dead end or a false "cancelled"
   // are the two ways this goes wrong.
@@ -133,7 +134,7 @@ test('a reschedule the server was too busy to take keeps the time the reader pic
   vi.mocked(getBooking).mockResolvedValue(confirmed)
   vi.mocked(getSlots).mockResolvedValue(['2026-09-07T11:00:00Z', '2026-09-07T11:30:00Z'])
   vi.mocked(rescheduleBooking).mockRejectedValue(
-    new ApiError(503, 'database_busy', 'The database was busy. Try again.'),
+    new ApiError(503, 'database_busy', 'The database was busy. Try again.', 5),
   )
 
   renderManage()

@@ -6,6 +6,7 @@ import SlotList from '../components/SlotList'
 import {
   asApiError,
   cancelBooking,
+  DATABASE_BUSY,
   getBooking,
   getLink,
   getSlots,
@@ -39,9 +40,15 @@ const NEXT_MONTH = 1
  * fired automatically: they are watching the button they just pressed, and a
  * silent retry would either look like nothing happened or fire a second write
  * they did not ask for.
+ *
+ * The wait comes off the server's own Retry-After, which `api.ts` has already
+ * parsed. Inventing a number here would be a second opinion about a value the
+ * server derives from the busy timeout it actually waited out.
  */
-const DATABASE_BUSY = 'database_busy'
-const BUSY_MESSAGE = 'The server is busy and nothing was changed. Try again in a few seconds.'
+function busyMessage(seconds: number | null): string {
+  const wait = seconds === null ? 'in a few seconds' : `in ${seconds} seconds`
+  return `The server is busy and nothing was changed. Try again ${wait}.`
+}
 
 // Which whole-page answer the route is giving. `missing` is the one honest
 // reply to any token that matches nothing — a real token for a deleted booking
@@ -217,13 +224,13 @@ export default function Manage() {
       setBooking(await cancelBooking(token))
       setPanel('actions')
     } catch (error) {
-      const { status, code } = asApiError(error)
+      const { status, code, retryAfter } = asApiError(error)
       // Whichever branch this takes, the panel stays open and the button stays
       // armed: cancel has no second option to offer, so a failure that closed
       // the panel would be a dead end, and one that showed the cancelled state
       // would be a lie about a booking that is still confirmed.
       if (status === NOT_FOUND) setPhase('missing')
-      else if (code === DATABASE_BUSY) setMessage(BUSY_MESSAGE)
+      else if (code === DATABASE_BUSY) setMessage(busyMessage(retryAfter))
       else setMessage('The meeting could not be cancelled. Reload the page and try again.')
     } finally {
       setBusy(false)
@@ -242,7 +249,7 @@ export default function Manage() {
       setStart(null)
       setSlots(null)
     } catch (error) {
-      const { status, code } = asApiError(error)
+      const { status, code, retryAfter } = asApiError(error)
       if (status === NOT_FOUND) {
         setPhase('missing')
       } else if (code === 'booking_cancelled') {
@@ -254,7 +261,7 @@ export default function Manage() {
         // The one failure that leaves the choice standing: the time was never
         // taken, so clearing it would send the reader hunting for a slot that
         // is still theirs.
-        setMessage(BUSY_MESSAGE)
+        setMessage(busyMessage(retryAfter))
       } else {
         setMessage(rescheduleMessage(code))
         // Here the time really is gone, so it leaves the list rather than
