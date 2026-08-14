@@ -1,0 +1,27 @@
+min_version: 2.1.10
+
+# Formatting is a pre-commit concern; tests are a pre-push concern. Running the
+# full suite on every commit teaches people to pass --no-verify, which is worse
+# than having no hook at all.
+
+pre-commit:
+  parallel: true
+  commands:
+    csharp-format:
+      root: backend/
+      glob: "*.cs"
+      run: dotnet format --verify-no-changes --include {staged_files}
+    frontend-lint:
+      root: frontend/
+      glob: "*.{ts,tsx}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    frontend-types:
+      root: frontend/
+      glob: "*.{ts,tsx}"
+      run: npx tsc --noEmit
+
+pre-push:
+  commands:
+    backend-tests:
+      root: backend/
+      run: dotnet test

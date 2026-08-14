@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job ids are the required status check contexts on main. Do not rename them,
+  # and do not give them a `name:` — that would change the context and silently
+  # leave branch protection waiting on a check that never reports.
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: backend/global.json
+      - run: dotnet restore
+      - run: dotnet build --no-restore -warnaserror
+      - run: dotnet format --verify-no-changes
+      - run: dotnet test --no-build
+
+  frontend:
+    runs-on: ubuntu-latest
+    env:
+      # 60 KiB gzipped. The budget is the point of the check; keep it here so
+      # there is exactly one number to argue about.
+      BUNDLE_BUDGET_GZIP_BYTES: 61440
+      NODE_VERSION: 26.5.0
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # This job is a required check, so it must report a conclusion even before
+      # frontend/ exists. Skipped jobs never report, which would leave every pull
+      # request unmergeable — so the job always runs and gates its real work on
+      # the directory being there.
+      - id: detect
+        run: |
+          if [ -d frontend ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "frontend/ does not exist yet — nothing to check."
+          fi
+
+      - if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npx eslint . --max-warnings 0
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npx vitest run
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm run build
+
+      - if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: |
+          size=$(gzip -c ../backend/src/Kairos.Api/wwwroot/assets/*.js | wc -c)
+          echo "bundle: ${size} bytes gzipped, budget ${BUNDLE_BUDGET_GZIP_BYTES}"
+          [ "$size" -lt "$BUNDLE_BUDGET_GZIP_BYTES" ]
