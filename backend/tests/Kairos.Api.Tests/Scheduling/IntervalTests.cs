@@ -16,8 +16,15 @@ public class IntervalTests
         Instant.FromUnixTimeSeconds(end * 60));
 
     [Fact]
-    public void Overlaps_TouchingIntervals_ReturnsFalse() =>
+    public void Overlaps_TouchingIntervals_ReturnsFalse()
+    {
         Minutes(0, 60).Overlaps(Minutes(60, 120)).ShouldBeFalse();
+
+        // The generator calls this the other way round — busy block as receiver, candidate
+        // slot as argument — and a slot ending exactly when a meeting starts is the commonest
+        // touching case there. Both directions or the regression hides in the untested one.
+        Minutes(60, 120).Overlaps(Minutes(0, 60)).ShouldBeFalse();
+    }
 
     [Fact]
     public void Overlaps_PartiallyCovering_ReturnsTrue() =>
