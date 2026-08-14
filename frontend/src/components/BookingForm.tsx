@@ -1,9 +1,21 @@
 import { useState, type FormEvent } from 'react'
 
-import { asApiError, createBooking, type Booking, type Link } from '../lib/api'
+import {
+  asApiError,
+  createBooking,
+  DATABASE_BUSY,
+  type Booking,
+  type Link,
+} from '../lib/api'
 import { endOf, longDate, zonedDate, zonedTime } from '../lib/time'
 
 const CONFLICT = 409
+
+/** The server's own wait, stated in words. Never a backoff invented here. */
+function wait(seconds: number | null): string {
+  if (seconds === null) return 'in a moment'
+  return seconds === 1 ? 'in a second' : `in ${seconds} seconds`
+}
 
 // Deliberately not an RFC 5322 implementation. The server validates properly
 // and the mail either arrives or it does not; this exists to catch the typo the
@@ -106,6 +118,16 @@ export default function BookingForm({
         // to disappear from the list before the invitee is told, which is the
         // caller's job — this form has no list.
         onSlotLost(problem.message)
+        return
+      }
+      if (problem.code === DATABASE_BUSY) {
+        // A lost lock is not a lost slot. Nothing was written, the time is
+        // still there, and the same button sends the same booking again.
+        // Routing this through onSlotLost would take a time away from someone
+        // who can still have it.
+        setFailure(
+          `The server was busy, so nothing was booked. Everything you typed is still here — send it again ${wait(problem.retryAfter)}.`,
+        )
         return
       }
       setFailure(problem.message)

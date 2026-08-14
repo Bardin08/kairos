@@ -6,6 +6,15 @@
 const BASE = '/api/v1'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
+/**
+ * A write waited out the full SQLite busy timeout and gave up. 503, and the
+ * write did NOT happen, so it is safe to send again — which is what separates
+ * it from a 409. A 409 means the slot is gone and the user must choose
+ * differently; this means nothing at all changed and the same request will
+ * probably work. Every write can answer it: create, cancel and reschedule.
+ */
+export const DATABASE_BUSY = 'database_busy'
+
 /** One bookable event type, as the booking page needs it. */
 export type Link = {
   slug: string
@@ -53,12 +62,24 @@ export type Booking = {
 export class ApiError extends Error {
   readonly status: number
   readonly code: string | null
+  /**
+   * Seconds from the `Retry-After` header, when the server sent one. It is the
+   * server's own busy timeout rather than a number this client invented, so a
+   * wait built on it stays correct when that timeout is retuned.
+   */
+  readonly retryAfter: number | null
 
-  constructor(status: number, code: string | null, message: string) {
+  constructor(
+    status: number,
+    code: string | null,
+    message: string,
+    retryAfter: number | null = null,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.retryAfter = retryAfter
   }
 }
 
@@ -92,10 +113,16 @@ async function toError(response: Response): Promise<ApiError> {
     // A proxy error page, or an empty body. The status is all there is.
   }
 
+  // Delta-seconds, which is the only form this API sends. An HTTP-date is also
+  // legal in the header generally, so a non-numeric value is dropped rather
+  // than turned into NaN and rendered at somebody.
+  const seconds = Number(response.headers.get('Retry-After'))
+
   return new ApiError(
     response.status,
     code,
     title || `The server answered ${response.status}.`,
+    Number.isFinite(seconds) && seconds > 0 ? seconds : null,
   )
 }
 

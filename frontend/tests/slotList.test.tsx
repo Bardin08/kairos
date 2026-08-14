@@ -48,14 +48,18 @@ const CREATED = {
   manageToken: 'bdef4bc6',
 }
 
-type Handler = (url: string, init?: RequestInit) => { status: number; body: unknown }
+type Handler = (
+  url: string,
+  init?: RequestInit,
+) => { status: number; body: unknown; retryAfter?: string }
 
 function stubFetch(handler: Handler) {
   const spy = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-    const { status, body } = handler(String(input), init)
+    const { status, body, retryAfter } = handler(String(input), init)
     return Promise.resolve({
       ok: status < 400,
       status,
+      headers: new Headers(retryAfter === undefined ? {} : { 'Retry-After': retryAfter }),
       json: () => Promise.resolve(body),
     } as unknown as Response)
   })
@@ -238,6 +242,57 @@ test('a corrupt availability pattern takes the whole page', async () => {
   renderBook()
 
   await screen.findByRole('heading', { name: 'This calendar cannot be read' })
+  expect(screen.queryByRole('group', { name: 'September 2026' })).toBeNull()
+})
+
+// Breaks if a contended write is treated like a lost race. Nothing was written,
+// so the time is still available and everything typed is still valid — telling
+// this user to pick another time would take a slot away from them for nothing.
+test('a 503 keeps the slot, the typed details and the armed button', async () => {
+  stubFetch((url) => {
+    if (url.includes('/slots')) return { status: 200, body: SLOTS_25 }
+    if (url.endsWith('/bookings')) {
+      return {
+        status: 503,
+        body: { title: 'The database was busy. Try again.', status: 503, code: 'database_busy' },
+        retryAfter: '5',
+      }
+    }
+    return { status: 200, body: LINK }
+  })
+  renderBook()
+
+  await waitFor(() => expect(times()).toHaveLength(2))
+  await fillAndSubmit()
+
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toContain('nothing was booked')
+  // The server's own wait, not one invented here.
+  expect(alert.textContent).toContain('in 5 seconds')
+
+  // Still on the form, with what was typed, and the button ready to send again.
+  expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Vlad')
+  expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('v@example.com')
+  expect(screen.getByRole('button', { name: 'Confirm booking' })).not.toBeNull()
+  expect(screen.queryByRole('group', { name: 'Available times' })).toBeNull()
+})
+
+// Breaks if a link taken down mid-session is rendered as a quiet empty month.
+// Both link routes answer `not_found` for a slug that resolves to nothing, and
+// the page must key on the code rather than either route's wording.
+test('a link that stops existing mid-session takes the whole page', async () => {
+  stubFetch((url) => {
+    if (url.includes('/slots')) {
+      return {
+        status: 404,
+        body: { title: "Link 'consulting' does not exist.", status: 404, code: 'not_found' },
+      }
+    }
+    return { status: 200, body: LINK }
+  })
+  renderBook()
+
+  await screen.findByRole('heading', { name: 'This link stopped taking bookings' })
   expect(screen.queryByRole('group', { name: 'September 2026' })).toBeNull()
 })
 
