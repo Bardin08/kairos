@@ -60,9 +60,13 @@ builder.Services.AddSingleton<IIntegrationConnector>(
 // Scoped: it reads and writes through the request's DbContext.
 builder.Services.AddScoped<IntegrationCredentialStore>();
 
-// Scoped, not singleton: it reads the request's DbContext. SlotQuery takes IEnumerable<IBusySource>,
-// so Part B's calendar source is one more registration here and no change anywhere else.
+// Scoped, not singleton: they read the request's DbContext. SlotQuery takes
+// IEnumerable<IBusySource>, so the calendar source is one more line here and no change anywhere
+// else — and a third provider would be a third line and still nothing in Scheduling/.
+// Registered unconditionally: unconfigured and never-connected are answered inside the adapter,
+// which returns no busy time rather than throwing, so a Kairos with no Google is a working Kairos.
 builder.Services.AddScoped<IBusySource, LocalBusySource>();
+builder.Services.AddScoped<IBusySource, GoogleCalendarAdapter>();
 builder.Services.AddScoped<AvailabilityQuery>();
 builder.Services.AddScoped<SlotQuery>();
 builder.Services.AddScoped<BookingWriter>();
