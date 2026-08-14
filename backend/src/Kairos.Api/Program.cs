@@ -4,6 +4,7 @@ using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Persistence;
 using Kairos.Api.Scheduling;
+using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,17 @@ builder.Services.AddDbContext<KairosDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Db") ?? "Data Source=kairos.db"));
 
 builder.Services.AddSingleton<IClock>(SystemClock.Instance);
+
+const string secretKeyPath = "Security:SecretKey";
+
+// Constructed here rather than resolved lazily, so an absent, non-base64 or wrong-length key
+// stops the process at startup. An app that boots without its key and finds out at the first
+// OAuth callback has turned a configuration error into a runtime mystery weeks later.
+builder.Services.AddSingleton(new SecretProtector(
+    builder.Configuration[secretKeyPath] ?? throw new InvalidOperationException(
+        $"{secretKeyPath} is not configured. Kairos stores provider credentials encrypted at "
+        + $"rest and needs a base64 {SecretProtector.KeyBytes}-byte AES-GCM key. Generate one "
+        + $"with: openssl rand -base64 {SecretProtector.KeyBytes}")));
 
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
