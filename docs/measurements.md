@@ -4,12 +4,16 @@ What Part A actually costs, and the evidence that its eleven acceptance conditio
 
 Measured 2026-08-14 on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish. Reproducing this on the Raspberry Pi the app is meant to live on will move the memory figure and nothing else — see condition 10.
 
-Conditions 2, 3, 4, 7, 9, 10 and 11 were measured against `99c874a`. Conditions 1, 5, 6 and 8 were re-measured against `223079b`, which changed how the booking page derives dates and grew the bundle; the figures below are the later ones.
+Conditions 2, 3, 4, 7, 9, 10 and 11 were measured against `99c874a`. Conditions 1, 5 and 6 were re-measured against `223079b`, which changed how the booking page derives dates. Condition 8 was measured again at `934e56a`, which moved the bundle without touching slot computation, zone rendering or the theme contract. The figures below are the latest in each case.
+
+## How Part A was built
+
+All eleven tasks are complete, and every change reached `main` through its own pull request. That is checkable rather than asserted: `main` holds 28 commits, of which the first is the repository's initial commit and the other 27 are each a squash merge carrying its pull request number. **27 pull requests merged, 27 commits, nothing pushed to `main` directly, nothing batched.** Two dependabot bumps (#2, #3) are open and are not task work.
 
 ## Headline
 
 ```
-bundle          69.1 kB gzipped   (budget 76.8 kB)
+bundle          69.2 kB gzipped   (budget 76.8 kB)
 allocations      8.2 kB per month of slots   (budget 65.5 kB)
 idle RSS       159.2 MiB          (target under 100 Mi — MISSED, see below)
 verify.sh       16 checks, 0 failed
@@ -20,12 +24,19 @@ verify.sh       16 checks, 0 failed
 `bash scripts/bundle-budget.sh` is the only place the budget number lives, and it weighs everything the build writes into `wwwroot/assets/` — JavaScript and CSS alike.
 
 ```
-bundle-budget: 69107 bytes gzipped across 1 file(s), budget 76800
+bundle-budget: 69152 bytes gzipped across 1 file(s), budget 76800
 ```
 
-One file, because Vite emitted no CSS chunk: Kairos's stylesheet is the vendored `wwwroot/kairos.css`, which the API serves directly and which no build measures. 7,693 bytes of headroom. The React 19.2 shell alone was 61,641, so the two real pages, four components and three helpers cost roughly 7.5 kB gzipped between them.
+One file, because Vite emitted no CSS chunk: Kairos's stylesheet is the vendored `wwwroot/kairos.css`, which the API serves directly and which no build measures. 7,648 bytes of headroom. The React 19.2 shell alone was 61,641, so the two real pages, four components and three helpers cost roughly 7.5 kB gzipped between them.
 
-It was 68,789 at `99c874a`. The 318 bytes came from `223079b`, which added `zonedOffset()` and moved the booker's form state up into `Book`.
+Where it went, so a future jump has something to be argued against:
+
+```
+68,789   99c874a   the two pages as first shipped
+69,107   223079b   +318   zonedOffset(), and the booker's form state hoisted into Book
+69,152   934e56a   +45    focus gated on intent, a realm-independent abort guard,
+                          and an unreadable organizer zone getting its own message
+```
 
 ## Allocations
 
@@ -165,7 +176,7 @@ Ascending lexicographically, every version nibble a 7. The inserts went through 
 
 ### 8. Bundle budget — pass
 
-69,107 bytes gzipped, budget 76,800. See above.
+69,152 bytes gzipped, budget 76,800. See above.
 
 ### 9. Allocation budget — pass
 
