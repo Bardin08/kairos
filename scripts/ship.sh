@@ -29,6 +29,19 @@ PR="$(gh pr view --json number --jq .number)"
 readonly PR
 printf 'ship: pull request #%s for %s\n' "$PR" "$BRANCH"
 
+# A freshly opened pull request has no checks attached for a few seconds, and
+# `gh pr checks --watch` treats "none reported" as a failure rather than waiting.
+# Poll until at least one check exists, then hand over to --watch.
+readonly CHECK_POLL_ATTEMPTS=30
+readonly CHECK_POLL_SECONDS=10
+
+attempt=0
+while [ "$(gh pr checks "$PR" --json name --jq 'length' 2>/dev/null || echo 0)" -eq 0 ]; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt "$CHECK_POLL_ATTEMPTS" ] || die "no checks reported on #$PR after waiting; not merging"
+  sleep "$CHECK_POLL_SECONDS"
+done
+
 # --watch blocks until every check reports, and exits non-zero if any failed.
 gh pr checks "$PR" --watch || die "CI is red on #$PR; not merging"
 
