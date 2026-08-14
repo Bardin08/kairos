@@ -128,7 +128,7 @@ public static class BookingsEndpoints
         var settings = await context.Settings.AsNoTracking()
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
 
-        await RequireOfferedAsync(
+        var offered = await RequireOfferedAsync(
             slots,
             request.Slug,
             request.DurationMinutes,
@@ -137,24 +137,17 @@ public static class BookingsEndpoints
             DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
             cancellationToken);
 
-        // Reachable only because the line above resolved the same slug, so First rather than a
-        // second not-found branch that could never be taken.
-        var link = await context.Links.AsNoTracking()
-            .FirstAsync(candidate => candidate.Slug == request.Slug && candidate.Active, cancellationToken);
-
-        // The querying link's RESOLVED margin, and the seam this endpoint exists to keep tight:
-        // the read above and the write below must agree about it, or the page offers a slot the
-        // writer refuses. It is one null-coalesce rather than a copy of the limits resolution —
-        // the same expression LocalBusySource and the writer's own SQL use — and it becomes
-        // `limits.MarginMinutes` off the call above the moment SlotQuery returns its resolved
-        // Limits alongside the slots.
+        // The link and the margin come off the re-check itself, which is the seam this endpoint
+        // exists to keep tight: the read and the write must agree about the resolved margin, or
+        // the page offers a slot the writer refuses. Resolving it a second time here — another
+        // Links read and another `?? settings.MarginMinutes` — would be a copy free to drift.
         var result = writer.TryCreate(
-            link.Id,
+            offered.LinkId,
             start,
             Duration.FromMinutes(request.DurationMinutes),
             new BookerDetails(request.Name, request.Email, bookerZone),
             request.Notes,
-            link.MarginMinutes ?? settings.MarginMinutes);
+            offered.Limits.MarginMinutes);
 
         if (!result.Success)
         {
@@ -254,9 +247,10 @@ public static class BookingsEndpoints
     /// <summary>
     /// Availability, minimum notice and the daily cap enforced on write. <see cref="BookingWriter"/>
     /// only refuses a clash with another confirmed booking, so without this a POST naming 03:00
-    /// on a Sunday would succeed against a calendar that never offered it.
+    /// on a Sunday would succeed against a calendar that never offered it. Returns what the query
+    /// resolved, so the write path never has to resolve the link or its margin a second time.
     /// </summary>
-    private static async Task RequireOfferedAsync(
+    private static async Task<SlotResults> RequireOfferedAsync(
         SlotQuery slots,
         string slug,
         int durationMinutes,
@@ -267,10 +261,12 @@ public static class BookingsEndpoints
     {
         var date = start.InZone(organizerZone).Date;
         var offered = await slots.GetSlotsAsync(slug, durationMinutes, date, date, now, cancellationToken);
-        if (!offered.Contains(start))
+        if (!offered.Starts.Contains(start))
         {
             throw DomainException.Conflict(SlotUnavailableCode, "That time is not available.");
         }
+
+        return offered;
     }
 
     private static Task ConfirmAsync(
