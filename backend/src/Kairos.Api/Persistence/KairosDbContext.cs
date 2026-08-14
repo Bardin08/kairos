@@ -26,6 +26,14 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<BookingParticipant> BookingParticipants => Set<BookingParticipant>();
 
+    public DbSet<IntegrationCredential> IntegrationCredentials => Set<IntegrationCredential>();
+
+    public DbSet<CalendarEntry> CalendarEntries => Set<CalendarEntry>();
+
+    public DbSet<ConferenceLink> ConferenceLinks => Set<ConferenceLink>();
+
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         optionsBuilder.AddInterceptors(PragmaInterceptor.Instance);
 

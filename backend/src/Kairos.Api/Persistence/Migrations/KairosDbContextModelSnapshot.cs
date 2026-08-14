@@ -110,6 +110,99 @@ namespace Kairos.Api.Persistence.Migrations
                     b.ToTable("BookingParticipants");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.CalendarEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalEventId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("CalendarEntries");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.ConferenceLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JoinUrl")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("ConferenceLinks");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.IntegrationCredential", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountLabel")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConnectedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProtectedPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider")
+                        .IsUnique();
+
+                    b.ToTable("IntegrationCredentials");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Link", b =>
                 {
                     b.Property<Guid>("Id")
@@ -179,6 +272,44 @@ namespace Kairos.Api.Persistence.Migrations
                     b.HasKey("LinkId", "Minutes");
 
                     b.ToTable("LinkDurations");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DispatchedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DispatchedAt");
+
+                    b.HasIndex("BookingId", "Type")
+                        .IsUnique();
+
+                    b.ToTable("OutboxMessages");
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Pattern", b =>
@@ -318,6 +449,28 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Navigation("Booking");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.CalendarEntry", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.ConferenceLink", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Link", b =>
                 {
                     b.HasOne("Kairos.Api.Persistence.Entities.Pattern", "Pattern")
@@ -338,6 +491,17 @@ namespace Kairos.Api.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Link");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.OutboxMessage", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.PatternOverride", b =>

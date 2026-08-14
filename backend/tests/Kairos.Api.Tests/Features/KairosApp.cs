@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+
 using Kairos.Api.Persistence;
+using Kairos.Api.Security;
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -67,6 +70,13 @@ public sealed class KairosApp : WebApplicationFactory<KairosDbContext>
         var connectionString = $"Data Source={_path}";
 
         builder.UseSetting("ConnectionStrings:Db", connectionString);
+
+        // The application refuses to start without a key, so the harness supplies one the same
+        // way an operator does. A throwaway key generated per run, because nothing in these
+        // tests reads a value written by an earlier one.
+        builder.UseSetting(
+            "Security:SecretKey",
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(SecretProtector.KeyBytes)));
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<KairosDbContext>>();
