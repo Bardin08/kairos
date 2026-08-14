@@ -13,6 +13,9 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3.mtp-v2" />
     <PackageReference Include="Shouldly" />
+    <!-- The endpoints are tested over the real pipeline — routing, model binding, validation and
+         the exception handler included — because the wiring is what they are. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
 
   <ItemGroup>
