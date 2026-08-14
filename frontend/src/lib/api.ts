@@ -94,12 +94,12 @@ export class ApiError extends Error {
 /**
  * Whatever a rejected call threw, as something with a status and a code.
  *
- * A `catch` here receives four different things: an ApiError this module built;
- * a DOMException named AbortError when the app itself cancelled the request; a
- * TypeError from `fetch` when the network is not there; and a SyntaxError if a
- * 200 arrives with a body that is not JSON. The last three carry messages
- * written for a developer console, so they are replaced rather than shown to an
- * invitee.
+ * A `catch` here receives five different things: an ApiError this module built;
+ * an AbortError when the app itself cancelled the request; a TypeError from
+ * `fetch` when the network is not there; a SyntaxError if a 200 arrives with a
+ * body that is not JSON; and a RangeError if `Intl` was handed a zone that does
+ * not exist. The last four carry messages written for a developer console, so
+ * they are replaced rather than shown to an invitee.
  *
  * Status 0 means no HTTP status was reached — the request was cancelled, or it
  * never got an answer. It does NOT mean the request failed to complete: a 200
@@ -113,8 +113,24 @@ export class ApiError extends Error {
  */
 export function asApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error
-  if (error instanceof DOMException && error.name === 'AbortError') {
+  // Matched on the name, not on `instanceof DOMException`, which is
+  // realm-sensitive: under the jsdom test environment the abort arrives as a
+  // DOMException built in another realm and the instanceof is false, so the
+  // guard was correct in a browser and untestable here. The name is the same
+  // in every realm.
+  if (error instanceof Error && error.name === 'AbortError') {
     return new ApiError(0, REQUEST_ABORTED, 'The request was cancelled.')
+  }
+  // `Intl` is the only thing in this app that throws RangeError, and it throws
+  // it for exactly one reason: a zone identifier it does not recognise. That
+  // can only be the organizer's, since the invitee's comes from the browser.
+  // Without this the page blamed the network for a misconfigured link.
+  if (error instanceof RangeError) {
+    return new ApiError(
+      0,
+      null,
+      'This link is set to a time zone that cannot be read, so its times cannot be worked out. Whoever owns the link has to fix it.',
+    )
   }
   return new ApiError(0, null, 'Could not reach the server. Try again in a moment.')
 }

@@ -104,7 +104,7 @@ export default function Book() {
   const [details, setDetails] = useState({ name: '', email: '', notes: '' })
 
   const listRef = useRef<HTMLElement>(null)
-  const focusedDay = useRef<string | null>(null)
+  const wantFocus = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -203,6 +203,9 @@ export default function Book() {
     setStart(null)
     setAnimate(true)
     setLost(null)
+    // Asking for a day is the only thing that earns the focus move. Recorded
+    // here and spent in the effect below.
+    wantFocus.current = true
   }
 
   // The SPA's debt: a server-rendered page would have moved focus by
@@ -210,17 +213,25 @@ export default function Book() {
   // commit rather than inside the click handler, because before the commit the
   // section still carries the previous day's accessible name and a screen
   // reader announces the day the invitee has just left.
+  //
+  // Gated on intent rather than on `activeDay` changing. `activeDay` is
+  // DERIVED: it moves when the month pages and when the duration closes the
+  // selected day, neither of which is a request to go and read the times. Keyed
+  // on the value, paging forward three months threw focus out of the month
+  // arrow three times and a keyboard user had to Shift+Tab back to it after
+  // every press. The flag is consumed whatever happens, so an intent that
+  // cannot be honoured is not banked for a later, unrelated change.
+  // No dependency array on purpose. The trigger is the flag, not a value, so
+  // the effect wants to look after every commit — including one where the day
+  // chosen happens to be the day already showing, which a dependency on
+  // `activeDay` would skip. The body is a boolean read.
   useEffect(() => {
-    if (activeDay === null) return
-    // First paint is an arrival, not a move. Focus jumping into the list here
-    // would drop the reader past the title of the thing they opened.
-    if (focusedDay.current === null || focusedDay.current === activeDay) {
-      focusedDay.current = activeDay
-      return
-    }
-    focusedDay.current = activeDay
+    if (!wantFocus.current) return
+    wantFocus.current = false
+    // Null while the whole month is empty. The intent is spent either way,
+    // rather than banked and fired at some later unrelated render.
     listRef.current?.focus()
-  }, [activeDay])
+  })
 
   function chooseDuration(next: number) {
     setDuration(next)
@@ -269,9 +280,14 @@ export default function Book() {
 
   function body() {
     if (linkError !== null) {
+      // Only a genuine 404 gets the "does not lead anywhere" heading. A link
+      // that exists but cannot be used — a network failure, an unreadable
+      // organizer zone — is a different sentence, and pairing that heading
+      // with those messages reads as a contradiction.
+      const missing = linkError.code === NO_SUCH_LINK || linkError.status === NOT_FOUND
       return notice(
-        'This link does not lead anywhere',
-        linkError.code === NO_SUCH_LINK || linkError.status === NOT_FOUND
+        missing ? 'This link does not lead anywhere' : 'This link cannot be opened',
+        missing
           ? 'Nothing is published at this address. Check the link you were sent, or ask whoever sent it for a new one.'
           : linkError.message,
       )
