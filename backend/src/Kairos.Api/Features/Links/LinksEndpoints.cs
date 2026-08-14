@@ -66,7 +66,11 @@ public static class LinksEndpoints
         var link = await Active(context)
             .Include(candidate => candidate.Durations)
             .FirstOrDefaultAsync(candidate => candidate.Slug == slug, cancellationToken)
-            ?? throw DomainException.NotFound($"Link '{slug}'");
+            // Not "Link '{slug}'": the caller's value is never reflected into a response body,
+            // here or in SlotsEndpoints. It costs the message nothing — the slug is in the URL
+            // the caller just sent — and it keeps an arbitrary string out of whatever the client
+            // does with a ProblemDetails title.
+            ?? throw DomainException.NotFound("Link");
 
         var durations = link.Durations
             .OrderBy(duration => duration.SortOrder)
