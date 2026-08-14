@@ -69,7 +69,13 @@ public sealed class IcsBuilder(IClock? clock = null)
         return ics.ToString();
     }
 
-    private static string Keyword(IcsMethod method) => method switch
+    /// <summary>
+    /// The METHOD keyword this object carries, which is also what the MIME <c>method=</c>
+    /// parameter around it has to spell. Public so the two are one value rather than two
+    /// literals: a part labelled REQUEST wrapping a CANCEL is discarded by clients in silence,
+    /// which is the same failure mode a wrong SEQUENCE has and just as hard to see.
+    /// </summary>
+    public static string Keyword(IcsMethod method) => method switch
     {
         IcsMethod.Request => "REQUEST",
         IcsMethod.Cancel => "CANCEL",

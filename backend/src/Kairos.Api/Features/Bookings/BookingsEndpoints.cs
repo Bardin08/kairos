@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 using Kairos.Api.Availability;
 using Kairos.Api.Integrations;
+using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -117,6 +118,7 @@ public static class BookingsEndpoints
         SlotQuery slots,
         BookingWriter writer,
         CalendarSyncService calendars,
+        BookingMailer mailer,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -166,6 +168,14 @@ public static class BookingsEndpoints
         // and this endpoint is also the only place holding the loaded booking. It cannot fail the
         // request — SyncAsync has no throwing path — so the worst inline buys is a slower 201.
         await calendars.SyncAsync(booking, cancellationToken);
+
+        // After the sync, so the confirmation describes a meeting the organizer's calendar already
+        // knows about, and never before the write committed. The plaintext manage token exists
+        // only here, in memory, for the length of this call — it is what the confirmation is for,
+        // and it is why the send happens on this thread instead of from a queue that would have to
+        // store it. The mailer swallows its own failures, so nothing here can turn a relay being
+        // down into a booking the organizer never gets.
+        await mailer.SendConfirmationAsync(booking, result.ManageToken!, cancellationToken);
 
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}", ToResponse(booking, result.ManageToken));
