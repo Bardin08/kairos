@@ -36,6 +36,10 @@ builder.Services.AddScoped<BookingWriter>();
 
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();
+
+// Order is the contract: contention is answered first, then domain failures, and anything
+// neither handler claims falls through to a 500 with its stack trace in the log.
+builder.Services.AddExceptionHandler<DatabaseBusyExceptionHandler>();
 builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
 var app = builder.Build();

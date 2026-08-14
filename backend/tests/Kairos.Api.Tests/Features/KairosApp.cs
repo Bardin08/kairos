@@ -28,6 +28,13 @@ public sealed class KairosApp : WebApplicationFactory<KairosDbContext>
 
     public HttpClient Client => _client ??= CreateClient();
 
+    /// <summary>
+    /// The same database the application is using, for a test that needs a second connection to
+    /// it — holding a write lock while a request runs is the only way to reach the contention
+    /// path from outside.
+    /// </summary>
+    public string ConnectionString => $"Data Source={_path}";
+
     /// <summary>Writes through the application's own context, so the schema is the migrated one.</summary>
     public void Seed(Action<KairosDbContext> seed)
     {
