@@ -8,6 +8,7 @@ import {
   type Link,
 } from '../lib/api'
 import { endOf, longDate, zonedDate, zonedTime } from '../lib/time'
+import AlertIcon from './AlertIcon'
 
 const CONFLICT = 409
 
@@ -24,22 +25,6 @@ const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 type FieldErrors = { name?: string; email?: string }
 
-function AlertIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7.5v5M12 16h.01" />
-    </svg>
-  )
-}
-
 /**
  * Who is booking, and the commit.
  *
@@ -52,6 +37,8 @@ export default function BookingForm({
   start,
   durationMinutes,
   zone,
+  details,
+  onDetails,
   onBack,
   onBooked,
   onSlotLost,
@@ -62,14 +49,18 @@ export default function BookingForm({
   durationMinutes: number
   /** The INVITEE's zone. Sent as `timeZone`, which is theirs, not the host's. */
   zone: string
+  /**
+   * Held by the caller rather than here, so a 409 can unmount this form and
+   * send the invitee back to the times without throwing away what they typed.
+   */
+  details: { name: string; email: string; notes: string }
+  onDetails: (next: { name: string; email: string; notes: string }) => void
   onBack: () => void
   onBooked: (booking: Booking) => void
   /** The slot went while the form was open. Carries the server's account of it. */
   onSlotLost: (message: string) => void
 }) {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [notes, setNotes] = useState('')
+  const { name, email, notes } = details
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -174,7 +165,7 @@ export default function BookingForm({
             name="name"
             autoComplete="name"
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => onDetails({ ...details, name: event.target.value })}
             aria-invalid={errors.name === undefined ? undefined : true}
             aria-describedby={errors.name === undefined ? undefined : 'booking-name-error'}
           />
@@ -195,7 +186,7 @@ export default function BookingForm({
             type="email"
             autoComplete="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => onDetails({ ...details, email: event.target.value })}
             aria-invalid={errors.email === undefined ? undefined : true}
             aria-describedby={errors.email === undefined ? undefined : 'booking-email-error'}
           />
@@ -215,7 +206,7 @@ export default function BookingForm({
             name="notes"
             placeholder="One concrete question."
             value={notes}
-            onChange={(event) => setNotes(event.target.value)}
+            onChange={(event) => onDetails({ ...details, notes: event.target.value })}
           />
         </div>
 
