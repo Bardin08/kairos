@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover is load-bearing: without it env(safe-area-inset-bottom)
+         is zero and the sticky action bar sits under the home indicator. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Kairos</title>
+    <link rel="stylesheet" href="/kairos.css" />
+    <!-- Runs before first paint, so a stored choice never loses a frame to the
+         wrong theme. The six lines are duplicated from src/lib/theme.ts on
+         purpose: importing the module would cost a round trip before paint,
+         which is the whole thing being avoided. No stored choice means no
+         attribute, which leaves prefers-color-scheme in charge. -->
+    <script>
+      var stored = localStorage.getItem('theme')
+      if (stored === 'light' || stored === 'dark')
+        document.documentElement.setAttribute('data-theme', stored)
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

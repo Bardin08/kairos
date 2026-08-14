@@ -56,8 +56,15 @@ check "dependabot split by stack"    bash -c '[ "$(grep -c "package-ecosystem" .
 
 echo "== layout =="
 check "no razor pages"               bash -c '! find backend -name "*.cshtml" | grep -q .'
-check "backend tests ignore the ui"  bash -c '! grep -rlE "\.tsx|kairos\.css|wwwroot" backend/tests | grep -q .'
-check "git hooks installed"          grep -q lefthook .git/hooks/pre-commit
+# git grep rather than grep -r, so the search sees committed sources and not
+# bin/obj: once wwwroot holds files, the static web assets manifests dropped in
+# every test project's bin/ name kairos.css, and a plain recursive grep reads
+# that as a test reaching for the UI.
+check "backend tests ignore the ui"  bash -c '! git grep -lE "\.tsx|kairos\.css|wwwroot" -- backend/tests | grep -q .'
+# Asked for by path, not as .git/hooks/…: inside a git worktree .git is a file
+# pointing at the real git dir, so the literal path is "not a directory" and the
+# check fails on exactly the workflow the plan asks for.
+check "git hooks installed"          bash -c 'grep -q lefthook "$(git rev-parse --git-path hooks/pre-commit)"'
 
 echo "== backend =="
 check "formatted"                    bash -c 'cd backend && dotnet format --verify-no-changes'

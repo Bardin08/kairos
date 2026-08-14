@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Links — Kairos</title>
+<link rel="stylesheet" href="kairos.css">
+</head>
+<body>
+<!--
+THESIS: A single-operator workbench, not a dashboard. It shows what the system did and lets one person change it; it refuses the metrics tiles and activity feeds that a product with no second user has no reason to grow.
+OWN-WORLD: Same tokens as the booking page — cool-neutral ramp, one indigo accent on the primary action only, hairline borders, tabular figures, drawn 1.5px icons. Density rises, vocabulary does not change.
+STORY: The operator sees every link and the pattern behind it, reads the margins that protect the gaps between calls, and finds which link a meeting came through.
+FIRST VIEWPORT: Desktop — rail of three destinations, then the links table with pattern and margin per row. Phone — the same records as cards, bottom tab bar for the three destinations.
+FORM: The category standard (canon), taken by the user's own words after two re-rolls; seed key 8071c74d.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+
+<div class="admin-shell">
+
+  <aside class="rail">
+    <a class="wordmark" href="#">
+      <span class="wordmark-glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/></svg>
+      </span>
+      Kairos
+    </a>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="#links" data-view="links" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M10.5 13.5a4.5 4.5 0 006.4 0l2.6-2.6a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M13.5 10.5a4.5 4.5 0 00-6.4 0l-2.6 2.6a4.5 4.5 0 006.4 6.4l1-1"/></svg>
+        Links
+      </a>
+      <a href="#availability" data-view="availability">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8.5 3v4M15.5 3v4"/></svg>
+        Availability
+      </a>
+      <a href="#meetings" data-view="meetings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M17.5 20.5v-1.8a3.6 3.6 0 00-3.6-3.6H7.1a3.6 3.6 0 00-3.6 3.6v1.8"/><circle cx="10.5" cy="7.5" r="3.6"/><path d="M20.5 20.5v-1.8a3.6 3.6 0 00-2.7-3.5"/></svg>
+        Meetings
+      </a>
+    </nav>
+
+    <div class="rail-foot">
+      <span class="avatar avatar-sm" aria-hidden="true">VB</span>
+      <span class="grow t-sm muted">Vlad Bardin</span>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <div class="admin-main">
+
+    <!-- ============================ LINKS ============================ -->
+    <section data-view-panel="links">
+      <div class="page-header">
+        <h1 class="title-page">Links</h1>
+        <button class="btn btn-primary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          New link
+        </button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Link</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Pattern</th>
+              <th scope="col">Margin</th>
+              <th scope="col">Bookings</th>
+              <th scope="col"><span class="visually-hidden">Active</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-column="">
+                <span class="cell-primary">Mentorship</span>
+                <span class="cell-sub">kairos.vbardin.com/mentorship</span>
+              </td>
+              <td data-column="Duration" class="numeric">50 min</td>
+              <td data-column="Pattern"><span class="badge">Weekdays 09–17</span></td>
+              <td data-column="Margin" class="numeric">15 min</td>
+              <td data-column="Bookings" class="numeric">12 this month</td>
+              <td data-column="Active"><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Mentorship link active"></button></td>
+            </tr>
+            <tr>
+              <td data-column="">
+                <span class="cell-primary">Consulting</span>
+                <span class="cell-sub">kairos.vbardin.com/consulting</span>
+              </td>
+              <td data-column="Duration" class="numeric">60 min</td>
+              <td data-column="Pattern"><span class="badge">Weekdays 09–17</span></td>
+              <td data-column="Margin" class="numeric">30 min</td>
+              <td data-column="Bookings" class="numeric">4 this month</td>
+              <td data-column="Active"><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Consulting link active"></button></td>
+            </tr>
+            <tr>
+              <td data-column="">
+                <span class="cell-primary">Quick sync</span>
+                <span class="cell-sub">kairos.vbardin.com/quick</span>
+              </td>
+              <td data-column="Duration" class="numeric">25 min</td>
+              <td data-column="Pattern"><span class="badge">Weekdays 09–17</span></td>
+              <td data-column="Margin" class="numeric">5 min</td>
+              <td data-column="Bookings" class="numeric">9 this month</td>
+              <td data-column="Active"><button class="switch" type="button" role="switch" aria-checked="true" aria-label="Quick sync link active"></button></td>
+            </tr>
+            <tr>
+              <td data-column="">
+                <span class="cell-primary">Project sync</span>
+                <span class="cell-sub">kairos.vbardin.com/project-sync</span>
+              </td>
+              <td data-column="Duration" class="numeric">30 min</td>
+              <td data-column="Pattern"><span class="badge">Evenings</span></td>
+              <td data-column="Margin"><span class="muted numeric t-xs">Global — 15 min</span></td>
+              <td data-column="Bookings" class="numeric">0 this month</td>
+              <td data-column="Active"><button class="switch" type="button" role="switch" aria-checked="false" aria-label="Project sync link paused"></button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </section>
+
+    <!-- ========================= AVAILABILITY ========================= -->
+    <section data-view-panel="availability" hidden>
+      <div class="page-header">
+        <h1 class="title-page">Availability</h1>
+        <button class="btn btn-primary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          New pattern
+        </button>
+      </div>
+
+      <div class="grid-cards">
+        <article class="card card-pad-sm">
+          <h2 class="title-section mb-3">Weekdays 09–17</h2>
+          <div class="pattern-days mb-3">
+            <span class="pattern-day" data-on="true">Mo</span><span class="pattern-day" data-on="true">Tu</span>
+            <span class="pattern-day" data-on="true">We</span><span class="pattern-day" data-on="true">Th</span>
+            <span class="pattern-day" data-on="true">Fr</span><span class="pattern-day">Sa</span><span class="pattern-day">Su</span>
+          </div>
+          <p class="muted numeric t-sm">09:00 – 17:00 · Europe/Warsaw</p>
+          <p class="fine sep-top">Used by Mentorship and Consulting</p>
+        </article>
+
+        <article class="card card-pad-sm">
+          <h2 class="title-section mb-3">Evenings</h2>
+          <div class="pattern-days mb-3">
+            <span class="pattern-day">Mo</span><span class="pattern-day" data-on="true">Tu</span>
+            <span class="pattern-day">We</span><span class="pattern-day" data-on="true">Th</span>
+            <span class="pattern-day">Fr</span><span class="pattern-day">Sa</span><span class="pattern-day">Su</span>
+          </div>
+          <p class="muted numeric t-sm">18:30 – 21:00 · Europe/Warsaw</p>
+          <p class="fine sep-top">Used by Project sync</p>
+        </article>
+
+        <article class="card card-pad-sm">
+          <h2 class="title-section mb-3">Deep work</h2>
+          <div class="pattern-days mb-3">
+            <span class="pattern-day" data-on="true">Mo</span><span class="pattern-day">Tu</span>
+            <span class="pattern-day" data-on="true">We</span><span class="pattern-day">Th</span>
+            <span class="pattern-day">Fr</span><span class="pattern-day">Sa</span><span class="pattern-day">Su</span>
+          </div>
+          <p class="muted t-sm">Override — nothing bookable</p>
+          <p class="fine sep-top">Not used by any link yet</p>
+        </article>
+      </div>
+
+      <div class="page-header section-break">
+        <h2 class="title-section">Global defaults</h2>
+        <button class="btn" type="button">Edit defaults</button>
+      </div>
+      <div class="card grid-stats grid-stats-joined">
+        <div class="stat">
+          <span class="stat-value">15 min</span>
+          <span class="stat-label">Margin between meetings</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">4 hours</span>
+          <span class="stat-label">Minimum notice</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">3 a day</span>
+          <span class="stat-label">Booking cap</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">:00 and :30</span>
+          <span class="stat-label">Start increments</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== MEETINGS =========================== -->
+    <section data-view-panel="meetings" hidden>
+      <div class="page-header">
+        <h1 class="title-page">Meetings</h1>
+        <div class="row gap-2">
+          <select class="select select-inline" aria-label="Filter by link">
+            <option>All links</option><option>Mentorship</option><option>Consulting</option><option>Project sync</option>
+          </select>
+          <select class="select select-inline" aria-label="Filter by period">
+            <option>Upcoming</option><option>Past</option><option>Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="record">
+          <span class="record-date" aria-hidden="true"><span class="record-day">20</span><span class="record-month">Aug</span></span>
+          <div class="grow">
+            <p class="record-who">Ada Lovelace</p>
+            <p class="record-meta"><time>14:00 – 14:45</time> · ada@example.com</p>
+          </div>
+          <span class="badge">Mentorship</span>
+        </div>
+        <div class="record">
+          <span class="record-date" aria-hidden="true"><span class="record-day">21</span><span class="record-month">Aug</span></span>
+          <div class="grow">
+            <p class="record-who">Grace Hopper</p>
+            <p class="record-meta"><time>10:00 – 11:00</time> · grace@example.com</p>
+          </div>
+          <span class="badge">Consulting</span>
+        </div>
+        <div class="record">
+          <span class="record-date" aria-hidden="true"><span class="record-day">25</span><span class="record-month">Aug</span></span>
+          <div class="grow">
+            <p class="record-who">Alan Turing</p>
+            <p class="record-meta"><time>18:30 – 19:00</time> · alan@example.com</p>
+          </div>
+          <span class="badge">Project sync</span>
+        </div>
+        <div class="record">
+          <span class="record-date" aria-hidden="true"><span class="record-day">27</span><span class="record-month">Aug</span></span>
+          <div class="grow">
+            <p class="record-who">Katherine Johnson</p>
+            <p class="record-meta"><time>14:00 – 14:45</time> · katherine@example.com</p>
+          </div>
+          <span class="badge">Mentorship</span>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+</div>
+
+<nav class="tabbar" aria-label="Sections">
+  <div class="tabbar-inner">
+    <a href="#links" data-view="links" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M10.5 13.5a4.5 4.5 0 006.4 0l2.6-2.6a4.5 4.5 0 00-6.4-6.4l-1 1"/><path d="M13.5 10.5a4.5 4.5 0 00-6.4 0l-2.6 2.6a4.5 4.5 0 006.4 6.4l1-1"/></svg>
+      Links
+    </a>
+    <a href="#availability" data-view="availability">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8.5 3v4M15.5 3v4"/></svg>
+      Availability
+    </a>
+    <a href="#meetings" data-view="meetings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M17.5 20.5v-1.8a3.6 3.6 0 00-3.6-3.6H7.1a3.6 3.6 0 00-3.6 3.6v1.8"/><circle cx="10.5" cy="7.5" r="3.6"/><path d="M20.5 20.5v-1.8a3.6 3.6 0 00-2.7-3.5"/></svg>
+      Meetings
+    </a>
+  </div>
+</nav>
+
+<script>
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+  var toggle = document.getElementById("theme-toggle");
+  var stored = null;
+  try { stored = localStorage.getItem("kairos-theme"); } catch (e) {}
+  if (stored) root.setAttribute("data-theme", stored);
+
+  function currentlyDark() {
+    var explicit = root.getAttribute("data-theme");
+    if (explicit) return explicit === "dark";
+    return matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function syncToggleLabel() {
+    toggle.setAttribute("aria-label", currentlyDark() ? "Switch to light theme" : "Switch to dark theme");
+  }
+  syncToggleLabel();
+  toggle.addEventListener("click", function () {
+    var next = currentlyDark() ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("kairos-theme", next); } catch (e) {}
+    syncToggleLabel();
+  });
+
+  /* Three destinations. Real URLs in the product; switched here so the
+     surfaces can be compared without a server. */
+  var TITLES = { links: "Links", availability: "Availability", meetings: "Meetings" };
+
+  function go(view) {
+    document.querySelectorAll("[data-view-panel]").forEach(function (p) {
+      p.hidden = p.getAttribute("data-view-panel") !== view;
+    });
+    document.querySelectorAll("[data-view]").forEach(function (a) {
+      if (a.getAttribute("data-view") === view) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+    document.title = TITLES[view] + " — Kairos";
+  }
+
+  document.querySelectorAll("[data-view]").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      var view = a.getAttribute("data-view");
+      history.replaceState(null, "", "#" + view);
+      go(view);
+    });
+  });
+
+  document.querySelectorAll(".switch").forEach(function (sw) {
+    sw.addEventListener("click", function () {
+      sw.setAttribute("aria-checked", sw.getAttribute("aria-checked") === "true" ? "false" : "true");
+    });
+  });
+
+  var initial = (location.hash || "#links").slice(1);
+  go(TITLES[initial] ? initial : "links");
+})();
+</script>
+</body>
+</html>
