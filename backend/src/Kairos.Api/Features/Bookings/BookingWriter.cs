@@ -24,8 +24,19 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
 
     private const int SecondsPerMinute = 60;
 
-    /// <summary>SQLITE_CONSTRAINT — a unique index fired, here the confirmed-start backstop.</summary>
-    private const int SqliteConstraintErrorCode = 19;
+    /// <summary>
+    /// SQLITE_CONSTRAINT_UNIQUE. The primary code, 19, covers UNIQUE, FOREIGN KEY, NOT NULL and
+    /// CHECK alike, so matching on it would report an unknown link or a malformed booker as
+    /// "that slot was taken" and lose the real cause. Only a unique index means taken.
+    /// </summary>
+    private const int SqliteConstraintUniqueErrorCode = 2067;
+
+    /// <summary>
+    /// What a link inherits when the settings singleton is missing. Without it the row drops out
+    /// of the join, the count comes back zero and every booking is accepted — a missing
+    /// configuration row would silently disable the one check this class exists to perform.
+    /// </summary>
+    private const int NoMarginFallback = 0;
 
     private static readonly int ConfirmedStatus = (int)BookingStatus.Confirmed;
 
@@ -58,9 +69,25 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
         // because the context outlives this call.
         var previousTransactionBehavior = context.Database.AutoTransactionBehavior;
         context.Database.AutoTransactionBehavior = AutoTransactionBehavior.Never;
+
+        // busy_timeout is not what bounds a contended write. Microsoft.Data.Sqlite retries
+        // SQLITE_BUSY until the command timeout, thirty seconds by default, so the pragma's five
+        // seconds became six waits rather than one. One budget, taken from the pragma, so a
+        // caller stuck behind another writer gives up in seconds instead of pinning a request
+        // thread for half a minute.
+        var previousCommandTimeout = context.Database.GetCommandTimeout();
+        context.Database.SetCommandTimeout(
+            TimeSpan.FromMilliseconds(SqlitePragmas.BusyTimeoutMilliseconds));
+
+        // Both are tracked so that failure undoes exactly what this call did and nothing more:
+        // rolling back a transaction it never opened would discard the caller's uncommitted work,
+        // and ChangeTracker.Clear would discard whatever the caller was tracking.
+        var started = false;
+        Booking? pending = null;
         try
         {
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
+            started = true;
 
             // Half-open on both sides, and MAX here is SQLite's two-argument scalar maximum, so
             // the rule matches SlotGenerator exactly: pad by the larger of the two margins,
@@ -69,16 +96,15 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
                 SELECT COUNT(*) AS Value
                 FROM Bookings b
                 JOIN Links l ON l.Id = b.LinkId
-                CROSS JOIN Settings s
-                WHERE s.Id = {Settings.SingletonId}
-                  AND b.Status = {ConfirmedStatus}
-                  AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
-                  AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes), {queryingMargin}) * {SecondsPerMinute}) > {startUtc}
+                LEFT JOIN Settings s ON s.Id = {Settings.SingletonId}
+                WHERE b.Status = {ConfirmedStatus}
+                  AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
+                  AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc}
                 """).AsEnumerable().Single();
 
             if (clashes > 0)
             {
-                Rollback();
+                Abandon(started, pending);
                 return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
             }
 
@@ -86,7 +112,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
                 RandomNumberGenerator.GetBytes(ManageTokenBytes)).ToLowerInvariant();
 
             var bookingId = Guid.CreateVersion7();
-            var booking = new Booking
+            pending = new Booking
             {
                 Id = bookingId,
                 LinkId = linkId,
@@ -110,36 +136,74 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
                 ],
             };
 
-            context.Bookings.Add(booking);
+            context.Bookings.Add(pending);
             context.SaveChanges();
             context.Database.ExecuteSqlRaw("COMMIT;");
 
-            return new CreateBookingResult(true, booking.Id, manageToken, null);
+            return new CreateBookingResult(true, pending.Id, manageToken, null);
         }
-        catch (Exception exception) when (IsConstraintViolation(exception))
+        catch (Exception exception) when (IsSlotAlreadyTaken(exception))
         {
             // The partial unique index fired — the backstop, not the mechanism.
-            Rollback();
+            Abandon(started, pending);
             return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
         }
         catch
         {
-            Rollback();
+            Abandon(started, pending);
             throw;
         }
         finally
         {
+            context.Database.SetCommandTimeout(previousCommandTimeout);
             context.Database.AutoTransactionBehavior = previousTransactionBehavior;
         }
     }
 
+    /// <summary>
+    /// Hashes a manage token for storage and for lookup. Lower-cased first: the token is minted
+    /// as lower-case hex, so a copy that came back upper-cased — retyped, or through a URL
+    /// rewriter — would otherwise hash to something the unique index has never seen and the
+    /// manage link would 404 with nothing to explain it.
+    /// </summary>
     public static string Hash(string token) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token.ToLowerInvariant())))
+            .ToLowerInvariant();
 
     /// <summary>
-    /// SQLite rolls a failed statement back on its own, and then ROLLBACK throws "cannot rollback
-    /// - no transaction is active". Rethrowing that would replace the exception worth reading
-    /// with the one raised while cleaning up after it, so the cleanup stays silent.
+    /// Undoes what this call did, and nothing else. Both guards matter: a bare ROLLBACK after a
+    /// BEGIN IMMEDIATE that never ran would discard a transaction the caller opened — the shape a
+    /// reschedule takes — and clearing the change tracker wholesale would discard entities the
+    /// caller is holding. Left tracked, the two failed inserts would ride along on the caller's
+    /// next SaveChanges and re-insert the booking this method just refused.
+    /// </summary>
+    private void Abandon(bool started, Booking? pending)
+    {
+        if (started)
+        {
+            Rollback();
+        }
+
+        if (pending is null)
+        {
+            return;
+        }
+
+        // Copied first: detaching a participant makes EF fix up the navigation it is being read
+        // from, and the failure path would then throw over the failure it is cleaning up after.
+        foreach (var participant in pending.Participants.ToArray())
+        {
+            context.Entry(participant).State = EntityState.Detached;
+        }
+
+        context.Entry(pending).State = EntityState.Detached;
+    }
+
+    /// <summary>
+    /// A failed statement inside a transaction leaves that transaction open, so this normally
+    /// succeeds and is what undoes the insert. It is guarded because the connection can still be
+    /// out of one — a lock this call never won, say — and "cannot rollback - no transaction is
+    /// active" would replace the exception worth reading with one raised while cleaning up.
     /// </summary>
     private void Rollback()
     {
@@ -157,9 +221,9 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock)
     /// EF wraps a constraint violation raised by SaveChanges in DbUpdateException, so the check
     /// has to look through the exception it is handed rather than at its type.
     /// </summary>
-    private static bool IsConstraintViolation(Exception exception)
+    private static bool IsSlotAlreadyTaken(Exception exception)
     {
         var sqlite = (exception as SqliteException) ?? (exception.InnerException as SqliteException);
-        return sqlite?.SqliteErrorCode == SqliteConstraintErrorCode;
+        return sqlite?.SqliteExtendedErrorCode == SqliteConstraintUniqueErrorCode;
     }
 }

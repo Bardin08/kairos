@@ -18,8 +18,10 @@ namespace Kairos.Api.Tests.Features;
 public class BookingConcurrencyTests
 {
     private const int NoMargin = 0;
-    private const int ExistingMeetingMarginMinutes = 30;
+    private const int LargerMarginMinutes = 30;
+    private const int SmallerMarginMinutes = 20;
     private const int SlotMinutes = 30;
+    private const int MeetingMinutes = 60;
     private const int RacingCallers = 2;
     private const string ConsultingSlug = "consulting";
     private const string MentorshipSlug = "mentorship";
@@ -66,10 +68,20 @@ public class BookingConcurrencyTests
 
         results.Count(result => result.Success).ShouldBe(1);
         results.Single(result => !result.Success).Reason.ShouldBe(BookingWriter.SlotTakenReason);
-        results.Single(result => result.Success).ManageToken.ShouldNotBeNullOrWhiteSpace();
+
+        var winner = results.Single(result => result.Success);
+        winner.ManageToken.ShouldNotBeNullOrWhiteSpace();
 
         using var read = database.CreateContext();
         read.Bookings.Count(booking => booking.Status == BookingStatus.Confirmed).ShouldBe(1);
+
+        // The row keeps the hash, never the token. Whoever reads the database cannot use what
+        // they find there to cancel the meeting.
+        read.Bookings.Single().ManageTokenHash.ShouldBe(BookingWriter.Hash(winner.ManageToken!));
+
+        // One booking, one booker. The participant row is what the confirmation email and the
+        // .ics attendee are read from, so a booking without one is a booking nobody is on.
+        read.BookingParticipants.Count().ShouldBe(1);
     }
 
     [Fact]
@@ -95,27 +107,27 @@ public class BookingConcurrencyTests
     }
 
     [Fact]
-    public void TryCreate_ExistingMeetingHasTheLargerMargin_BlocksTheZeroMarginLink()
+    public void TryCreate_ExistingMeetingHasTheLargerMargin_BlocksTheSmallerMarginLink()
     {
         using var database = new TestDatabase();
         using var context = database.CreateContext();
-        Seed(context, ExistingMeetingMarginMinutes);
+        Seed(context, LargerMarginMinutes);
         var writer = new BookingWriter(context, SystemClock.Instance);
 
         // 10:00-11:00 on the link that wants thirty minutes either side of itself.
-        var existing = Duration.FromMinutes(SlotMinutes * 2);
-        writer.TryCreate(
-                ConsultingId, MeetingStart, existing, Booker, string.Empty, ExistingMeetingMarginMinutes)
+        var existing = Duration.FromMinutes(MeetingMinutes);
+        writer.TryCreate(ConsultingId, MeetingStart, existing, Booker, string.Empty, LargerMarginMinutes)
             .Success.ShouldBeTrue();
 
-        // The zero-margin link inherits the larger of the two margins, not the sum: the meeting
-        // is blocked until 11:30, so 11:15 is refused and 11:30 — half-open — is offered.
-        var tooSoon = MeetingStart + existing + Duration.FromMinutes(SlotMinutes / 2);
-        var justInTime = MeetingStart + existing + Duration.FromMinutes(ExistingMeetingMarginMinutes);
+        // Both margins are non-zero and unequal on purpose: with thirty against zero the maximum
+        // and the sum are the same number, and a writer that added them would pass. Thirty
+        // against twenty separates them — blocked to 11:30, free at 11:30, not 11:50.
+        var insideTheLargerMargin = MeetingStart + existing + Duration.FromMinutes(SmallerMarginMinutes);
+        var atTheLargerMargin = MeetingStart + existing + Duration.FromMinutes(LargerMarginMinutes);
 
-        writer.TryCreate(MentorshipId, tooSoon, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(MentorshipId, insideTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
             .Reason.ShouldBe(BookingWriter.SlotTakenReason);
-        writer.TryCreate(MentorshipId, justInTime, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(MentorshipId, atTheLargerMargin, SlotDuration, Booker, string.Empty, SmallerMarginMinutes)
             .Success.ShouldBeTrue();
     }
 
