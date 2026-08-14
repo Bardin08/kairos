@@ -11,6 +11,11 @@ public sealed class PatternOverrideConfiguration : IEntityTypeConfiguration<Patt
     {
         builder.HasKey(patternOverride => patternOverride.Id);
 
+        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
+        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
+        builder.Property(patternOverride => patternOverride.Id)
+            .HasValueGenerator<Uuid7ValueGenerator>();
+
         builder.HasOne(patternOverride => patternOverride.Pattern)
             .WithMany(pattern => pattern.Overrides)
             .HasForeignKey(patternOverride => patternOverride.PatternId)
