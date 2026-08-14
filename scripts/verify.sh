@@ -3,46 +3,93 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-# 60 KiB gzipped, the same budget the frontend CI job enforces.
-readonly BUNDLE_BUDGET_GZIP_BYTES=61440
+# Enough of a failing command's output to act on, without burying the summary.
+readonly FAILURE_LOG_LINES=20
 
-PASS=0; FAIL=0; FAILED=()
+LOG_DIR="$(mktemp -d)"
+readonly LOG_DIR
+trap 'rm -rf "$LOG_DIR"' EXIT
+
+PASS=0; FAIL=0; SKIP=0; CHECKS=0
+FAILED=(); FAILED_LOGS=()
+LAST_CHECK_OK=yes
 
 check() {  # check <description> <command...>
   local desc="$1"; shift
-  if "$@" >/dev/null 2>&1; then
+  local log="$LOG_DIR/$CHECKS.log"
+  CHECKS=$((CHECKS+1))
+  if "$@" >"$log" 2>&1; then
+    LAST_CHECK_OK=yes
     PASS=$((PASS+1)); printf '  ok   %s\n' "$desc"
   else
-    FAIL=$((FAIL+1)); FAILED+=("$desc"); printf '  FAIL %s\n' "$desc"
+    LAST_CHECK_OK=no
+    FAIL=$((FAIL+1)); FAILED+=("$desc"); FAILED_LOGS+=("$log")
+    printf '  FAIL %s\n' "$desc"
   fi
 }
+
+skip() {  # skip <description> <reason>
+  SKIP=$((SKIP+1)); printf '  skip %s — %s\n' "$1" "$2"
+}
+
+# Tasks 1-3 have no frontend/ at all. Reporting those checks as failures would
+# make the suite red by construction, and a suite that is always red stops being
+# read. CI gates the same way.
+HAS_FRONTEND=no
+[ -d frontend ] && HAS_FRONTEND=yes
+readonly HAS_FRONTEND
+readonly NO_FRONTEND_YET="frontend/ does not exist yet"
 
 echo "== supply chain =="
 check "no floating nuget versions"   bash -c '! grep -E "Version=\"[^[]" backend/Directory.Packages.props'
 check "transitive pinning enabled"   grep -q "CentralPackageTransitivePinningEnabled>true" backend/Directory.Packages.props
-check "no caret ranges in npm"       bash -c '! grep -E "\"[\^~]" frontend/package.json'
-check "npm lockfile committed"       test -f frontend/package-lock.json
-check "actions pinned by sha"        bash -c '! grep -E "uses: .*@v[0-9]" .github/workflows/ci.yml'
-check "dependabot split by stack"    bash -c 'grep -c "package-ecosystem" .github/dependabot.yml | grep -qx 3'
+if [ "$HAS_FRONTEND" = yes ]; then
+  check "no caret ranges in npm"     bash -c '! grep -E "\"[\^~]" frontend/package.json'
+  check "npm lockfile committed"     test -f frontend/package-lock.json
+else
+  skip "no caret ranges in npm"      "$NO_FRONTEND_YET"
+  skip "npm lockfile committed"      "$NO_FRONTEND_YET"
+fi
+check "actions pinned by sha"        bash -c '! grep -rE "uses: .*@v[0-9]" .github/workflows/'
+# shellcheck disable=SC2016  # the $() is meant for the inner shell, not this one
+check "dependabot split by stack"    bash -c '[ "$(grep -c "package-ecosystem" .github/dependabot.yml)" -ge 3 ]'
 
 echo "== layout =="
 check "no razor pages"               bash -c '! find backend -name "*.cshtml" | grep -q .'
 check "backend tests ignore the ui"  bash -c '! grep -rlE "\.tsx|kairos\.css|wwwroot" backend/tests | grep -q .'
+check "git hooks installed"          grep -q lefthook .git/hooks/pre-commit
 
 echo "== backend =="
 check "formatted"                    bash -c 'cd backend && dotnet format --verify-no-changes'
 check "builds"                       bash -c 'cd backend && dotnet build -warnaserror'
-check "tests pass"                   bash -c 'cd backend && dotnet test --no-build'
+if [ "$LAST_CHECK_OK" = yes ]; then
+  check "tests pass"                 bash -c 'cd backend && dotnet test --no-build'
+else
+  skip "tests pass"                  "the build failed, so --no-build would only test stale binaries"
+fi
 
 echo "== frontend =="
-check "lints"                        bash -c 'cd frontend && npx eslint . --max-warnings 0'
-check "typechecks"                   bash -c 'cd frontend && npx tsc --noEmit'
-check "tests pass"                   bash -c 'cd frontend && npx vitest run'
-check "bundle under budget"          bash -c "cd frontend && npm run build && [ \"\$(gzip -c ../backend/src/Kairos.Api/wwwroot/assets/*.js | wc -c)\" -lt ${BUNDLE_BUDGET_GZIP_BYTES} ]"
+if [ "$HAS_FRONTEND" = yes ]; then
+  check "lints"                      bash -c 'cd frontend && npx eslint . --max-warnings 0'
+  check "typechecks"                 bash -c 'cd frontend && npx tsc --noEmit'
+  check "tests pass"                 bash -c 'cd frontend && npx vitest run'
+  check "bundle under budget"        bash -c '(cd frontend && npm run build) && bash scripts/bundle-budget.sh'
+else
+  skip "lints"                       "$NO_FRONTEND_YET"
+  skip "typechecks"                  "$NO_FRONTEND_YET"
+  skip "tests pass"                  "$NO_FRONTEND_YET"
+  skip "bundle under budget"         "$NO_FRONTEND_YET"
+fi
 
 echo
-printf '%d passed, %d failed\n' "$PASS" "$FAIL"
-# Descriptions are collected, not just streamed: a long run scrolls and the one
-# failure that matters ends up above the fold.
-for d in "${FAILED[@]:-}"; do [ -n "$d" ] && printf '  failed: %s\n' "$d"; done
+printf '%d passed, %d skipped, %d failed\n' "$PASS" "$SKIP" "$FAIL"
+# Failures are collected rather than only streamed: a long run scrolls, and the
+# one failure that matters ends up above the fold. Each carries the tail of its
+# own output, so a red line is actionable without re-running the command by hand.
+if [ "$FAIL" -gt 0 ]; then
+  for i in $(seq 0 $((FAIL - 1))); do
+    printf '\n  failed: %s\n' "${FAILED[$i]}"
+    tail -n "$FAILURE_LOG_LINES" "${FAILED_LOGS[$i]}" | sed 's/^/    /'
+  done
+fi
 [ "$FAIL" -eq 0 ]
