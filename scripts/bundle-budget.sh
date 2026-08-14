@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Assert the built SPA's JavaScript fits its gzipped budget.
+# Assert everything the SPA build emits fits its gzipped budget.
 #
 # The budget lives here and nowhere else — CI and scripts/verify.sh both call
 # this script rather than carrying their own copy of the number.
 #
-# Scope: the JavaScript bundle only. kairos.css is deliberately NOT counted; the
-# plan states the budget against JS. Do not read a passing run as evidence that
-# the stylesheet is within any budget, because nothing measures it.
+# Scope: every file the build writes into assets/, JavaScript and CSS alike. CSS
+# counts because the moment a component imports a stylesheet Vite emits a chunk
+# of it, and an unweighed output is a budget with a hole in it.
+#
+# The vendored kairos.css is NOT counted and is not in assets/ — it is a source
+# asset the API serves directly, it is not emitted by any build, and nothing
+# measures it. Do not read a passing run as evidence that it is within a budget.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -31,12 +35,15 @@ readonly ASSET_DIR="backend/src/Kairos.Api/wwwroot/assets"
 # A glob that matches nothing expands to the literal pattern, gzip then fails,
 # and `wc -c` still prints 0 — which used to sail under the budget and report a
 # pass with no bundle at all. nullglob plus an explicit emptiness test is what
-# makes "nothing was built" a failure instead of a green tick.
+# makes "nothing was built" a failure instead of a green tick. The emptiness
+# test is on the scripts alone: a build with no CSS chunk is ordinary, a build
+# with no JavaScript never happened.
 shopt -s nullglob
-files=("$ASSET_DIR"/*.js)
+files=("$ASSET_DIR"/*.js "$ASSET_DIR"/*.css)
+scripts=("$ASSET_DIR"/*.js)
 shopt -u nullglob
 
-if [ "${#files[@]}" -eq 0 ]; then
+if [ "${#scripts[@]}" -eq 0 ]; then
   printf 'bundle-budget: no JavaScript in %s — nothing was built, so nothing was measured\n' "$ASSET_DIR" >&2
   exit 1
 fi

@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs'
+import { createReadStream, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 // vitest/config is Vite's own defineConfig widened to accept `test`, so the
@@ -7,12 +7,30 @@ import { defineConfig, type Plugin } from 'vitest/config'
 
 // The SPA is built into the API's wwwroot and served from there as static files.
 const outDir = '../backend/src/Kairos.Api/wwwroot'
-const assetsDir = new URL(`${outDir}/assets/`, import.meta.url)
+// Resolved here rather than left to Vite: these two need the same directory
+// Vite is writing to, so if outDir ever moves, all three move together.
+const assetsDir = fileURLToPath(new URL(`${outDir}/assets/`, import.meta.url))
+const stylesheet = fileURLToPath(new URL(`${outDir}/kairos.css`, import.meta.url))
 
-// Warn about any chunk over 60 kB, the size at which a single chunk is worth
-// questioning. The gzipped budget the build is actually held to lives in
-// scripts/bundle-budget.sh.
-const chunkSizeWarningLimitKb = 60
+const stylesheetUrl = '/kairos.css'
+
+// In production the API serves kairos.css out of wwwroot next to index.html.
+// The dev server has to answer the same URL, and it is handed over here rather
+// than through public/ so that public/ keeps its ordinary meaning: files put
+// there ship. Serving it from a directory the build also writes to would mean
+// copying the vendored stylesheet over itself on every build.
+function serveVendoredStylesheet(): Plugin {
+  return {
+    name: 'kairos-serve-vendored-stylesheet',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(stylesheetUrl, (_request, response) => {
+        response.setHeader('Content-Type', 'text/css')
+        createReadStream(stylesheet).pipe(response)
+      })
+    },
+  }
+}
 
 // Vite only clears an outDir it owns, and it does not own this one — kairos.css
 // lives there. Left alone, hashed bundles from every earlier build pile up in
@@ -22,21 +40,16 @@ function clearStaleAssets(): Plugin {
     name: 'kairos-clear-stale-assets',
     apply: 'build',
     buildStart() {
-      rmSync(fileURLToPath(assetsDir), { recursive: true, force: true })
+      rmSync(assetsDir, { recursive: true, force: true })
     },
   }
 }
 
 export default defineConfig({
-  plugins: [react(), clearStaleAssets()],
+  plugins: [react(), serveVendoredStylesheet(), clearStaleAssets()],
   build: {
     outDir,
     emptyOutDir: false, // kairos.css lives there and is not ours to delete
-    // public/ holds one file: a symlink to that same kairos.css, so the dev
-    // server can serve it at the /kairos.css the API serves in production.
-    // Copying it would write the vendored stylesheet over itself.
-    copyPublicDir: false,
-    chunkSizeWarningLimit: chunkSizeWarningLimitKb,
   },
   server: { proxy: { '/api': 'http://localhost:5000' } },
   test: {
