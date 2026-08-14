@@ -83,10 +83,10 @@ public static class SlotsEndpoints
         // One clock read, passed down. Minimum notice is measured from it, and the create-booking
         // path re-checks against the same reading, so a slot offered at the notice boundary is
         // still there when it is submitted.
-        var instants = await slots.GetSlotsAsync(
+        var results = await slots.GetSlotsAsync(
             request.Slug, request.Duration, from, to, clock.GetCurrentInstant(), cancellationToken);
 
-        return [.. instants.Select(InstantPattern.ExtendedIso.Format)];
+        return [.. results.Starts.Select(InstantPattern.ExtendedIso.Format)];
     }
 
     /// <summary>

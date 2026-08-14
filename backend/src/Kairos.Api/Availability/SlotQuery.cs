@@ -45,7 +45,7 @@ public sealed class SlotQuery(
     /// instant this page offered from. A clock in here would let read and write disagree at the
     /// boundary, and the symptom is a slot the page offers being rejected on submit.
     /// </summary>
-    public async Task<IReadOnlyList<Instant>> GetSlotsAsync(
+    public async Task<SlotResults> GetSlotsAsync(
         string slug,
         int? durationMinutes,
         LocalDate from,
@@ -65,6 +65,9 @@ public sealed class SlotQuery(
             .FirstOrDefaultAsync(candidate => candidate.Slug == slug && candidate.Active, cancellationToken)
             ?? throw DomainException.NotFound($"Link '{slug}'");
 
+        // SortOrder, not ascending length: it is the order the operator chose for the booking
+        // page's tabs, it comes back out in SlotResults, and it is what decides which duration a
+        // request with no duration on it gets.
         var offered = link.Durations
             .OrderBy(duration => duration.SortOrder)
             .Select(duration => duration.Minutes)
@@ -94,7 +97,7 @@ public sealed class SlotQuery(
         var busy = await GatherBusyAsync(rangeStart, rangeEnd, limits.MarginMinutes, cancellationToken);
         var bookingsPerDay = await CountPerLocalDayAsync(rangeStart, rangeEnd, from, to, zone, cancellationToken);
 
-        return generator.Generate(
+        var starts = generator.Generate(
             windows,
             CollectionsMarshal.AsSpan(busy),
             Duration.FromMinutes(minutes),
@@ -102,6 +105,8 @@ public sealed class SlotQuery(
             now,
             zone,
             bookingsPerDay);
+
+        return new SlotResults(link.Id, minutes, offered, limits, starts);
     }
 
     /// <summary>

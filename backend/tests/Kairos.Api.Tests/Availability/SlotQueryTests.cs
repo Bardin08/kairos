@@ -134,7 +134,7 @@ public class SlotQueryTests
         // On the other link, which is the point: availability is one calendar.
         AddBooking(context, MentorshipId, Instant.FromUtc(2026, 9, 14, 10, 0));
 
-        var slots = await Query(context)
+        var results = await Query(context)
             .GetSlotsAsync(ConsultingSlug, null, Monday, Monday, WellBefore, TestContext.Current.CancellationToken);
 
         // 09:30 ends exactly when the booking starts and is still offered — half-open throughout.
@@ -146,7 +146,7 @@ public class SlotQueryTests
             Instant.FromUtc(2026, 9, 14, 11, 0),
             Instant.FromUtc(2026, 9, 14, 11, 30),
         ];
-        slots.ShouldBe(expected);
+        results.Starts.ShouldBe(expected);
     }
 
     [Fact]
@@ -161,12 +161,12 @@ public class SlotQueryTests
         // spends Tuesday's. It is outside both availability windows, so only the cap can move.
         AddBooking(context, MentorshipId, Instant.FromUtc(2026, 9, 14, 22, 0));
 
-        var slots = await Query(context)
+        var results = await Query(context)
             .GetSlotsAsync(ConsultingSlug, null, Monday, Tuesday, WellBefore, TestContext.Current.CancellationToken);
 
         var zone = DateTimeZoneProviders.Tzdb[TokyoZoneId];
-        slots.ShouldNotBeEmpty();
-        slots.ShouldAllBe(slot => slot.InZone(zone).Date == Monday);
+        results.Starts.ShouldNotBeEmpty();
+        results.Starts.ShouldAllBe(slot => slot.InZone(zone).Date == Monday);
     }
 
     [Fact]
@@ -176,16 +176,70 @@ public class SlotQueryTests
         await using var context = database.CreateContext();
         Seed(context, dailyCap: 0);
 
-        var slots = await Query(context)
+        var results = await Query(context)
             .GetSlotsAsync(ConsultingSlug, null, Monday, Monday, WellBefore, TestContext.Current.CancellationToken);
 
-        slots.ShouldBeEmpty();
+        results.Starts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetSlotsAsync_CancelledBookingOnACappedDay_DoesNotSpendTheCap()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context, dailyCap: 1);
+
+        var cancelledHour = Instant.FromUtc(2026, 9, 14, 10, 0);
+        AddBooking(context, MentorshipId, cancelledHour, BookingStatus.Cancelled);
+
+        var results = await Query(context)
+            .GetSlotsAsync(ConsultingSlug, null, Monday, Monday, WellBefore, TestContext.Current.CancellationToken);
+
+        // A cancellation frees the day it was on: the cap is untouched, and the hour itself is
+        // back on offer. Counting cancelled rows would close a one-a-day link for good.
+        results.Starts.ShouldContain(cancelledHour);
+    }
+
+    [Fact]
+    public async Task GetSlotsAsync_RangeExactlyAtTheCap_IsAnswered()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context);
+
+        // Inclusive, so the widest legal range ends MaxRangeDays - 1 days after it starts. The
+        // reject side alone would let the effective cap slip to 30 without a test noticing.
+        var results = await Query(context).GetSlotsAsync(
+            ConsultingSlug,
+            null,
+            Monday,
+            Monday.PlusDays(SlotQuery.MaxRangeDays - 1),
+            WellBefore,
+            TestContext.Current.CancellationToken);
+
+        results.Starts.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetSlotsAsync_DurationsSortedAgainstTheirLength_ComeBackInTheOperatorsOrder()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context, durations: [Hour, HalfHour]);
+
+        var results = await Query(context)
+            .GetSlotsAsync(ConsultingSlug, Hour, Monday, Monday, WellBefore, TestContext.Current.CancellationToken);
+
+        // The booking page lists tabs in this order and a single-duration link takes the first of
+        // it, so SortOrder is the answer to "which duration", not decoration.
+        results.OfferedDurations.ShouldBe([Hour, HalfHour]);
     }
 
     private static SlotQuery Query(KairosDbContext context) =>
         new(context, new AvailabilityQuery(context), new SlotGenerator(), [new LocalBusySource(context)]);
 
-    private static void AddBooking(KairosDbContext context, Guid linkId, Instant start)
+    private static void AddBooking(
+        KairosDbContext context, Guid linkId, Instant start, BookingStatus status = BookingStatus.Confirmed)
     {
         context.Bookings.Add(new Booking
         {
@@ -193,7 +247,7 @@ public class SlotQueryTests
             LinkId = linkId,
             StartUtc = start.ToUnixTimeSeconds(),
             EndUtc = (start + Duration.FromMinutes(HalfHour)).ToUnixTimeSeconds(),
-            Status = BookingStatus.Confirmed,
+            Status = status,
             ManageTokenHash = BookingWriter.Hash(Guid.CreateVersion7().ToString()),
             CreatedAt = start.ToUnixTimeSeconds(),
         });
@@ -248,13 +302,16 @@ public class SlotQueryTests
                 MarginMinutes = 0,
             });
 
-        foreach (var minutes in durations ?? [HalfHour])
+        // SortOrder follows the seeded array's order, not the length, so a test can seed a link
+        // whose operator-chosen order disagrees with ascending minutes.
+        var offered = durations ?? [HalfHour];
+        for (var position = 0; position < offered.Length; position++)
         {
             context.LinkDurations.Add(new LinkDuration
             {
                 LinkId = ConsultingId,
-                Minutes = minutes,
-                SortOrder = minutes,
+                Minutes = offered[position],
+                SortOrder = position,
             });
         }
 
