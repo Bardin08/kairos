@@ -12,8 +12,14 @@ public sealed class DomainException(DomainErrorKind kind, string code, string me
 
     public string Code { get; } = code;
 
+    /// <summary>
+    /// The one code with no constant of its own until now, because it is minted here rather than
+    /// by a caller. Named so nothing has to retype it — the clients key on these strings.
+    /// </summary>
+    public const string NotFoundCode = "not_found";
+
     public static DomainException NotFound(string what) =>
-        new(DomainErrorKind.NotFound, "not_found", $"{what} does not exist.");
+        new(DomainErrorKind.NotFound, NotFoundCode, $"{what} does not exist.");
 
     public static DomainException Invalid(string code, string message) =>
         new(DomainErrorKind.Invalid, code, message);
