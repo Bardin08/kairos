@@ -1,4 +1,7 @@
+using System.Text.Json;
+
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 
@@ -24,6 +27,8 @@ public class BookingWriterTests
     private const int SlotMinutes = 30;
     private const int MeetingMinutes = 60;
     private const int CallersMargin = 999;
+    private const string ConsultingSlug = "consulting";
+    private const string MentorshipSlug = "mentorship";
 
     private static readonly Guid ConsultingId = Guid.CreateVersion7();
     private static readonly Guid MentorshipId = Guid.CreateVersion7();
@@ -41,18 +46,18 @@ public class BookingWriterTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, SmallerMarginMinutes);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
-        writer.TryCreate(ConsultingId, MeetingStart, Meeting, Booker, string.Empty, SmallerMarginMinutes)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, Meeting, Booker, string.Empty, SmallerMarginMinutes)
             .Success.ShouldBeTrue();
 
         // The meeting asks for twenty minutes; the caller asks for thirty, so thirty wins.
         var insideTheLargerMargin = MeetingStart + Meeting + Duration.FromMinutes(SmallerMarginMinutes);
         var atTheLargerMargin = MeetingStart + Meeting + Duration.FromMinutes(LargerMarginMinutes);
 
-        writer.TryCreate(MentorshipId, insideTheLargerMargin, SlotDuration, Booker, string.Empty, LargerMarginMinutes)
+        writer.TryCreate(MentorshipId, MentorshipSlug, insideTheLargerMargin, SlotDuration, Booker, string.Empty, LargerMarginMinutes)
             .Reason.ShouldBe(BookingWriter.SlotTakenReason);
-        writer.TryCreate(MentorshipId, atTheLargerMargin, SlotDuration, Booker, string.Empty, LargerMarginMinutes)
+        writer.TryCreate(MentorshipId, MentorshipSlug, atTheLargerMargin, SlotDuration, Booker, string.Empty, LargerMarginMinutes)
             .Success.ShouldBeTrue();
     }
 
@@ -65,16 +70,17 @@ public class BookingWriterTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, LargerMarginMinutes);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
-        writer.TryCreate(ConsultingId, MeetingStart, Meeting, Booker, string.Empty, LargerMarginMinutes)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, Meeting, Booker, string.Empty, LargerMarginMinutes)
             .Success.ShouldBeTrue();
 
         var blockedFrom = MeetingStart - Duration.FromMinutes(LargerMarginMinutes);
-        writer.TryCreate(MentorshipId, blockedFrom - SlotDuration, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(MentorshipId, MentorshipSlug, blockedFrom - SlotDuration, SlotDuration, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
         writer.TryCreate(
                 MentorshipId,
+                MentorshipSlug,
                 blockedFrom - SlotDuration + Duration.FromMinutes(1),
                 SlotDuration,
                 Booker,
@@ -91,11 +97,11 @@ public class BookingWriterTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, NoMargin);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
-        writer.TryCreate(ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
-        writer.TryCreate(MentorshipId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(MentorshipId, MentorshipSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
             .Reason.ShouldBe(BookingWriter.SlotTakenReason);
 
         var booked = context.Bookings.Single();
@@ -103,7 +109,7 @@ public class BookingWriterTests
         booked.CancelledAt = SystemClock.Instance.GetCurrentInstant().ToUnixTimeSeconds();
         context.SaveChanges();
 
-        writer.TryCreate(MentorshipId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(MentorshipId, MentorshipSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
     }
 
@@ -117,13 +123,13 @@ public class BookingWriterTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, NoMargin);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
-        writer.TryCreate(ConsultingId, MeetingStart, Duration.Zero, Booker, string.Empty, NoMargin)
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, Duration.Zero, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
 
         var result = writer.TryCreate(
-            MentorshipId, MeetingStart, Duration.Zero, Booker, string.Empty, NoMargin);
+            MentorshipId, MentorshipSlug, MeetingStart, Duration.Zero, Booker, string.Empty, NoMargin);
 
         result.Success.ShouldBeFalse();
         result.Reason.ShouldBe(BookingWriter.SlotTakenReason);
@@ -145,8 +151,8 @@ public class BookingWriterTests
         inheriting.MarginMinutes = null;
         context.SaveChanges();
 
-        var writer = new BookingWriter(context, SystemClock.Instance);
-        writer.TryCreate(MentorshipId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+        var writer = Writer(context);
+        writer.TryCreate(MentorshipId, MentorshipSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
             .Success.ShouldBeTrue();
 
         context.Database.ExecuteSqlRaw("DELETE FROM Settings;");
@@ -154,7 +160,7 @@ public class BookingWriterTests
         // Overlapping rather than identical: an identical start would be stopped by the unique
         // index whatever the query returned, and the backstop would hide the hole being tested.
         var overlapping = MeetingStart + Duration.FromMinutes(SlotMinutes / 2);
-        writer.TryCreate(ConsultingId, overlapping, SlotDuration, Booker, string.Empty, NoMargin)
+        writer.TryCreate(ConsultingId, ConsultingSlug, overlapping, SlotDuration, Booker, string.Empty, NoMargin)
             .Reason.ShouldBe(BookingWriter.SlotTakenReason);
     }
 
@@ -172,9 +178,9 @@ public class BookingWriterTests
         SqlitePragmas.Apply(connection);
         Execute(connection, $"BEGIN IMMEDIATE; UPDATE Settings SET MarginMinutes = {CallersMargin};");
 
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
         Should.Throw<SqliteException>(() =>
-            writer.TryCreate(ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin));
+            writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin));
 
         using var read = connection.CreateCommand();
         read.CommandText = $"SELECT MarginMinutes FROM Settings WHERE Id = {Settings.SingletonId};";
@@ -193,10 +199,10 @@ public class BookingWriterTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         Seed(context, NoMargin);
-        var writer = new BookingWriter(context, SystemClock.Instance);
+        var writer = Writer(context);
 
         Should.Throw<DbUpdateException>(() =>
-            writer.TryCreate(Guid.CreateVersion7(), MeetingStart, SlotDuration, Booker, string.Empty, NoMargin));
+            writer.TryCreate(Guid.CreateVersion7(), ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin));
 
         context.ChangeTracker.Entries().Count(entry => entry.State == EntityState.Added).ShouldBe(0);
         context.SaveChanges();
@@ -212,8 +218,8 @@ public class BookingWriterTests
         using var context = database.CreateContext();
         Seed(context, NoMargin);
 
-        var result = new BookingWriter(context, SystemClock.Instance)
-            .TryCreate(ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+        var result = Writer(context)
+            .TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
 
         context.Bookings.AsNoTracking().Single()
             .ManageTokenHash.ShouldBe(BookingWriter.Hash(result.ManageToken!.ToUpperInvariant()));
@@ -227,12 +233,63 @@ public class BookingWriterTests
         using var context = database.CreateContext();
         Seed(context, NoMargin);
 
-        var result = new BookingWriter(context, SystemClock.Instance)
-            .TryCreate(ConsultingId, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+        var result = Writer(context)
+            .TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
 
         var printed = result.ToString();
         printed.ShouldNotContain(result.ManageToken!);
         printed.ShouldContain(result.Id.ToString());
+    }
+
+    /// <summary>
+    /// The outbox's whole claim, checked where it is actually made: the announcement is inside
+    /// the booking's own transaction, so a committed booking is never a booking nobody was told
+    /// about. Counted after a commit the writer performed itself — nothing here saves.
+    /// </summary>
+    [Fact]
+    public void TryCreate_TheBookingCommits_TheAnnouncementCommittedWithIt()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+
+        var result = Writer(context)
+            .TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+
+        var message = context.OutboxMessages.AsNoTracking().Single();
+        message.Type.ShouldBe(OutboxMessageType.BookingCreated);
+        message.BookingId.ShouldBe(result.Id);
+        message.DispatchedAt.ShouldBeNull();
+
+        var payload = JsonSerializer.Deserialize<BookingEventPayload>(message.Payload).ShouldNotBeNull();
+        payload.Event.ShouldBe(BookingEventPayload.BookingCreated);
+        payload.BookingId.ShouldBe(result.Id);
+        payload.Slug.ShouldBe(ConsultingSlug);
+        payload.DurationMinutes.ShouldBe(SlotMinutes);
+    }
+
+    /// <summary>
+    /// The other half, and the one that would rot quietly: a refused booking leaves nothing to
+    /// announce, including nothing sitting in the change tracker waiting for the caller's next
+    /// SaveChanges. Saving afterwards is the assertion — without the detach in Abandon, the
+    /// announcement for a booking that was never written appears right there.
+    /// </summary>
+    [Fact]
+    public void TryCreate_TheSlotIsTaken_LeavesNoAnnouncementBehindEither()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+        var writer = Writer(context);
+
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+            .Success.ShouldBeTrue();
+        writer.TryCreate(MentorshipId, MentorshipSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+            .Reason.ShouldBe(BookingWriter.SlotTakenReason);
+
+        context.SaveChanges();
+
+        context.OutboxMessages.AsNoTracking().Count().ShouldBe(1);
     }
 
     private static void Execute(SqliteConnection connection, string sql)
@@ -242,6 +299,14 @@ public class BookingWriterTests
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// The writer as the composition root builds it. The outbox writer is not a stand-in: the
+    /// booking and its announcement go in on one SaveChanges, so a test that left it out would
+    /// exercise a shorter INSERT batch than the application ever runs.
+    /// </summary>
+    private static BookingWriter Writer(KairosDbContext context) =>
+        new(context, SystemClock.Instance, new OutboxWriter(context, SystemClock.Instance));
+
     private static void Seed(KairosDbContext context, int consultingMarginMinutes)
     {
         var pattern = new Pattern { Id = Guid.CreateVersion7(), Name = "Weekdays" };
@@ -250,7 +315,7 @@ public class BookingWriterTests
             new Link
             {
                 Id = ConsultingId,
-                Slug = "consulting",
+                Slug = ConsultingSlug,
                 Name = "Consulting",
                 PatternId = pattern.Id,
                 MarginMinutes = consultingMarginMinutes,
@@ -258,7 +323,7 @@ public class BookingWriterTests
             new Link
             {
                 Id = MentorshipId,
-                Slug = "mentorship",
+                Slug = MentorshipSlug,
                 Name = "Mentorship",
                 PatternId = pattern.Id,
                 MarginMinutes = NoMargin,

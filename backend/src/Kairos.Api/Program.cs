@@ -5,6 +5,7 @@ using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Google;
+using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Security;
@@ -66,10 +67,29 @@ builder.Services.AddScoped<IntegrationCredentialStore>();
 // Registered unconditionally: unconfigured and never-connected are answered inside the adapter,
 // which returns no busy time rather than throwing, so a Kairos with no Google is a working Kairos.
 builder.Services.AddScoped<IBusySource, LocalBusySource>();
-builder.Services.AddScoped<IBusySource, GoogleCalendarAdapter>();
 builder.Services.AddScoped<AvailabilityQuery>();
 builder.Services.AddScoped<SlotQuery>();
 builder.Services.AddScoped<BookingWriter>();
+
+// One adapter resolved through three interfaces, and one instance per request rather than three:
+// registering the class separately and handing the same instance to each role is what keeps a
+// single Google client per scope. Busy sources are a collection because every source has a say;
+// the writer and the conference creator are single because a meeting goes into one calendar. A
+// second provider is therefore a second IBusySource line beside this one and a replacement of the
+// other two — the shape of the decision, not an oversight.
+builder.Services.AddScoped<GoogleCalendarAdapter>();
+builder.Services.AddScoped<IBusySource>(
+    services => services.GetRequiredService<GoogleCalendarAdapter>());
+builder.Services.AddScoped<ICalendarWriter>(
+    services => services.GetRequiredService<GoogleCalendarAdapter>());
+builder.Services.AddScoped<IConferenceCreator>(
+    services => services.GetRequiredService<GoogleCalendarAdapter>());
+
+builder.Services.AddScoped<CalendarSyncService>();
+
+// Scoped, and registered here by its first consumer: it adds to the request's DbContext and
+// never saves, so it has to be the same context the caller is about to commit.
+builder.Services.AddScoped<OutboxWriter>();
 
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();

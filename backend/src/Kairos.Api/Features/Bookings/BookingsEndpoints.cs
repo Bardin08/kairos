@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 
 using Kairos.Api.Availability;
+using Kairos.Api.Integrations;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -115,6 +116,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         SlotQuery slots,
         BookingWriter writer,
+        CalendarSyncService calendars,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -143,6 +145,7 @@ public static class BookingsEndpoints
         // Links read and another `?? settings.MarginMinutes` — would be a copy free to drift.
         var result = writer.TryCreate(
             offered.LinkId,
+            request.Slug,
             start,
             Duration.FromMinutes(request.DurationMinutes),
             new BookerDetails(request.Name, request.Email, bookerZone),
@@ -156,6 +159,14 @@ public static class BookingsEndpoints
         }
 
         var booking = await LoadAsync(context, result.Id, cancellationToken);
+
+        // After the booking is committed and before the 201, in the request rather than behind a
+        // queue. Inline costs the booker whatever the provider's round trip costs; a background
+        // job would answer 201 for a meeting whose calendar state nothing has established yet,
+        // and this endpoint is also the only place holding the loaded booking. It cannot fail the
+        // request — SyncAsync has no throwing path — so the worst inline buys is a slower 201.
+        await calendars.SyncAsync(booking, cancellationToken);
+
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}", ToResponse(booking, result.ManageToken));
     }

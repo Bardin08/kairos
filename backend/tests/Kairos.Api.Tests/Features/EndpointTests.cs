@@ -323,6 +323,27 @@ public class EndpointTests
         app.Read(context => context.Bookings.Count()).ShouldBe(0);
     }
 
+    /// <summary>
+    /// The state every fresh Kairos is in, and the one a booking page must survive: no Google
+    /// client configured, nothing connected, nobody having pressed Connect. The booking is written
+    /// and nothing is recorded about a calendar — not a failure row, because nothing was tried.
+    /// The announcement is there regardless, because a subscriber's interest in a booking has
+    /// nothing to do with whether the organizer wired up a calendar.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_NoCalendarProviderConnected_StillSucceedsAndRecordsNoSyncFailure()
+    {
+        using var app = NewApp();
+
+        var response = await CreateAsync(app, Day() + FirstSlotTime);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        app.Read(context => context.Bookings.Count()).ShouldBe(1);
+        app.Read(context => context.CalendarEntries.Count()).ShouldBe(0);
+        app.Read(context => context.ConferenceLinks.Count()).ShouldBe(0);
+        app.Read(context => context.OutboxMessages.Count()).ShouldBe(1);
+    }
+
     private static KairosApp NewApp()
     {
         var app = new KairosApp();

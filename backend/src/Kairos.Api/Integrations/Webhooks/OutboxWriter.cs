@@ -20,12 +20,24 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// </remarks>
 public sealed class OutboxWriter(KairosDbContext context, IClock clock)
 {
-    public void Enqueue(Guid bookingId, OutboxMessageType type, string payload) =>
-        context.OutboxMessages.Add(new OutboxMessage
+    /// <summary>
+    /// Adds the message and returns it, untracked-by-nobody and unsaved. The return value exists
+    /// for the one caller that has to be able to take it back: <c>BookingWriter</c> enqueues
+    /// inside its own transaction, and a failure there has to detach exactly what it added — a
+    /// message left in the change tracker would ride along on the caller's next SaveChanges and
+    /// announce a booking that was never written.
+    /// </summary>
+    public OutboxMessage Enqueue(Guid bookingId, OutboxMessageType type, string payload)
+    {
+        var message = new OutboxMessage
         {
             BookingId = bookingId,
             Type = type,
             Payload = payload,
             CreatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds(),
-        });
+        };
+
+        context.OutboxMessages.Add(message);
+        return message;
+    }
 }
