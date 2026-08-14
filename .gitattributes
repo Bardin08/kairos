@@ -1,0 +1,7 @@
+# The repository stores LF; .editorconfig and `dotnet format` both assume it.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
