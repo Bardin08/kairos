@@ -16,12 +16,20 @@ readonly BRANCH
 readonly CHECK_POLL_SECONDS=10
 readonly CHECK_TIMEOUT_SECONDS=900
 
+# GitHub computes mergeability asynchronously, so `mergeable` reads UNKNOWN for a
+# short window after every push. Unknown means "ask again shortly", never "fine":
+# reading it as fine is how a conflict stays invisible until the deadline.
+readonly MERGEABILITY_TIMEOUT_SECONDS=120
+
 # Total wall clock the ship may spend getting the pull request in, across however
 # many rebases the base needs. Bounded by time rather than by attempt count: with
 # several tasks merging in parallel a rebase is routine, and each attempt costs a
 # full CI run, so "two attempts" means nothing while "forty minutes" means what
 # it says.
 readonly MERGE_DEADLINE_SECONDS=2400
+
+MERGEABILITY=unknown
+CI_STATUS=green
 
 die() { printf 'ship: %s\n' "$1" >&2; exit 1; }
 
@@ -53,18 +61,61 @@ failing_checks() {
     --jq '[.[] | select(.bucket != "pass" and .bucket != "skipping") | "\(.name)=\(.bucket)"] | join(", ")'
 }
 
+# Sets MERGEABILITY to "ok" or "conflicted", polling through the window where
+# GitHub has not computed it yet. Dies if it never settles.
+await_mergeability() {
+  local deadline answer mergeable state
+  deadline=$(( $(date +%s) + MERGEABILITY_TIMEOUT_SECONDS ))
+
+  while :; do
+    answer="$(gh pr view "$PR" --json mergeable,mergeStateStatus \
+      --jq '[(.mergeable // "UNKNOWN"), (.mergeStateStatus // "UNKNOWN")] | join(" ")' 2>/dev/null || true)"
+    mergeable="${answer%% *}"
+    state="${answer##* }"
+
+    if [ "$mergeable" = "CONFLICTING" ] || [ "$state" = "DIRTY" ]; then
+      MERGEABILITY=conflicted
+      return
+    fi
+    if [ "$mergeable" = "MERGEABLE" ]; then
+      MERGEABILITY=ok
+      return
+    fi
+
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      die "GitHub did not compute mergeability for #$PR within ${MERGEABILITY_TIMEOUT_SECONDS}s (mergeable=${mergeable:-empty}, mergeStateStatus=${state:-empty})"
+    fi
+    sleep "$CHECK_POLL_SECONDS"
+  done
+}
+
 # Waits for every check to reach a terminal bucket, then fails unless all of them
 # are green. Bounded, so a job that never picks up a runner cannot hang the ship
-# for the six hours GitHub allows a workflow to run.
+# for the six hours GitHub allows a workflow to run. Sets CI_STATUS to "green" or
+# "conflicted"; dies on red or on the timeout.
 wait_for_green_ci() {
   local deadline buckets
   deadline=$(( $(date +%s) + CHECK_TIMEOUT_SECONDS ))
+  CI_STATUS=green
 
   while :; do
     buckets="$(gh pr checks "$PR" --json bucket --jq '.[].bucket' 2>/dev/null || true)"
     if [ -n "$buckets" ] && ! printf '%s\n' "$buckets" | grep -q '^pending$'; then
       break
     fi
+
+    # No checks at all is ambiguous, and the two causes want opposite responses.
+    # A conflicted pull request has no buildable merge ref, so GitHub creates no
+    # workflow run — not a failed one, none — and waiting the full budget here
+    # would blame the deadline for a conflict a rebase fixes in seconds.
+    if [ -z "$buckets" ]; then
+      await_mergeability
+      if [ "$MERGEABILITY" = conflicted ]; then
+        CI_STATUS=conflicted
+        return
+      fi
+    fi
+
     if [ "$(date +%s)" -ge "$deadline" ]; then
       die "checks on #$PR did not finish within ${CHECK_TIMEOUT_SECONDS}s; not merging"
     fi
@@ -96,8 +147,10 @@ merge_blocker() {
 rebase_onto_main() {
   git fetch origin main
   if ! git rebase origin/main; then
+    local conflicting
+    conflicting="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
     git rebase --abort || true
-    die "#$PR does not rebase cleanly onto origin/main; resolve the conflict by hand"
+    die "#$PR does not rebase cleanly onto origin/main; conflicting files: ${conflicting:-unknown}; resolve by hand"
   fi
   git push --force-with-lease
 
@@ -115,12 +168,37 @@ rebase_onto_main() {
   done
 }
 
+# An add/add conflict against a base that moved is exactly what a rebase fixes,
+# so a conflict goes round the same retry loop rather than exiting. It exits only
+# when the rebase itself needs a human, which rebase_onto_main reports by name.
+handle_conflict() {
+  if [ "$(date +%s)" -ge "$ship_deadline" ]; then
+    die "#$PR is conflicted against main; base moved $rebases time(s), still not merged after ${MERGE_DEADLINE_SECONDS}s"
+  fi
+  rebases=$((rebases + 1))
+  printf 'ship: no workflow run will be created — #%s is conflicted against main; rebase %d\n' "$PR" "$rebases"
+  rebase_onto_main
+}
+
 ship_deadline=$(( $(date +%s) + MERGE_DEADLINE_SECONDS ))
 rebases=0
 merge_error=""
 
 while :; do
+  # Mergeability is settled before the wait, not after it: a conflicted pull
+  # request has no workflow run to wait for, so entering the check poll first
+  # means waiting out the whole budget for something visible immediately.
+  await_mergeability
+  if [ "$MERGEABILITY" = conflicted ]; then
+    handle_conflict
+    continue
+  fi
+
   wait_for_green_ci
+  if [ "$CI_STATUS" = conflicted ]; then
+    handle_conflict
+    continue
+  fi
 
   # gh also deletes the local branch and switches the checkout, and it exits
   # non-zero if that local step fails even though the remote merge succeeded. The
@@ -133,8 +211,12 @@ while :; do
     red-ci)
       die "CI went red on #$PR ($(failing_checks)) before the merge; not retrying"
       ;;
-    DIRTY|DRAFT)
+    DRAFT)
       die "#$PR cannot be merged (mergeStateStatus=$blocker): $merge_error"
+      ;;
+    DIRTY)
+      handle_conflict
+      continue
       ;;
   esac
 
