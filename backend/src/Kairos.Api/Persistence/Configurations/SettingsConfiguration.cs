@@ -17,6 +17,18 @@ public sealed class SettingsConfiguration : IEntityTypeConfiguration<Settings>
         builder.Property(settings => settings.Id)
             .ValueGeneratedNever();
 
+        // A negative limit is not a smaller limit — it inverts the padded interval, so a busy
+        // block stops overlapping anything and the booking page hands out a taken slot with no
+        // exception and no log line. The kernel does no floor check, so the floor lives here,
+        // one constraint per column so a violation names the column that broke it.
+        builder.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_Settings_MarginMinutes_NonNegative", "MarginMinutes >= 0");
+            table.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
+            table.HasCheckConstraint("CK_Settings_DailyCap_NonNegative", "DailyCap >= 0");
+            table.HasCheckConstraint("CK_Settings_StartIncrementMinutes_NonNegative", "StartIncrementMinutes >= 0");
+        });
+
         // The only HasData in the model. The numbers live in SchedulingDefaults so the seed and
         // the kernel cannot drift apart.
         builder.HasData(new Settings

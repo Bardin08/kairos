@@ -38,6 +38,10 @@ public partial class Init : Migration
             constraints: table =>
             {
                 table.PrimaryKey("PK_Settings", x => x.Id);
+                table.CheckConstraint("CK_Settings_DailyCap_NonNegative", "DailyCap >= 0");
+                table.CheckConstraint("CK_Settings_MarginMinutes_NonNegative", "MarginMinutes >= 0");
+                table.CheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
+                table.CheckConstraint("CK_Settings_StartIncrementMinutes_NonNegative", "StartIncrementMinutes >= 0");
             });
 
         migrationBuilder.CreateTable(
@@ -58,6 +62,10 @@ public partial class Init : Migration
             constraints: table =>
             {
                 table.PrimaryKey("PK_Links", x => x.Id);
+                table.CheckConstraint("CK_Links_DailyCap_NonNegative", "DailyCap IS NULL OR DailyCap >= 0");
+                table.CheckConstraint("CK_Links_MarginMinutes_NonNegative", "MarginMinutes IS NULL OR MarginMinutes >= 0");
+                table.CheckConstraint("CK_Links_MinNoticeMinutes_NonNegative", "MinNoticeMinutes IS NULL OR MinNoticeMinutes >= 0");
+                table.CheckConstraint("CK_Links_StartIncrementMinutes_NonNegative", "StartIncrementMinutes IS NULL OR StartIncrementMinutes >= 0");
                 table.ForeignKey(
                     name: "FK_Links_Patterns_PatternId",
                     column: x => x.PatternId,

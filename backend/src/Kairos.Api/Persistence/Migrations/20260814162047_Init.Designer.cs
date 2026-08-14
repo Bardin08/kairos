@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Kairos.Api.Persistence.Migrations
 {
     [DbContext(typeof(KairosDbContext))]
-    [Migration("20260814160704_Init")]
+    [Migration("20260814162047_Init")]
     partial class Init
     {
         /// <inheritdoc />
@@ -156,7 +156,16 @@ namespace Kairos.Api.Persistence.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("Links");
+                    b.ToTable("Links", t =>
+                        {
+                            t.HasCheckConstraint("CK_Links_DailyCap_NonNegative", "DailyCap IS NULL OR DailyCap >= 0");
+
+                            t.HasCheckConstraint("CK_Links_MarginMinutes_NonNegative", "MarginMinutes IS NULL OR MarginMinutes >= 0");
+
+                            t.HasCheckConstraint("CK_Links_MinNoticeMinutes_NonNegative", "MinNoticeMinutes IS NULL OR MinNoticeMinutes >= 0");
+
+                            t.HasCheckConstraint("CK_Links_StartIncrementMinutes_NonNegative", "StartIncrementMinutes IS NULL OR StartIncrementMinutes >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.LinkDuration", b =>
@@ -267,7 +276,16 @@ namespace Kairos.Api.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Settings");
+                    b.ToTable("Settings", t =>
+                        {
+                            t.HasCheckConstraint("CK_Settings_DailyCap_NonNegative", "DailyCap >= 0");
+
+                            t.HasCheckConstraint("CK_Settings_MarginMinutes_NonNegative", "MarginMinutes >= 0");
+
+                            t.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
+
+                            t.HasCheckConstraint("CK_Settings_StartIncrementMinutes_NonNegative", "StartIncrementMinutes >= 0");
+                        });
 
                     b.HasData(
                         new
