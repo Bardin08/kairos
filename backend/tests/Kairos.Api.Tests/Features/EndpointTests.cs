@@ -9,6 +9,7 @@ using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 using NodaTime;
@@ -293,6 +294,33 @@ public class EndpointTests
         slots.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await CodeOfAsync(detail)).ShouldBe(DomainException.NotFoundCode);
         (await CodeOfAsync(slots)).ShouldBe(DomainException.NotFoundCode);
+    }
+
+    /// <summary>
+    /// The wiring the unit tests cannot see: that the contention handler is registered at all,
+    /// and that a write which loses the lock for the whole busy timeout reaches it instead of
+    /// answering 500. Costs the busy timeout in wall clock, once, because there is no way to
+    /// hold a real SQLite write lock for less time than a real writer waits for it.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_AnotherWriterHoldsTheLock_IsServiceUnavailableRatherThanAFault()
+    {
+        using var app = NewApp();
+        using var blocker = new SqliteConnection(app.ConnectionString);
+
+        blocker.Open();
+        using (var begin = blocker.CreateCommand())
+        {
+            begin.CommandText = "BEGIN IMMEDIATE;";
+            begin.ExecuteNonQuery();
+        }
+
+        var response = await CreateAsync(app, Day() + FirstSlotTime);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+        response.Headers.RetryAfter.ShouldNotBeNull();
+        (await CodeOfAsync(response)).ShouldBe(DatabaseBusyExceptionHandler.DatabaseBusyCode);
+        app.Read(context => context.Bookings.Count()).ShouldBe(0);
     }
 
     private static KairosApp NewApp()
