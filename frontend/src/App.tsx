@@ -1,5 +1,6 @@
 import { Route, Switch } from 'wouter'
 import Book from './pages/Book'
+import Integrations from './pages/Integrations'
 import Manage from './pages/Manage'
 
 export default function App() {
@@ -16,6 +17,11 @@ export default function App() {
           booking page shows after a booking; the two have to agree or nothing
           is manageable. */}
       <Route path="/manage/:token" component={Manage} />
+      {/* Fixed, and not a preference: IntegrationEndpoints.ReturnPath is this
+          string, and every OAuth callback redirects to it carrying
+          ?connected= or ?error=. Rename this route and the provider bounces a
+          browser onto the not-found page halfway through a connection. */}
+      <Route path="/integrations" component={Integrations} />
       <Route>This link does not lead anywhere.</Route>
     </Switch>
   )

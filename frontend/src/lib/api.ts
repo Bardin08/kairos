@@ -1,7 +1,7 @@
-// The whole HTTP surface, in one place, for both pages. The booking page uses
-// the first three; the manage page uses the last three. Neither reimplements a
-// fetch, because the two failure shapes below are the part that is easy to get
-// wrong twice.
+// The whole HTTP surface, in one place, for every page. The booking page uses
+// the first three; the manage page uses the three after those; the integrations
+// page uses the last two. None reimplements a fetch, because the two failure
+// shapes below are the part that is easy to get wrong twice.
 
 const BASE = '/api/v1'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -251,4 +251,65 @@ export function rescheduleBooking(
     { start },
     signal,
   )
+}
+
+/**
+ * The deployment has no client credentials for that provider, so the consent
+ * screen it would send the operator to does not exist. Answered by `connect`,
+ * and predicted by `configured: false` on the row — the page reads the flag and
+ * does not offer the button, so this code arrives only when the configuration
+ * changed under a page that was already open.
+ */
+export const PROVIDER_NOT_CONFIGURED = 'provider_not_configured'
+
+/**
+ * One provider and where its connection stands.
+ *
+ * `provider` is the lowercase enum name — the same string the connect path
+ * takes — and nothing here is specific to any one vendor. The integrations page
+ * renders whatever this array holds, so a provider the backend learns to
+ * connect appears in the UI without a line of frontend changing.
+ *
+ * The four states the page distinguishes are all in these flags, and they are
+ * not the same question asked twice. `configured` is about the deployment: no
+ * client credentials, nothing to connect to. `connected` is about the operator:
+ * a credential is stored. `reconnectRequired` is about that credential still
+ * working — a grant revoked in the provider's own account settings leaves the
+ * row connected and useless, and only a fresh consent fixes it.
+ */
+export type Integration = {
+  provider: string
+  configured: boolean
+  connected: boolean
+  /** The connected account, as the provider names it. An email address today. */
+  accountLabel: string | null
+  /** Extended-ISO instant, `2026-08-14T22:29:14Z`, or null when not connected. */
+  connectedAt: string | null
+  reconnectRequired: boolean
+}
+
+/** Every provider this build can connect, with its state. Never a fixed list. */
+export function listIntegrations(signal?: AbortSignal): Promise<Integration[]> {
+  return request<Integration[]>('/integrations', { signal })
+}
+
+/**
+ * Where to send the browser to ask the provider for consent.
+ *
+ * The URL is returned rather than followed, and the caller must NAVIGATE to it
+ * — `location.assign`, not `fetch`. It is another origin's consent screen: a
+ * fetch would be refused by CORS, and even if it were not, the thing on the far
+ * end is a page for a human to press a button on, not an API.
+ */
+export async function connectIntegration(
+  provider: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const { consentUrl } = await post<{ consentUrl: string }>(
+    `/integrations/${encodeURIComponent(provider)}/connect`,
+    undefined,
+    signal,
+  )
+
+  return consentUrl
 }
