@@ -11,7 +11,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded pull request runs, never a push to main: two ships minutes
+  # apart share one group, and main's history must not carry a cancelled run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Job ids are the required status check contexts on main. Do not rename them,
@@ -19,6 +21,7 @@ jobs:
   # leave branch protection waiting on a check that never reports.
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -27,6 +30,8 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: backend/global.json
+          cache: true
+          cache-dependency-path: backend/Directory.Packages.props
       - run: dotnet restore
       - run: dotnet build --no-restore -warnaserror
       - run: dotnet format --verify-no-changes
@@ -34,10 +39,8 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
-      # 60 KiB gzipped. The budget is the point of the check; keep it here so
-      # there is exactly one number to argue about.
-      BUNDLE_BUDGET_GZIP_BYTES: 61440
       NODE_VERSION: 26.5.0
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -82,9 +85,7 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # The budget and the "was anything actually built" guard live in the script,
+      # so CI and scripts/verify.sh cannot drift apart.
       - if: steps.detect.outputs.present == 'true'
-        working-directory: frontend
-        run: |
-          size=$(gzip -c ../backend/src/Kairos.Api/wwwroot/assets/*.js | wc -c)
-          echo "bundle: ${size} bytes gzipped, budget ${BUNDLE_BUDGET_GZIP_BYTES}"
-          [ "$size" -lt "$BUNDLE_BUDGET_GZIP_BYTES" ]
+        run: bash scripts/bundle-budget.sh
