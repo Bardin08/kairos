@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using Kairos.Api.Availability;
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Email;
+using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -191,18 +192,51 @@ public static class BookingsEndpoints
     /// Idempotent: a manage link opened twice, or a double-clicked button, gets the same answer
     /// rather than a 404 for a booking the caller can plainly see.
     /// </summary>
+    /// <remarks>
+    /// The <c>booking.cancelled</c> announcement is enqueued here, in this endpoint, and
+    /// deliberately not wherever <see cref="Booking.Status"/> becomes
+    /// <see cref="BookingStatus.Cancelled"/>. <see cref="RescheduleAsync"/> is release, re-check,
+    /// re-place: it sets a booking cancelled and back to confirmed on every path out, so a hook
+    /// on the status change would announce a cancellation for every meeting that merely moved.
+    /// This endpoint is the only place where cancelled is where the booking stays.
+    /// </remarks>
     private static async Task<BookingResponse> CancelAsync(
         string token,
         KairosDbContext context,
+        OutboxWriter outbox,
         IClock clock,
         CancellationToken cancellationToken)
     {
         var booking = await FindAsync(context, token, cancellationToken);
-        if (booking.Status == BookingStatus.Confirmed)
+        if (booking.Status != BookingStatus.Confirmed)
         {
-            booking.Status = BookingStatus.Cancelled;
-            booking.CancelledAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+            return ToResponse(booking, null);
+        }
+
+        booking.Status = BookingStatus.Cancelled;
+        booking.CancelledAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+
+        // One SaveChanges, so the cancellation and the announcement of it commit together or
+        // neither does — the same rule BookingWriter follows for creation, for the same reason.
+        outbox.Enqueue(
+            booking.Id,
+            OutboxMessageType.BookingCancelled,
+            BookingEventPayload.Cancelled(
+                booking.Id,
+                booking.Link.Slug,
+                Instant.FromUnixTimeSeconds(booking.StartUtc),
+                Instant.FromUnixTimeSeconds(booking.EndUtc)).ToJson());
+
+        try
+        {
             await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
+        {
+            // Two cancels in flight at once — the double-clicked button this endpoint is
+            // documented to survive. The other one committed first, so the booking is cancelled
+            // and its announcement is queued; this call has nothing left to do but agree. Without
+            // this catch, adding the outbox row would have turned an idempotent 200 into a 500.
         }
 
         return ToResponse(booking, null);
