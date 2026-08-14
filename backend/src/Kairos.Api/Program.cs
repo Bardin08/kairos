@@ -4,6 +4,7 @@ using Kairos.Api.Features.Integrations;
 using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Integrations;
+using Kairos.Api.Integrations.Email;
 using Kairos.Api.Integrations.Google;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
@@ -12,6 +13,7 @@ using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 using NodaTime;
 
@@ -60,6 +62,14 @@ builder.Services.AddSingleton<IIntegrationConnector>(
 
 // Scoped: it reads and writes through the request's DbContext.
 builder.Services.AddScoped<IntegrationCredentialStore>();
+
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+
+// All three are stateless and hold no per-request state: the builder renders text, the sender
+// opens a connection per message, and the mailer only composes. Singletons, like SlotGenerator.
+builder.Services.AddSingleton<IcsBuilder>();
+builder.Services.AddSingleton<EmailSender>();
+builder.Services.AddSingleton<BookingMailer>();
 
 // Scoped, not singleton: they read the request's DbContext. SlotQuery takes
 // IEnumerable<IBusySource>, so the calendar source is one more line here and no change anywhere
@@ -127,6 +137,18 @@ if (string.IsNullOrEmpty(integrationAdminToken))
         + "internet until Part C ships real authentication.",
         adminTokenPath,
         IntegrationEndpoints.AdminTokenHeader);
+}
+
+// Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
+// nothing throws — but it is indistinguishable from a broken one from the outside, because the
+// symptom of both is mail that never arrives. This is the line that tells the two apart.
+if (!app.Services.GetRequiredService<IOptions<EmailOptions>>().Value.IsConfigured)
+{
+    app.Logger.LogWarning(
+        "{Section} is not configured: bookings will be written and nobody will be emailed. Set "
+        + $"{EmailOptions.SectionName}:Host, {EmailOptions.SectionName}:From and "
+        + $"{EmailOptions.SectionName}:PublicBaseUrl to turn confirmations on.",
+        EmailOptions.SectionName);
 }
 
 // React owns client routing, so anything that is not an API route and not a file on disk is the

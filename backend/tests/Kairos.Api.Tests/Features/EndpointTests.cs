@@ -344,6 +344,26 @@ public class EndpointTests
         app.Read(context => context.OutboxMessages.Count()).ShouldBe(1);
     }
 
+    /// <summary>
+    /// The same state, one integration over: no relay configured. The mailer runs on this request
+    /// after the write has committed, so an unconfigured or unreachable relay that threw would
+    /// turn every booking into a 500 for a reason no booker could act on — exactly the regression
+    /// an unconnected calendar would be, and the test above is its twin. The harness sets no Email
+    /// keys, which is the case being pinned; the wiring is what is under test, not the composition.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_NoRelayConfigured_StillWritesTheBookingAndAnswers201()
+    {
+        using var app = NewApp();
+
+        var response = await CreateAsync(app, Day() + FirstSlotTime);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        (await ReadJsonAsync(response)).GetProperty("manageToken").GetString().ShouldNotBeNullOrEmpty();
+        app.Read(context => context.Bookings.Count(booking => booking.Status == BookingStatus.Confirmed))
+            .ShouldBe(1);
+    }
+
     private static KairosApp NewApp()
     {
         var app = new KairosApp();

@@ -8,6 +8,7 @@
     <!-- Versions come from Directory.Packages.props. A version here would be a second answer. -->
     <PackageReference Include="NodaTime" />
     <PackageReference Include="Google.Apis.Calendar.v3" />
+    <PackageReference Include="MailKit" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
       <PrivateAssets>all</PrivateAssets>
