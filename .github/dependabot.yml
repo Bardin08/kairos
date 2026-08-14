@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Three separate streams, so a frontend bump can be merged while a backend one
+  # waits. No auto-merge anywhere: every bump is a pull request a human reads,
+  # and CI has to be green before it lands like any other change.
+  - package-ecosystem: nuget
+    directory: /backend
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    labels: [dependencies, backend]
+    commit-message: { prefix: "chore(backend)" }
+    groups:
+      efcore: { patterns: ["Microsoft.EntityFrameworkCore*"] }
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    labels: [dependencies, frontend]
+    commit-message: { prefix: "chore(frontend)" }
+    versioning-strategy: increase   # rewrites the exact pin; never introduces a range
+    groups:
+      react: { patterns: ["react", "react-dom", "@types/react*"] }
+      vite: { patterns: ["vite", "@vitejs/*", "vitest"] }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    labels: [dependencies, ci]
