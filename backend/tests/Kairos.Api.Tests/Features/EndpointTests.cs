@@ -364,6 +364,82 @@ public class EndpointTests
             .ShouldBe(1);
     }
 
+    /// <summary>
+    /// The cancellation the subscriber is owed, in the same transaction as the state change that
+    /// caused it. Announced from the endpoint rather than from wherever the status is written,
+    /// which the next test is the reason for.
+    /// </summary>
+    [Fact]
+    public async Task CancelBooking_ConfirmedBooking_QueuesTheCancellationBesideTheCreation()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var response = await app.Client.PostAsync(
+            $"{ApiVersions.V1}/bookings/{token}/cancel", null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        QueuedTypes(app).ShouldBe([OutboxMessageType.BookingCreated, OutboxMessageType.BookingCancelled]);
+    }
+
+    /// <summary>
+    /// The trap in wiring <c>booking.cancelled</c> at all. A reschedule is release, re-check,
+    /// re-place: it sets the booking cancelled and back to confirmed on the way through, so an
+    /// announcement hung off the status change would tell every subscriber that a meeting which
+    /// merely moved had been called off — and the unique index would then make the real
+    /// cancellation, later, silently unannounceable.
+    /// </summary>
+    [Fact]
+    public async Task RescheduleBooking_ReleasesTheSlotToRePlaceIt_AnnouncesNoCancellation()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var response = await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + ThirdSlotTime },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        QueuedTypes(app).ShouldBe([OutboxMessageType.BookingCreated]);
+    }
+
+    /// <summary>
+    /// A double-clicked cancel button. The endpoint was idempotent before it enqueued anything
+    /// and has to stay so: a second cancellation is one the unique index refuses, and refusing it
+    /// must not turn a 200 into a 500.
+    /// </summary>
+    [Fact]
+    public async Task CancelBooking_Twice_AnswersTheSameAndQueuesOneCancellation()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+        var url = $"{ApiVersions.V1}/bookings/{token}/cancel";
+
+        await app.Client.PostAsync(url, null, TestContext.Current.CancellationToken);
+        var again = await app.Client.PostAsync(url, null, TestContext.Current.CancellationToken);
+
+        again.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadJsonAsync(again)).GetProperty("status").GetString().ShouldBe("cancelled");
+        QueuedTypes(app).ShouldBe([OutboxMessageType.BookingCreated, OutboxMessageType.BookingCancelled]);
+    }
+
+    /// <summary>Oldest first, which is also the order the dispatcher delivers them in.</summary>
+    private static List<OutboxMessageType> QueuedTypes(KairosApp app) =>
+        app.Read(context => context.OutboxMessages
+            .AsNoTracking()
+            .OrderBy(message => message.CreatedAt)
+            .ThenBy(message => message.Id)
+            .Select(message => message.Type)
+            .ToList());
+
     private static KairosApp NewApp()
     {
         var app = new KairosApp();

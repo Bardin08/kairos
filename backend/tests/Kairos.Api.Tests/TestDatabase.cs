@@ -15,6 +15,13 @@ public sealed class TestDatabase : IDisposable
     private readonly string _path = Path.Combine(Path.GetTempPath(), $"kairos-test-{Guid.CreateVersion7():N}.db");
 
     /// <summary>
+    /// The same database, for a test that has to build its own container around it rather than
+    /// take a context from here — a hosted service resolves its context from a scope factory, so
+    /// it needs somewhere to resolve one from.
+    /// </summary>
+    public string ConnectionString => $"Data Source={_path}";
+
+    /// <summary>
     /// A context on this database, schema applied. Migrate rather than EnsureCreated, so the
     /// tests run against the migration that ships instead of a schema built straight from the
     /// model — drift between the two is exactly the failure worth catching.
@@ -22,7 +29,7 @@ public sealed class TestDatabase : IDisposable
     public KairosDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<KairosDbContext>()
-            .UseSqlite($"Data Source={_path}")
+            .UseSqlite(ConnectionString)
             .Options;
 
         var context = new KairosDbContext(options);

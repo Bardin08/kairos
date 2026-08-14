@@ -101,6 +101,17 @@ builder.Services.AddScoped<CalendarSyncService>();
 // never saves, so it has to be the same context the caller is about to commit.
 builder.Services.AddScoped<OutboxWriter>();
 
+builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(WebhookOptions.SectionName));
+
+// The two halves of the outbox, and two hosted services rather than one. Noticing that a meeting
+// ended and delivering what is queued are different jobs on different clocks: mixed into one
+// service, a receiver that refuses would drag the noticing into its retry loop and every retry
+// storm would become a duplicate storm. Singletons, as every hosted service is, so both reach
+// the database through IServiceScopeFactory — a scope per tick, because DbContext is scoped, is
+// not thread-safe, and these two tick independently of each other and of every request.
+builder.Services.AddHostedService<MeetingEndedPoller>();
+builder.Services.AddHostedService<OutboxDispatcher>();
+
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();
 
