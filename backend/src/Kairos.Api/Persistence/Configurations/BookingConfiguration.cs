@@ -11,6 +11,11 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Booking>
     {
         builder.HasKey(booking => booking.Id);
 
+        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
+        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
+        builder.Property(booking => booking.Id)
+            .HasValueGenerator<Uuid7ValueGenerator>();
+
         // Stored as its underlying int, not as text: the column is then constrained to the
         // values the enum defines, and a typo cannot become a new status by accident.
         builder.Property(booking => booking.Status)

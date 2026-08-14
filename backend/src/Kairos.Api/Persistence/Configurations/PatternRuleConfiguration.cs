@@ -11,6 +11,11 @@ public sealed class PatternRuleConfiguration : IEntityTypeConfiguration<PatternR
     {
         builder.HasKey(rule => rule.Id);
 
+        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
+        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
+        builder.Property(rule => rule.Id)
+            .HasValueGenerator<Uuid7ValueGenerator>();
+
         builder.HasOne(rule => rule.Pattern)
             .WithMany(pattern => pattern.Rules)
             .HasForeignKey(rule => rule.PatternId)
