@@ -21,12 +21,19 @@ public sealed class SettingsConfiguration : IEntityTypeConfiguration<Settings>
         // block stops overlapping anything and the booking page hands out a taken slot with no
         // exception and no log line. The kernel does no floor check, so the floor lives here,
         // one constraint per column so a violation names the column that broke it.
+        //
+        // The start increment's floor is one and not zero, which is the one place these four
+        // differ. Zero is not a smaller step, it is no step at all: the generator advances by
+        // local.PlusMinutes(step), so a zero never moves and the loop stops producing starts.
+        // Part A defends against it inside the loop with Math.Max(step, 1); this is the same
+        // invariant at the only level that can still be written past an endpoint, and it agrees
+        // with the [Range(1, …)] a link's own override has answered to since Task 3.
         builder.ToTable(table =>
         {
             table.HasCheckConstraint("CK_Settings_MarginMinutes_NonNegative", "MarginMinutes >= 0");
             table.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
             table.HasCheckConstraint("CK_Settings_DailyCap_NonNegative", "DailyCap >= 0");
-            table.HasCheckConstraint("CK_Settings_StartIncrementMinutes_NonNegative", "StartIncrementMinutes >= 0");
+            table.HasCheckConstraint("CK_Settings_StartIncrementMinutes_AtLeastOne", "StartIncrementMinutes >= 1");
         });
 
         // The only HasData in the model. The numbers live in SchedulingDefaults so the seed and

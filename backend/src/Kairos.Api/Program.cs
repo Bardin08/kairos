@@ -216,7 +216,8 @@ v1.MapIntegrations();
 app.MapAdmin()
     .MapLinksAdmin()
     .MapMeetingsAdmin()
-    .MapPatternsAdmin();
+    .MapPatternsAdmin()
+    .MapSettingsAdmin();
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the

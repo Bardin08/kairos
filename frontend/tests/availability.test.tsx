@@ -15,12 +15,18 @@ import {
   savePatternOverride,
   type Pattern,
 } from '../src/routes/admin/patterns'
+import { getSettings, type Settings } from '../src/routes/admin/adminSettings'
 
 vi.mock('../src/routes/admin/patterns', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/patterns')>()),
   listPatterns: vi.fn(),
   deletePattern: vi.fn(),
   savePatternOverride: vi.fn(),
+}))
+
+vi.mock('../src/routes/admin/adminSettings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/routes/admin/adminSettings')>()),
+  getSettings: vi.fn(),
 }))
 
 // Same file the running app loads. The task adds no CSS, so the stylesheet is
@@ -46,9 +52,22 @@ async function openEditor() {
   fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
 }
 
+const ORGANIZER_ZONE = 'Europe/Warsaw'
+
+const settings: Settings = {
+  timeZone: ORGANIZER_ZONE,
+  signedInAs: null,
+  marginMinutes: 15,
+  minNoticeMinutes: 120,
+  dailyCap: 4,
+  startIncrementMinutes: 30,
+  overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
+}
+
 beforeEach(() => {
   vi.mocked(listPatterns).mockResolvedValue([weekdays])
   vi.mocked(savePatternOverride).mockResolvedValue(weekdays)
+  vi.mocked(getSettings).mockResolvedValue(settings)
 })
 
 afterEach(cleanup)
@@ -90,6 +109,20 @@ test('the same date form can replace the hours instead', async () => {
       endMinute: FIVE_PM,
     }),
   )
+})
+
+/**
+ * The hours on a card carry the zone they are read in.
+ *
+ * A card is the unit somebody screenshots, quotes and argues with, and
+ * 09:00–17:00 with no zone on it is a time that means four different things.
+ * Task 4 could not put it here — the only endpoint exposing the zone needed a
+ * link to exist — and shipped a sentence at the top of the page instead.
+ */
+test('a pattern card names the organizer zone beside its hours', async () => {
+  render(<Availability />)
+
+  expect(await screen.findByText(/09:00–17:00 · Europe\/Warsaw/)).toBeDefined()
 })
 
 /**

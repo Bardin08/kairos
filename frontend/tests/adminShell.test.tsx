@@ -1,16 +1,35 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, expect, test } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
 import App from '../src/App'
 import AdminShell from '../src/routes/admin/AdminShell'
+import { getSettings, type Settings } from '../src/routes/admin/adminSettings'
+
+vi.mock('../src/routes/admin/adminSettings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/routes/admin/adminSettings')>()),
+  getSettings: vi.fn(),
+  listTimeZones: vi.fn(),
+}))
+
+const OPERATOR = 'Vlad Bardin'
+
+const settings: Settings = {
+  timeZone: 'UTC',
+  signedInAs: OPERATOR,
+  marginMinutes: 15,
+  minNoticeMinutes: 120,
+  dailyCap: 4,
+  startIncrementMinutes: 30,
+  overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
+}
 
 // Same file the running app loads, read the same way stylesheet.test.ts reads
-// it. Nothing in this task may add CSS, so the stylesheet is the authority on
-// which class names exist.
+// it. It is the authority on which class names exist — Part C adds exactly one
+// rule to it, for the tab bar's secondary destination, and no new class.
 const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kairos.css')
 
 const ADMIN_BASE = '/admin'
@@ -33,7 +52,39 @@ function tabBar(container: HTMLElement) {
   return bar
 }
 
+beforeEach(() => {
+  vi.mocked(getSettings).mockResolvedValue(settings)
+})
+
 afterEach(cleanup)
+
+/**
+ * The comp's identity block, restored now that OIDC supplies the claim it needs.
+ *
+ * The name is whatever the identity provider called this operator and null when
+ * it called them nothing — and null draws no block at all. A subject identifier
+ * or an email address presented as a person's name would be worse than the gap
+ * Task 2 left here on purpose.
+ */
+test('the rail foot names the signed-in operator when the claims carry a name', async () => {
+  renderShell('/admin/links')
+
+  expect(await screen.findByText(OPERATOR)).toBeDefined()
+  // Two letters beside it, aria-hidden, so nothing is read out twice.
+  expect(screen.getByText('VB').getAttribute('aria-hidden')).toBe('true')
+})
+
+test('a provider that sends no name leaves the rail foot with no identity block', async () => {
+  vi.mocked(getSettings).mockResolvedValue({ ...settings, signedInAs: null })
+  const container = renderShell('/admin/links')
+
+  // Awaited on the read itself, so the assertion is made after it settled
+  // rather than before it started — there is no rendered change to wait for
+  // when the answer is "draw nothing".
+  await waitFor(() => expect(vi.mocked(getSettings)).toHaveBeenCalled())
+
+  expect(container.querySelector('.avatar')).toBeNull()
+})
 
 test('the rail and the tab bar carry the same three destinations', () => {
   const container = renderShell('/admin/links')
