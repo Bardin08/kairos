@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import Settings from '../src/routes/admin/Settings'
+import { ApiError } from '../src/lib/api'
 import {
   getSettings,
   listTimeZones,
@@ -132,6 +133,37 @@ test('the theme control forces light and dark, and hands control back to the sys
   fireEvent.change(theme, { target: { value: 'system' } })
   // No attribute at all, which is what leaves prefers-color-scheme in charge.
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+})
+
+/**
+ * `GET /admin/logout` shipped in Task 5 with no caller at all — dead code until
+ * something pressed it. It lives here rather than in the rail because the rail
+ * is desktop-only: below 900px it is display:none, and a sign-out a phone
+ * cannot reach is barely better than none.
+ */
+test('the session can be ended, through a plain anchor and not a router link', async () => {
+  render(<Settings />)
+
+  const signOut = await screen.findByRole('link', { name: 'Sign out' })
+
+  // /admin/logout is a SERVER route under the path the single page nests on. A
+  // wouter <Link> here is swallowed by the router and renders its not-found.
+  expect(signOut.getAttribute('href')).toBe('/admin/logout')
+})
+
+/**
+ * An expired cookie on a workbench left open overnight is the most ordinary
+ * failure this surface has, and rendered generically it reads "The server
+ * answered 401." — a status code, and no way out of it.
+ */
+test('an expired session is a way back in rather than a status code', async () => {
+  vi.mocked(getSettings).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+  render(<Settings />)
+
+  const signIn = await screen.findByRole('link', { name: 'Sign in again' })
+
+  expect(signIn.getAttribute('href')).toBe('/admin/login')
+  expect(screen.queryByText(/The server answered/)).toBeNull()
 })
 
 test('every class this page renders exists in kairos.css', async () => {

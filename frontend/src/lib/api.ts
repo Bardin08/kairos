@@ -1,7 +1,19 @@
-// The whole HTTP surface, in one place, for every page. The booking page uses
-// the first three; the manage page uses the three after those; the integrations
-// page uses the last two. None reimplements a fetch, because the two failure
-// shapes below are the part that is easy to get wrong twice.
+// The HTTP surface of every page the entry chunk carries: the booking page uses
+// the first three, the manage page the three after those, the integrations page
+// the last two. None reimplements a fetch, because the two failure shapes below
+// are the part that is easy to get wrong twice.
+//
+// The workbench's own calls are NOT here. They live in the admin chunk —
+// routes/admin/patterns.ts, adminLinks.ts, adminSettings.ts, adminMeetings.ts —
+// because a module in this file's chunk is downloaded by every invitee who
+// opens a link on their phone, whether or not they could ever call it.
+//
+// Integrations is the one operator page whose calls stay here, and the reason is
+// its route rather than its reader: /integrations is where the OAuth callback
+// redirects a browser, App.tsx imports that page eagerly so the redirect never
+// lands on a chunk boundary, and a call reached from an eager page is in the
+// eager graph wherever it is written. Moving these two would move the bytes and
+// not remove them.
 
 const BASE = '/api/v1'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -183,10 +195,9 @@ async function toError(response: Response): Promise<ApiError> {
  * One request, and the only place a failure becomes an ApiError.
  *
  * Exported so a module outside this file can make a call without reimplementing
- * `fetch` — which is the whole reason this module exists. The admin surface's
- * own calls live in the admin chunk rather than here: they are useless to an
- * invitee, and code reachable from the booking route is code every invitee
- * downloads on mobile data whether they can use it or not.
+ * `fetch` — which is the whole reason this module exists, and why the workbench's
+ * own calls can live in the admin chunk without a second copy of the two failure
+ * shapes above. See this file's header for which calls are where and why.
  */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, init)
@@ -323,7 +334,7 @@ export type Integration = {
 
 /** Every provider this build can connect, with its state. Never a fixed list. */
 export function listIntegrations(signal?: AbortSignal): Promise<Integration[]> {
-  return request<Integration[]>('/integrations', { signal })
+  return request<Integration[]>('/admin/integrations', { signal })
 }
 
 /**
@@ -339,79 +350,10 @@ export async function connectIntegration(
   signal?: AbortSignal,
 ): Promise<string> {
   const { consentUrl } = await post<{ consentUrl: string }>(
-    `/integrations/${encodeURIComponent(provider)}/connect`,
+    `/admin/integrations/${encodeURIComponent(provider)}/connect`,
     undefined,
     signal,
   )
 
   return consentUrl
-}
-
-/** One link, as the meetings filter offers it. Only links that have meetings. */
-export type MeetingLink = {
-  id: string
-  name: string
-}
-
-/**
- * One meeting as the operator's list draws it.
- *
- * `calendarSynced` is the whole of the sync question: false covers a booking
- * nobody connected a calendar for, a write that failed, and a write nothing
- * finished. `calendarError` is the provider's own words when there are any, and
- * it is why "not synced" does not send the operator to the server log.
- */
-export type Meeting = {
-  id: string
-  /** ISO UTC instant, `2026-09-07T09:00:00Z`. Render it in `timeZone`. */
-  start: string
-  end: string
-  durationMinutes: number
-  status: string
-  linkId: string
-  /** The link this was booked through — the one fact a calendar cannot supply. */
-  linkName: string
-  participantName: string
-  participantEmail: string
-  /** The PARTICIPANT's zone, as they gave it. Never the organizer's. */
-  participantTimeZone: string
-  calendarSynced: boolean
-  /** Lowercase provider name, or null when nothing was ever written. */
-  calendarProvider: string | null
-  calendarError: string | null
-}
-
-/**
- * One render of the meetings tab.
- *
- * `links` is the filter's options and does NOT narrow with the filters — a
- * dropdown that collapsed to the link just chosen would be a filter with no way
- * back out of itself.
- */
-export type Meetings = {
-  /** The ORGANIZER's zone, from Settings. Every time on the page renders in it. */
-  timeZone: string
-  links: MeetingLink[]
-  meetings: Meeting[]
-}
-
-/**
- * Every meeting, newest last, narrowed by whatever is given.
- *
- * `from` and `to` are ISO calendar dates in the ORGANIZER's zone and are
- * inclusive at both ends. Every filter is optional; sending none asks for the
- * lot. Answers 401 when the operator's session has expired, which is a sign-in
- * and not an error to render.
- */
-export function listMeetings(
-  filter: { linkId?: string; from?: string; to?: string },
-  signal?: AbortSignal,
-): Promise<Meetings> {
-  const query = new URLSearchParams()
-  if (filter.linkId !== undefined) query.set('linkId', filter.linkId)
-  if (filter.from !== undefined) query.set('from', filter.from)
-  if (filter.to !== undefined) query.set('to', filter.to)
-
-  const search = query.toString()
-  return request<Meetings>(`/admin/meetings${search === '' ? '' : `?${search}`}`, { signal })
 }

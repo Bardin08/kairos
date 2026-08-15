@@ -31,13 +31,14 @@ public sealed record ConnectIntegrationResponse(string ConsentUrl);
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What protects these endpoints.</b> The two operator-driven routes require a session, under
-/// the same <see cref="AdminGroup.Policy"/> every admin route uses — Part B wrote them "behind
-/// the admin boundary" before there was one, and this is where that promise is kept. Their paths
-/// stay where they are rather than moving under <c>/api/v1/admin</c>: the callback path is
-/// registered byte-for-byte with Google, and a boundary is a policy rather than a prefix. The
-/// callback itself is anonymous by necessity — a browser arrives there on a redirect from Google
-/// — so it is guarded by <c>state</c> instead.
+/// <b>What protects these endpoints.</b> The two operator-driven routes hang off
+/// <see cref="AdminGroup.MapAdmin"/> like every other admin route, and are therefore under
+/// <c>/api/v1/admin</c> — Part B wrote them "behind the admin boundary" before there was one, and
+/// this is where that promise is kept. They were left outside the prefix at first to protect the
+/// callback's registered URI, but that constraint binds the callback alone: <c>list</c> and
+/// <c>connect</c> are registered with nobody and cost two fetch URLs to move. The callback stays
+/// exactly where it is and stays anonymous, because a browser arrives there on a redirect from
+/// Google and the ticket it presents is <c>state</c>.
 /// </para>
 /// <para>
 /// <b>state.</b> Not a row in a table and not a cache entry: the value is the provider and an
@@ -74,17 +75,27 @@ public static class IntegrationEndpoints
     private const char StateSeparator = ':';
     private const int StateLifetimeMinutes = 10;
 
-    public static RouteGroupBuilder MapIntegrations(this RouteGroupBuilder group)
+    /// <summary>
+    /// The operator's two, on the admin group — so the policy comes from the group rather than
+    /// from a <c>RequireAuthorization</c> beside each route that a third route could forget.
+    /// </summary>
+    public static RouteGroupBuilder MapIntegrationsAdmin(this RouteGroupBuilder group)
     {
-        group.MapGet("/integrations", ListAsync)
-            .WithName("ListIntegrations")
-            .RequireAuthorization(AdminGroup.Policy);
+        group.MapGet("/integrations", ListAsync).WithName("ListIntegrations");
+        group.MapPost("/integrations/{provider}/connect", Connect).WithName("ConnectIntegration");
+        return group;
+    }
 
-        group.MapPost("/integrations/{provider}/connect", Connect)
-            .WithName("ConnectIntegration")
-            .RequireAuthorization(AdminGroup.Policy);
-
-        // No guard: the caller is Google's redirect, and the ticket it presents is the state.
+    /// <summary>
+    /// The one route that cannot move and cannot be gated.
+    /// </summary>
+    /// <remarks>
+    /// Its path is registered byte-for-byte with the provider, so changing it breaks consent
+    /// rather than protecting it, and the caller is a browser arriving on a redirect with no
+    /// session of ours — which is why the ticket it presents is <c>state</c>.
+    /// </remarks>
+    public static RouteGroupBuilder MapIntegrationCallback(this RouteGroupBuilder group)
+    {
         group.MapGet("/integrations/{provider}/callback", CallbackAsync)
             .WithName("CompleteIntegration");
 

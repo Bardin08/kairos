@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 
-import AlertIcon from '../../components/AlertIcon'
 import RecordTable, { type RecordColumn } from '../../components/RecordTable'
-import { asApiError, listMeetings, type Meeting, type Meetings as List } from '../../lib/api'
-import { localZone, shiftDays, shortMonth, todayIn, zonedDate, zonedTime } from '../../lib/time'
+import { localZone, todayIn, zonedDate, zonedTime } from '../../lib/time'
+import { listMeetings, type Meeting, type Meetings as List } from './adminMeetings'
+import Failure from './Failure'
+import { shiftDays, shortMonth } from './adminTime'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is the
 // whole reason they are shapes rather than colours: `live` fills the 7px dot,
@@ -126,7 +127,9 @@ export default function Meetings() {
   const [linkId, setLinkId] = useState('')
   const [list, setList] = useState<List | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
-  const [failure, setFailure] = useState('')
+  // The error itself, not a sentence made from it: `Failure` branches on the
+  // status, and a string has already thrown that away.
+  const [failure, setFailure] = useState<unknown>(null)
 
   // Starts as the browser's and becomes the organizer's as soon as the first
   // answer says what it is. The zone decides what "today" means to the period
@@ -151,7 +154,7 @@ export default function Meetings() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setFailure(asApiError(error).message)
+        setFailure(error)
         setPhase('broken')
       })
 
@@ -267,13 +270,9 @@ export default function Meetings() {
       <p className="fine mb-5">Times are the organizer&apos;s, in {zone}.</p>
 
       {/* An icon as well as the red, the same way every other failure in this
-          product is drawn. A table is rendered under it only if one arrived. */}
-      {phase === 'broken' && (
-        <p className="field-error mb-5" role="alert">
-          <AlertIcon />
-          {failure}
-        </p>
-      )}
+          product is drawn, and an expired session gets a way back in rather
+          than a status code. A table is rendered under it only if one arrived. */}
+      {phase === 'broken' && <Failure error={failure} className="mb-5" />}
 
       {phase === 'loading' && <p className="prose t-sm">Reading the meetings…</p>}
 

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import AlertIcon from '../../components/AlertIcon'
 import RecordTable, { type RecordColumn } from '../../components/RecordTable'
 import { listLinks, type AdminLink, type GlobalLimits, type LinksPage } from './adminLinks'
-import { asApiError } from '../../lib/api'
+import Failure from './Failure'
 import LinkEditor from './LinkEditor'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is why
@@ -12,11 +11,6 @@ import LinkEditor from './LinkEditor'
 // reader, and the word beside the dot says which is which regardless.
 const LIVE = 'live'
 const PAUSED = 'paused'
-
-/** Nothing on this page can fix a missing session, so it says so and stops. */
-const UNAUTHORIZED = 401
-const LOCKED_MESSAGE =
-  'This session has expired or was never signed in. Open /admin/login and come back.'
 
 type Phase = 'loading' | 'ready' | 'broken'
 
@@ -46,7 +40,9 @@ function margin(link: AdminLink, globals: GlobalLimits) {
 export default function Links() {
   const [page, setPage] = useState<LinksPage | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
-  const [failure, setFailure] = useState('')
+  // The error itself, not a sentence made from it: `Failure` branches on the
+  // status, and a string has already thrown that away.
+  const [failure, setFailure] = useState<unknown>(null)
   const [editing, setEditing] = useState<Editing | null>(null)
   // Bumped after every write. The page re-reads rather than patching its own
   // copy, because the server decides the slug, the order and what a limit
@@ -63,9 +59,8 @@ export default function Links() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        const failed = asApiError(error)
         setPhase('broken')
-        setFailure(failed.status === UNAUTHORIZED ? LOCKED_MESSAGE : failed.message)
+        setFailure(error)
       })
 
     return () => controller.abort()
@@ -158,12 +153,7 @@ export default function Links() {
         </button>
       </div>
 
-      {failure !== '' && (
-        <p className="field-error mb-5" role="alert">
-          <AlertIcon />
-          {failure}
-        </p>
-      )}
+      <Failure error={failure} className="mb-5" />
 
       {/* `broken` draws no table at all: it has already put its one sentence
           above, and column headings over nothing would read as a list that came

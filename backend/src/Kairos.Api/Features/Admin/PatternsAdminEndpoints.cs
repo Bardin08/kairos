@@ -130,9 +130,21 @@ public static class PatternsAdminEndpoints
     /// </summary>
     public const string OverrideIncompleteCode = "override_incomplete";
 
+    /// <summary>
+    /// Two writes set the same date at once. Only reachable from two tabs or two windows, which
+    /// on a single-operator scheduler is rare and not impossible — and the alternative to naming
+    /// it is a 500 with a SQLite constraint in the body.
+    /// </summary>
+    public const string OverrideDateTakenCode = "override_date_taken";
+
     private const string PatternName = "Pattern";
     private const string RuleName = "Rule";
     private const string OverrideName = "Date override";
+
+    private const string NameTaken = "Another pattern already has that name.";
+
+    private const string DateTaken =
+        "That date was set by another change a moment ago. Reload the pattern and set it again.";
 
     public static RouteGroupBuilder MapPatternsAdmin(this RouteGroupBuilder group)
     {
@@ -184,7 +196,8 @@ public static class PatternsAdminEndpoints
     {
         var pattern = new Pattern { Name = Named(request) };
         context.Patterns.Add(pattern);
-        await UniquelyNamedAsync(() => context.SaveChangesAsync(cancellationToken));
+        await UniquelyNamedAsync(
+            () => context.SaveChangesAsync(cancellationToken), PatternNameTakenCode, NameTaken);
 
         // A pattern with no rules yet, which is the only thing a create can produce: the weekly
         // windows are added one at a time, and a form that demanded one before the pattern
@@ -204,11 +217,14 @@ public static class PatternsAdminEndpoints
         // cannot translate inside the SetProperty lambda, and the trim would never run.
         var name = Named(request);
 
-        var renamed = await UniquelyNamedAsync(() => context.Patterns
-            .Where(pattern => pattern.Id == patternId)
-            .ExecuteUpdateAsync(
-                pattern => pattern.SetProperty(candidate => candidate.Name, name),
-                cancellationToken));
+        var renamed = await UniquelyNamedAsync(
+            () => context.Patterns
+                .Where(pattern => pattern.Id == patternId)
+                .ExecuteUpdateAsync(
+                    pattern => pattern.SetProperty(candidate => candidate.Name, name),
+                    cancellationToken),
+            PatternNameTakenCode,
+            NameTaken);
 
         if (renamed == 0)
         {
@@ -355,7 +371,13 @@ public static class PatternsAdminEndpoints
                 StartMinute = start,
                 EndMinute = end,
             });
-            await context.SaveChangesAsync(cancellationToken);
+
+            // Wrapped for the same reason the name writes are, and against the same index. Two
+            // PUTs for one date both read replaced == 0 and both take this branch; the second one
+            // hits the unique index on (PatternId, Date), and unwrapped that arrives as a 500
+            // about a constraint rather than as the conflict it is.
+            await UniquelyNamedAsync(
+                () => context.SaveChangesAsync(cancellationToken), OverrideDateTakenCode, DateTaken);
         }
 
         return await ReadAsync(context, patternId, cancellationToken);
@@ -443,18 +465,21 @@ public static class PatternsAdminEndpoints
     }
 
     /// <summary>
-    /// The unique index on the name reported as the conflict it is. Caught rather than
-    /// pre-checked: a SELECT before the INSERT is a race two browser tabs win often enough to
-    /// matter, and the index has to be there for correctness either way.
+    /// A unique index reported as the conflict it is. Caught rather than pre-checked: a SELECT
+    /// before the INSERT is a race two browser tabs win often enough to matter, and the index has
+    /// to be there for correctness either way.
     /// </summary>
     /// <remarks>
     /// The filter, not the exception type, is what makes this narrow. SaveChanges wraps the
     /// provider failure in DbUpdateException and ExecuteUpdate does not, so a catch written
-    /// against either type would silently stop covering one of its two callers — and
+    /// against either type would silently stop covering one of its callers — and
     /// <see cref="SqliteErrors.IsUniqueViolation"/> already walks the chain to the extended
     /// error code, which is the only thing that means "duplicate" rather than "some constraint".
     /// </remarks>
-    private static async Task<int> UniquelyNamedAsync(Func<Task<int>> write)
+    private static async Task<int> UniquelyNamedAsync(
+        Func<Task<int>> write,
+        string code,
+        string message)
     {
         try
         {
@@ -462,8 +487,7 @@ public static class PatternsAdminEndpoints
         }
         catch (Exception failure) when (SqliteErrors.IsUniqueViolation(failure))
         {
-            throw DomainException.Conflict(
-                PatternNameTakenCode, "Another pattern already has that name.");
+            throw DomainException.Conflict(code, message);
         }
     }
 }
