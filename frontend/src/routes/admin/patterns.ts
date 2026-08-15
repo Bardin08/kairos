@@ -86,15 +86,12 @@ export function deletePattern(patternId: string): Promise<void> {
   return adminRequestNothing(patternUrl(patternId), { method: 'DELETE' })
 }
 
-export function addPatternRule(
+/** The whole weekly shape in one request: the server refuses or stores the set entire. */
+export function replacePatternRules(
   patternId: string,
-  rule: { isoDayOfWeek: number; startMinute: number; endMinute: number },
+  rules: readonly { isoDayOfWeek: number; startMinute: number; endMinute: number }[],
 ): Promise<Pattern> {
-  return write('POST', `${patternUrl(patternId)}/rules`, rule)
-}
-
-export function removePatternRule(patternId: string, ruleId: string): Promise<Pattern> {
-  return write('DELETE', `${patternUrl(patternId)}/rules/${encodeURIComponent(ruleId)}`)
+  return write('PUT', `${patternUrl(patternId)}/rules`, { rules })
 }
 
 /**

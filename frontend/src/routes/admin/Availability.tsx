@@ -3,13 +3,12 @@ import { useEffect, useId, useState } from 'react'
 import { getSettings } from './adminSettings'
 import Failure from './Failure'
 import {
-  addPatternRule,
   createPattern,
   deletePattern,
   listPatterns,
   removePatternOverride,
-  removePatternRule,
   renamePattern,
+  replacePatternRules,
   savePatternOverride,
   type Pattern,
   type PatternOverride,
@@ -164,11 +163,10 @@ function PatternEditor({
   function addRule() {
     if (ruleFrom === null || ruleTo === null) return
     apply('rule', () =>
-      addPatternRule(pattern.id, {
-        isoDayOfWeek,
-        startMinute: ruleFrom,
-        endMinute: ruleTo,
-      }),
+      replacePatternRules(pattern.id, [
+        ...pattern.rules,
+        { isoDayOfWeek, startMinute: ruleFrom, endMinute: ruleTo },
+      ]),
     )
   }
 
@@ -238,7 +236,14 @@ function PatternEditor({
                 <button
                   className="btn btn-ghost btn-danger"
                   type="button"
-                  onClick={() => apply('rule', () => removePatternRule(pattern.id, rule.id))}
+                  onClick={() =>
+                    apply('rule', () =>
+                      replacePatternRules(
+                        pattern.id,
+                        pattern.rules.filter((kept) => kept.id !== rule.id),
+                      ),
+                    )
+                  }
                 >
                   Remove
                 </button>
