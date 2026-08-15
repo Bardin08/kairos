@@ -413,3 +413,372 @@ MailKit.Security.SslHandshakeException
 Across both live logs, **five bookings, five send attempts, five failures, zero successes.** The chain is fine — `smtp.gmail.com` presented a valid Google Trust Services WE2 certificate over TLS 1.3, and an independent client on the same machine at the same moment completed STARTTLS, authenticated with the same credential and delivered a 2,744-byte message. So this is not a network problem, not a credential problem and not interception; it is one library default meeting a platform that cannot complete an online revocation check. The message the operator found in their inbox is that hand-relayed one, carrying Kairos's own composed bytes. A fix is in flight as its own pull request.
 
 **The sender is `vbardin.homelab@gmail.com`, not `vbardin.com`.** The spec assumed a relay with SPF and DKIM for `vbardin.com`; there is none, and a free Gmail account cannot send as a foreign domain with aligned DKIM. SPF and DKIM are Google's and are aligned, which is what the Gmail result rests on. Accepted by the operator. Related and also accepted: the relay credential is a Gmail app password shared with the identity stack and cannot be scoped send-only — it authenticates over IMAP too — which is documented in `homelab/docs/runbooks/credential-rotation.md` with the dedicated `vbardin.homelab@gmail.com` account as the mitigation.
+
+---
+
+# Part C
+
+What Part C's conditions do when they are run against a real instance, in a real browser, at real viewports. Same rule as Parts A and B: every line below is something that was observed, and where an observation contradicted an earlier claim the observation is what is written down. Four of these conditions had never been run by anybody — they need a layout engine, and jsdom has none — so this is the first record in the project that answers them at all.
+
+Measured 2026-08-15 at `244dffc` on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish, 16 KiB pages. One instance on port 5300 with its own SQLite file, seeded through the admin API with two links — `consulting` (durations 25 and 50, margin 30, notice 120, cap 4, increment 30) and `mentorship` (single duration 30, margin 0, increment 15) — over a Mon–Fri 09:00–17:00 pattern with a 09:00–09:45 override on 25 September, organizer zone `Europe/Warsaw`. Browser conditions used headless Chromium 151 via Playwright 1.62.1 with an explicit `timezoneId`.
+
+## How Part C was built
+
+`main` holds 53 commits: one initial commit and 52 squash merges, each carrying its pull request number. **Nothing was pushed to `main` directly.** Part A was #1–#30, Part B #31–#42 with #43 as its follow-up fix. Part C is **#44, #45, #47, #48, #49, #50, #52, #53 and #54 — nine merges for six tasks**, the three extra being a bundle-budget scope fix, a test pinning the throw site a revoked grant actually uses, and a refactor moving two integration routes under the admin prefix. #46 and #51 landed in the same window and are Part B follow-ups rather than Part C work.
+
+## Headline
+
+```
+booking route     71,471 bytes gzipped   (ceiling 76,800 — 5,329 free)
+admin chunk        9,295 bytes gzipped   (lazy, not charged)
+idle RSS           190.2 MiB             (target under 100 Mi — MISSED, and worse than Part A)
+backend tests      183 passed, 0 failed  (Part B left it at 136)
+frontend tests      68 passed, 0 failed  (Part B left it at 32)
+verify.sh          16 passed, 0 skipped, 0 failed
+conditions         10 pass, 1 partial, 4 fail, 1 unrun
+```
+
+The four failures are real and none of them is a surprise to the code: two are rules DESIGN.md contradicts elsewhere in its own text, one is a deliberate single exception with an ESLint disable and a written reason beside it, and one is a memory target that has been missed since Part A.
+
+## The browser this record needed
+
+Four of the design conditions and all three of the rules that decay are viewport or pixel checks. They were carried unrun through Parts A and B and through every Part C implementation task, and every agent that met them disclosed the gap rather than reasoning about pixels from a stylesheet. This record closes it.
+
+**`playwright@1.62.1` is now a devDependency of `frontend/`, pinned exactly, and `scripts/measure-ui.mjs` is the only thing that uses it.** That script is not in `scripts/verify.sh` and should not be: it needs a seeded instance, an operator session and a browser download, none of which belong in a gate that runs on every commit. It is run by hand, and the command is in its header.
+
+**The operator session was minted rather than obtained**, because there is no Pocket ID to talk to here. `scripts/measure-ui.mjs` is handed an `.AspNetCore.Cookies` value produced by protecting a `Cookies` authentication ticket with the application's own data-protection key ring and application discriminator. Everything downstream of that cookie is the application exactly as it ships — the same policy, the same handlers, the same database. What is not exercised is the OpenID Connect leg itself, which no test in this repository exercises either.
+
+That the cookie could be minted at all is a finding in its own right, and it is condition-shaped: **the `admin` policy is `RequireAuthenticatedUser()` and nothing more.** The forged ticket carried `sub=part-c-operator`, a subject that exists in no identity provider anywhere, and it was admitted to every write endpoint on the workbench. Kairos has no `sub` allowlist and no claim check; the only thing standing between an arbitrary principal and the operator's data is whichever users Pocket ID is configured to issue tokens for. That may be the right place for the control, but it is a decision nobody has recorded, and until it is recorded the boundary is "whatever the IdP happens to be set to".
+
+## The design system's seven conditions
+
+The first of the seven — *booking completes with JavaScript disabled* — was withdrawn when the surface moved to React, and is replaced by *the booking route's bundle size is measured and recorded*. That measurement is under **Resources** below, with the rest of the weight.
+
+### 2. 440×956 — pass, with one thing not exercised
+
+The two panes stack, the primary action is alone, and it is at the bottom edge.
+
+```
+pane 1   x 17   y 61.0    406 x 204.5
+pane 2   x 17   y 265.5   406 x 915.4      same x, so stacked rather than side by side
+
+.btn-primary visible, no time chosen      0
+.btn-primary visible, time chosen         1   "Continue"   y 900   height 44
+.btn-primary visible, details step        1   "Confirm booking"   and .actionbar is gone
+
+.actionbar   position fixed   top 887   bottom 956   viewport height 956
+             padding-block-end: calc(var(--space-3) + env(safe-area-inset-bottom))
+```
+
+The bar's bottom edge and the viewport's bottom edge are the same pixel, and the desktop CTA is absent — the two are mutually exclusive at this width, as Part A found at 420px. One primary action in every state that has one, and none in the state that has nothing to commit yet.
+
+**Not exercised: a non-zero safe-area inset.** `env(safe-area-inset-bottom)` resolved to `0px`, because headless Chromium has no notch to emulate and Playwright cannot set one. So what was measured is that the rule reserves the inset and that the bar sits flush at inset zero, not that it clears a home indicator on a real phone. Proving that needs a device or a simulator, and neither is a browser automation problem.
+
+### 3. Duration 25 → 50 changes the times and the days — pass
+
+Re-run as a regression against Task 3's first run, and it reproduces Part A's numbers exactly.
+
+```
+times   24 Sep @25: 09:00 … 16:30   (16 starts)
+        24 Sep @50: 09:00 … 16:00   (15 starts)
+days    open @25: 1,2,3,4,7,8,9,10,11,14,15,16,17,18,21,22,23,24,25,28,29,30
+        open @50: 1,2,3,4,7,8,9,10,11,14,15,16,17,18,21,22,23,24,   28,29,30
+        closed by the switch: 25 September
+```
+
+Both halves moved, and 25 September is the day that carries the 09:00–09:45 override: a 25 fits at 09:00, a 50 does not fit at all.
+
+### 4. Tabular figures — fail
+
+The booking surface is clean and the workbench is not.
+
+```
+booking page   52 numeric leaf elements, 52 with font-variant-numeric: tabular-nums, 0 without
+manage page     2 numeric leaf elements,  2 with,  0 without
+slot column     width 189px on Monday 17 August, 189px on Tuesday 18 August — no shift
+admin           counts and clock fragments outside the rule, listed below
+```
+
+One rule carries the whole condition — `time, .numeric, td.numeric, .slot, .day, .stat-value` — and it is a list of selectors rather than a property of numbers, so a figure is tabular only where somebody remembered to say so. Where it was forgotten, measured in the browser:
+
+```
+/admin/availability   p.fine       "1 single date set"                        a count, not tabular
+/admin/settings       p.fine       "Kept clear … 2 links set their own …"     a count, not tabular
+/admin/settings       p.fine       "30 gives you :00 and :30. 2 links …"      a duration, two clock
+                                                                             fragments and a count
+```
+
+Three more were found by reading rather than by running, and are recorded here because the run could not reach them:
+
+- **`Manage.tsx:426`** renders the reschedule CTA as `className="btn btn-primary"` around `Move to {chosen.long}` — a full date and time span that re-renders on every slot click, in a control that no tabular rule reaches. The identical control in `Book.tsx:526` is `className="btn numeric"`. This is precisely the jitter case the rule's own comment exists to prevent, and it is the sharpest one.
+- **`Availability.tsx`** has five `<input type="time">` / `type="date"` on a bare `.input`, at lines 265, 272, 323, 344 and 351, sitting in the same card as `.numeric` spans that are tabular. They were not visible in the page's default state, so the browser pass reports no lacking input; the source says otherwise.
+- **`<option>` text is reachable by no rule at all** — `Settings.tsx:269` prints a UTC offset, `Meetings.tsx:261` prints "Last 30 days", and both are visible in the closed control.
+
+Two hygiene notes from the same read: `.stat-value` in the rule is dead — no `.stat` markup exists anywhere — and `td.numeric` is redundant with `.numeric` beside it.
+
+### 5. Theme forced against the system preference, and contrast on the accent — pass
+
+First-frame values captured in a `requestAnimationFrame` registered before any page script, the same method Part A used, and now with a control that exists: **Part C ships the theme control**, in Settings, as a three-state select.
+
+```
+nothing stored, OS light   first frame: attr=null   --surface-page #FFFFFF   --accent #4E56E3
+nothing stored, OS dark    first frame: attr=null   --surface-page #0E1014   --accent #737DEE
+stored dark,   OS light    first frame: attr=dark   --surface-page #0E1014   --accent #737DEE
+stored light,  OS dark     first frame: attr=light  --surface-page #FFFFFF   --accent #4E56E3
+```
+
+Both directions of the override hold, and neither flashes: the first frame already carries the settled value, including where the stored choice contradicts the OS.
+
+Every element painted with the accent that carries text, in both themes, with its measured ratio:
+
+```
+light   .day[aria-pressed]   #FFFFFF on #4E56E3   5.58:1
+        .slot[aria-pressed]  #FFFFFF on #4E56E3   5.58:1
+        .btn-primary         #FFFFFF on #4E56E3   5.58:1
+dark    .day[aria-pressed]   #0B0D2B on #737DEE   5.33:1
+        .slot[aria-pressed]  #0B0D2B on #737DEE   5.33:1
+        .btn-primary         #0B0D2B on #737DEE   5.33:1
+```
+
+Nothing falls below 4.5:1 in either theme, and the prohibited pair is prohibited in fact rather than by intent: **white on the dark-mode accent measures 3.56:1**, which is what `--text-on-accent` going to `#0B0D2B` in dark is for. The stylesheet's own comment says "~3.5:1"; the measurement agrees with it.
+
+### 6. Keyboard alone reaches every control on both surfaces — partial
+
+Tab was pressed until the focus returned to something already seen, and what it reached was compared against every visible focusable element on the page.
+
+```
+/book/:slug, calendar step   30 controls, 30 reached
+/book/:slug, details step     5 controls,  5 reached
+/manage/:token                covered by the cancel run below
+/admin/links                  7 controls,  7 reached
+/admin/meetings               6 controls,  6 reached
+/admin/availability           8 controls,  8 reached
+/admin/settings              13 controls, 13 reached
+```
+
+Nothing is unreachable, and no control was focused with neither an outline nor a shadow. Two things stop this being a clean pass.
+
+**The ring on a form control is not the ring.** `:focus-visible` gives everything else `outline: 2px solid var(--focus-ring)` at `outline-offset: 2px`. `.input:focus, .textarea:focus, .select:focus` sets `outline: none` and replaces it with an accent border plus a 3px `--accent-subtle` halo — and that rule is in the `components` layer while the base ring is in `base`, so it wins regardless of specificity, and it matches `:focus` rather than `:focus-visible`. Measured on a focused settings field:
+
+```
+outline      rgb(23, 26, 32) none 3px      style is `none`, so nothing is drawn
+border-color rgb(78, 86, 227)              --accent, changed from rgb(225, 227, 234)
+box-shadow   rgb(238, 240, 254) 0 0 0 3px  --accent-subtle
+```
+
+The border change is a clear signal. The halo is not: `#EEF0FE` on `#FFFFFF` is **1.13:1**, and `#1A1D3D` on `#171A20` is **1.07:1**. So a focused field is marked by one channel, not two, and the design system's "the ring is never removed, only inset where a container would clip it" is not true of the controls this sentence is most about.
+
+**The slot grid clips the ring by one pixel.** `.slots` above 861px is `overflow-y: auto` with `padding: 3px; margin: -3px`, added — its comment says so — to make room for the focus ring. The ring needs 4px: 2px of offset plus 2px of width. Measured on the first slot with focus on it, the slack between the button's box and the scroll container's is `top 3, left 3`, and on the second column `right 3`. The outermost pixel of the ring is clipped on the first and last rows and on both outer columns. `padding: 4px; margin: -4px` closes it.
+
+### 7. No inline `style` attribute in the built markup — fail
+
+```
+/book/consulting     16 elements with a style attribute — all button.slot, all `--i: N`
+/manage/:token        0
+/admin/links          0
+/admin/meetings       0
+```
+
+This is the exception the project already knows about: the stagger's per-item delay is `animation-delay: calc(var(--i) * …)`, which needs a per-item custom property, and `SlotList.tsx:101` carries a per-line `eslint-disable-next-line react/forbid-dom-props` with its reason written beside it. The condition as written does not hold — sixteen inline `style` attributes are sixteen inline `style` attributes — and the honest reading is that the condition is stated more absolutely than the design it is checking. Every other surface is clean, and the rule that would catch a second exception is armed: `--max-warnings 0` turns an unused disable directive into a build failure.
+
+## The three rules that decay
+
+### Two Jobs — fail
+
+The accent has more than two jobs, and it has different extra jobs at different widths. Measured by walking every element that is actually displayed and comparing its computed `background-color`, `color` and border colours against the resolved accent tokens.
+
+```
+1280px, rail    background  span.wordmark-glyph                --accent        the logo mark
+                color       span.avatar.avatar-sm "VB"          --accent-text   the operator's initials
+                background  button.btn-primary                  --accent        the commit action   OK
+                the rail's current item: background rgb(237,238,242) = --surface-active,
+                font-weight 600 against a sibling's 500 — no accent at all
+
+ 899px, tabbar   background  button.btn-primary                  --accent        the commit action   OK
+                color       a[aria-current="page"] and its svg   --accent-text   the current tab
+                ::before    height 2px, background rgb(78,86,227) = --accent     the edge bar
+                the rail, and with it the wordmark and avatar, is display:none here
+```
+
+So the desktop half of the shell is compliant on navigation and the phone half is not, and both halves spend the accent on a logo mark that marks nothing. The tab bar's use is not an oversight either: `AdminShell.tsx:136-139` describes it deliberately, and DESIGN.md's own Navigation section instructs it — *"Phone: a bottom tab bar, the same three destinations, accent used only for the current one."* **DESIGN.md contradicts its own Two Jobs Rule**, and the rule is the thing that lost. Two further accent uses sit outside the two jobs and were not on this screen: `.pattern-day[data-on="true"]` on an availability card, and `a { color: var(--accent-text) }` on every anchor — load-bearing enough that `Book.tsx:400` and `Manage.tsx:485` both use a `<button>` instead of an anchor to escape it.
+
+The clean fix for the shell is the one the rail already demonstrates: an inset fill and a heavier weight mark the current destination without the accent, and the tab bar's 2px bar is a shape rather than a hue and can keep its job in a neutral. Nothing here is a defect in the implementation; it is a rule and a spec disagreeing, and the disagreement has to be settled in one of them.
+
+### Second Channel — pass
+
+Monochrome screenshots at 1280px and 899px, of Links, Meetings and the shell — two screenshots and not one, because the rail and the tab bar carry different second channels and the tab bar's is the one that was caught failing during the design build.
+
+```
+Links     Live     filled dot   ●        Archived  hollow dot  ○   same size, same position
+Meetings  Confirmed filled dot  ●        Cancelled hollow dot  ○
+          Not synced hollow dot ○        plus the provider's own sentence underneath
+rail      current: inset fill + weight 600 against 500 — both survive grayscale
+tabbar    current: 2px edge bar above the tab — survives grayscale, and it is the channel
+          that carries the state once the hue is gone
+```
+
+Every state is still readable with the hue removed. A link was archived before the screenshots were taken so that both sides of the live/paused pair appeared in the same frame; a screenshot in which every row is live proves nothing. The confirmed/cancelled pair came free, because the fourth phase condition below leaves cancelled meetings behind it.
+
+### Inversion — pass
+
+Dark is not the light palette flipped, and three independent tests say so.
+
+```
+                        light            255 - light would be       dark actually is
+--surface-page          #FFFFFF          #000000                    #0E1014
+--surface-sunken        #F6F7F9          #090806  (warm)            #0A0C0F  (cool)
+--text-primary          #171A20          #E8E5DF  (warm)            #EEF0F4  (cool)
+--accent                #4E56E3          #B1A91C  (olive)           #737DEE  (indigo)
+```
+
+Inverting a cool neutral produces a warm one and inverting indigo produces yellow; neither happens. Mirroring the ramp index instead matches 3 of 14 neutral tokens and 0 of 7 accent tokens. And three things no reversal can produce are present: `--text-tertiary` is `--gray-500` in **both** themes and `--focus-ring` is `--indigo-400` in both; the elevation structure changes, because light gives page and raised the same `#FFFFFF` and separates them by shadow while dark separates them by value (`#0E1014` against `#171A20`) and adds a sunken step *below* the page that has no counterpart at the top of the light ramp; and nine dark values are hand-chosen literals with no ramp member behind them. The status colours settle it by construction — the primitives carry `green-500`/`green-100` for light and `green-400`/`green-950` for dark, so the palette was authored twice on purpose.
+
+## The phase's four conditions
+
+### 1. Cross-timezone across the DST boundary — pass
+
+The organizer zone was set **through the Settings screen in a browser**, not through the API: moved to `Europe/Lisbon`, saved, read back as `Europe/Lisbon`, moved back to `Europe/Warsaw`, saved, read back as `Europe/Warsaw`, with the screen answering `Saved.` both times. Then a booking with the invitee in `America/New_York` on Monday 26 October 2026 — the Monday after Poland falls back and the week before New York does, so the usual six-hour gap is five.
+
+```
+19 Oct (Warsaw still CEST)  first slots, rendered in New York:  03:00  03:30  04:00
+26 Oct (Warsaw now CET)     first slots, rendered in New York:  04:00  04:30  05:00
+```
+
+Booked end to end through the page. The invitee's summary read **`Monday 26 October, 04:00–04:25`** and **`25 minutes · America/New_York · Consulting call`**. The same meeting in the organizer's own calendar, which is what Part C adds and Part A could not check:
+
+```
+/admin/meetings, "Times are the organizer's, in Europe/Warsaw."
+
+  26  OCT 2026   09:00 – 09:25   25 min   DST Traveller
+                                          dst@example.com
+                                          04:00 their time · America/New_York
+                                          Consulting call   Confirmed
+```
+
+One instant, named 09:00 by the organizer and 04:00 by the invitee, on a day when the offset between them is not the one it was a week earlier. The month grid also opened on `August 2026` with the invitee in New York — the organizer's current month, as Part A found.
+
+### 2. Cross-link margin — pass, and this time 11:15 means something
+
+`consulting` (margin 30) booked 10:00–10:50 Warsaw on 7 September, so the shadow is 09:30–11:20. `mentorship`, margin 0, was given a **15-minute start increment** for this run precisely because Part A's record notes that 11:15 proved nothing at a 30-minute increment: it was never a candidate. At 15 it is.
+
+```
+mentorship @30, 7 September, after the booking (Warsaw wall clock):
+  09:00                                    11:30  11:45  12:00 … 16:30
+
+  11:00  absent      a 30 starting there runs into the shadow
+  11:15  absent      a real candidate at this increment, and genuinely blocked
+  11:30  present     the first start clear of 11:20
+  09:00  present     a 30 there ends exactly at 09:30, where the shadow opens — half-open
+  09:30  absent
+```
+
+11:00 and 11:15 blocked, 11:30 permitted, on a link whose own margin is zero. The margin pads the busy interval and not the candidate, and it is the larger of the two links' margins that applies.
+
+### 3. Two concurrent requests for one slot — pass
+
+```
+thread 0: HTTP 201  01a00349-108d-7340-87aa-a4062cfb68ed
+thread 1: HTTP 409  {"code":"slot_taken","title":"That time was taken while this booking was being made."}
+SELECT COUNT(*) FROM Bookings WHERE StartUtc = 1788850800 AND Status = 10  ->  1
+```
+
+Both requests were issued from one `Promise.all` against the same start instant. One booking, one rejection, one row.
+
+### 4. Cancelling frees the slot and its margin shadow on every link — pass
+
+A `consulting` booking of 10:00–10:50 Warsaw on 9 September, cancelled through the manage page in a browser — "Cancel meeting", then "Yes, cancel it" — leaving the page reading *Cancelled* and *This meeting was cancelled and the time is back on the organizer's calendar.* All three reads of that day, before and after:
+
+```
+mentorship @30    22 slots  ->  31 slots     restored: 07:15 07:30 07:45 08:00 08:15
+                                                       08:30 08:45 09:00 09:15  (UTC)
+consulting @25    12 slots  ->  16 slots     restored: 07:30 08:00 08:30 09:00
+consulting @50    10 slots  ->  15 slots
+```
+
+The slot itself and the whole of its 30-minute shadow came back, on the link that made the booking and on the link that only ever felt the shadow.
+
+## Resources
+
+### Bundle — pass
+
+`bash scripts/bundle-budget.sh` at `244dffc`, after `npm run build`:
+
+```
+bundle-budget: booking route 71471 bytes gzipped across 1 file(s), budget 76800
+bundle-budget: lazy chunks 9295 bytes gzipped across 1 file(s), not charged to the budget
+```
+
+**5,329 bytes of headroom, 93.1% of the ceiling consumed.** The ceiling is 76,800 and is documented with per-React-version measurements in the script's own comment block; the 61,440 that preceded it was superseded during Part A when the React 19.2 shell alone measured 61,641 gzipped and did not fit its own budget.
+
+The comparison that matters is what Part C cost the invitee. Part B's last reading was 70,691 for a build with no lazy chunk, so it was everything. Part C added an entire operator workbench — four pages, an editor, a record table, a shell — and the invitee's route moved by **780 bytes**, because all of it is behind `lazy(() => import('./routes/admin/AdminShell'))` and lands in the 9,295-byte chunk instead. Two admin-only calls do stay in the entry chunk on purpose: `/integrations` is a fixed top-level route the OAuth callback redirects a browser to, and `App.tsx` imports that page eagerly.
+
+What can still move this number is shared code, since a helper pulled into both surfaces is charged to the invitee. Whether 76,800 is the right ceiling remains open and untouched.
+
+### Idle memory — fail, and further from the target than Part A
+
+Measured on a freshly started Release process with its own SQLite file, after loading both booking pages **and all four admin pages** in a real browser and idling 30 seconds. Part A measured this before the admin surface existed, so this is the number that counts.
+
+```
+                              Part C          Part A         change
+ps rss                        190.2 MiB       159.2 MiB      +31.0 MiB
+macOS physical footprint      144 MB          119.8 MB       +24.2 MB
+  of which dirty, untagged    116 MB           95.7 MB
+  of which malloc              22 MB           18.2 MB
+```
+
+RSS was sampled four times a second while a booking page and its month of slots were fetched, and it never moved off the idle figure: the highest reading of the whole run is the 190.2 MiB above. This process does not spike under load; it starts heavy and stays there.
+
+**The conclusion has not changed and the gap has widened.** Part A recorded this condition as a fail at 159.2 MiB against a target of under 100 Mi; Part C is 190.2 MiB against the same target.
+
+The floor underneath it was re-measured on the same machine on the same day rather than quoted from Part A, because a floor from a different runtime build would make the comparison meaningless. An empty `WebApplication.CreateSlimBuilder` app with one `MapGet`, published the same way:
+
+```
+empty app, idle   84.7 MiB rss / 57 MB footprint     (Part A measured 80.5 / 52.5)
+```
+
+So the floor drifted up by 4.2 MiB and Kairos's own share went from about 79 MiB to **105.5 MiB rss / 87 MB footprint**. Roughly 26 MiB of that is Kairos code and data rather than platform. It is not attributable to Part C alone: Part B added two hosted services that tick forever, a Google client factory and an SMTP path, and this instance has bookings in it where Part A's had fewer. What can be said precisely is that no part of this is the frontend — the workbench is 9 kB of JavaScript that never enters this process — and that the target was written for a Raspberry Pi on linux-arm64 with 4 KiB pages, which is a different runtime baseline entirely and where this has still never been measured.
+
+### The pod's limits — unrun
+
+**There is no pod.** The repository contains no `Dockerfile`, no container image, no Kubernetes manifest and no Helm chart; `limits 192Mi/500m` is a number from the phase's conditions with nothing in the repository to attach it to. Nothing was measured against it and nothing could be.
+
+The nearest available reading is the one above: the high-water mark across the whole run, load included, was 190.2 MiB — **1.8 MiB under 192Mi**, on a machine with 16 KiB pages and no cgroup at all. That margin is a coincidence of units rather than evidence, and it is not a comfortable one: a container on linux-arm64 with 4 KiB pages will not report this number, and a cgroup limit does not let a process idle at the edge of it, it kills it. Proving this condition needs a container image, a manifest carrying the limits, and `kubectl top pod` or a `memory.current` read while a booking page loads. Building that image is the smallest missing piece, and it is not a browser problem.
+
+## The register of what is not covered
+
+Everything below was carried into this task as unproved. Each line says what was done about it.
+
+**Run here, and now proved:**
+
+- **Every untested validation code on the patterns and meetings slices.** All of them fire, over HTTP, against the running application: `override_incomplete` 400, `pattern_name_taken` 409, `window_inverted` 400, `date_invalid` 400, `range_inverted` 400, `time_zone_unknown` 400, and the `[Range]` bounds — `IsoDayOfWeek must be between 1 and 7`, `StartMinute`/`EndMinute must be between 0 and 1439`, `StartIncrementMinutes must be between 1 and …` — each as a DataAnnotations 400.
+- **"Dimmed rather than absent", end to end for the first time.** A real all-day override was written to 4 November 2026 through the admin API; the public slots read for that day returned `[]` and the day beside it returned 16. In the browser, on the November grid: 30 day buttons for a 30-day month, and
+
+  ```
+  4 Nov   data-state=unavailable   disabled   "Wednesday 4 November, no times available"
+          colour rgb(155,161,176)   no availability dot
+  5 Nov   data-state=available     enabled    "Thursday 5 November, 16 times available"
+          colour rgb(23,26,32)      4px accent dot
+  ```
+
+  A real blocked override reaching a real dimmed cell, with the reason in the accessible name. No stubbed fetch anywhere in it.
+- **The admin boundary from outside.** With no cookie, `/api/v1/admin/links`, `/meetings`, `/patterns`, `/settings` and `/integrations` all answer **401**. An unmatched `/api/` path answers **404** with no content type rather than 200 with HTML. `/admin/links` still answers 200 `text/html`, which is the single page and is correct.
+- **`CalendarSyncState.Pending` reads as not-synced — and reads wrong.** A `Pending` row was inserted for a confirmed booking. The API answers `calendarSynced: false`, `calendarProvider: "google"`, `calendarError: null`, and the workbench renders **"Not synced — No calendar was connected when this was booked, so nothing was written."** For a `Pending` row that sentence is false: a calendar *is* connected and the write has not finished. `whyNotSynced` branches on `calendarError === null` alone, so it cannot tell "never attempted" from "in flight". Small, and worth a third branch.
+- **Data protection keys are not persisted.** There is no `AddDataProtection` or `PersistKeysTo` call anywhere in `backend/src`, so the key ring is the framework default — `$HOME/.aspnet/DataProtection-Keys` — which in a container with no volume dies with the pod, and the operator logs in again after every restart. Accepted for one operator; now written down.
+
+**Found while running, not previously recorded:**
+
+- **`pattern_name_required` is unreachable.** `SavePatternRequest.Name` carries `[Required]`, which rejects null, empty and whitespace-only strings; `Named()` then trims and throws `pattern_name_required` when the result is empty. Both use the same predicate, so nothing that would reach the throw survives the attribute. `{"name":"   "}` and `{"name":"\t\n "}` both answer 400 `The Name field is required.` on POST **and** on PATCH, never the domain code. It is dead code with a documented constant and a doc comment.
+- **A zero-width space is a valid pattern name.** `{"name":"​"}` was accepted and created a pattern, because `char.IsWhiteSpace('​')` is false and `Trim()` leaves it. The workbench now lists a pattern whose name draws nothing.
+- **`.record-day` overflows its own line box.** 20px type at `line-height: 1.1` gives a 22px line box around a 23px ink box, so the digits sit one pixel proud at the top. Nothing clips them — every ancestor up to `.table-wrap` is `overflow: visible` — and a 4× screenshot with the box outlined shows the glyphs complete. It is one pixel of slack away from being clipped by anything that ever gains an overflow.
+- **The `860` / `861` boundary has a gap.** `max-width: 860px` and `min-width: 861px` leave a fractional viewport in between matching neither, reachable by browser zoom. At 860.5px the panes stay two columns while the calendar goes to one, and the sticky action bar stays hidden. Degraded rather than broken — the desktop CTA is still there — but it is a hole.
+- **The admin surface under-reserves for its own tab bar.** `.admin-main` reserves 96px at the bottom; the tab bar measures 1 + 44 + 1 + 56 = 102px plus `env(safe-area-inset-bottom)`. The booking page reserves 92px for an action bar that measures about 59px plus the inset, so the asymmetry runs the wrong way. On a phone with a home indicator the last block of every admin page sits under the tab bar.
+- **No `safe-area-inset-left` / `-right` anywhere.** Both fixed bars use `inset-inline: 0` and `.page` uses a fixed inline padding, so in landscape on a notched device their content runs under the notch.
+
+**Still unproved, with what proving it would take:**
+
+- **A live Google grant revoked against a real account.** The throw site is pinned by a test (#52) and condition 3 of Part B planted a dead credential, but nobody has revoked a real grant and confirmed the row reads not-synced *with the provider's own words* rather than with the "no calendar was connected" sentence. Needs the operator's Google account, a revocation in their security settings, and one booking afterwards. This is a ten-minute manual check and it is the last one standing between "handled" and "observed".
+- **Two `CalendarEntry` rows for one booking.** The read orders by `UpdatedAt` descending and takes the first. There is one provider, so the tie-break has never run. Needs a second provider, or a seeded second row with a deliberate tie.
+- **`UniquelyNamedAsync`'s Add branch, on the patterns slice.** It is wired to three call sites in `PatternsAdminEndpoints` — pattern create, pattern rename and the override upsert — and the Add branch is only reachable when two writers both observe `replaced == 0`. The happy path is tested and the race is not. Two parallel writes dropped into a test are flaky rather than a test, so proving it needs a barrier-released pair like the one the third phase condition above uses for bookings.
+- **A third `BookingStatus`.** `Meetings.tsx` renders `status === 'confirmed' ? 'Confirmed' : 'Cancelled'`. The enum has two values today and is numbered with gaps specifically so a third can be inserted; the day one is, this prints "Cancelled" for it, silently. A `switch` with an exhaustive default is the fix and it costs nothing now.
+- **The OpenID Connect leg.** No test and no measurement in this repository has ever talked to a Pocket ID. The cookie half of the gate is exercised end to end and the challenge half is not.
+- **`appsettings.Development.json` commits `"ClientSecret": "development-placeholder"`.** Not a real secret, and it keeps `dotnet run` working now that startup fails fast — but it is the shape into which a real secret gets pasted by accident, and nothing in the file says not to.
