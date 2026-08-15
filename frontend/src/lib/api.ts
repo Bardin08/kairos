@@ -313,3 +313,72 @@ export async function connectIntegration(
 
   return consentUrl
 }
+
+/** One link, as the meetings filter offers it. Only links that have meetings. */
+export type MeetingLink = {
+  id: string
+  name: string
+}
+
+/**
+ * One meeting as the operator's list draws it.
+ *
+ * `calendarSynced` is the whole of the sync question: false covers a booking
+ * nobody connected a calendar for, a write that failed, and a write nothing
+ * finished. `calendarError` is the provider's own words when there are any, and
+ * it is why "not synced" does not send the operator to the server log.
+ */
+export type Meeting = {
+  id: string
+  /** ISO UTC instant, `2026-09-07T09:00:00Z`. Render it in `timeZone`. */
+  start: string
+  end: string
+  durationMinutes: number
+  status: string
+  linkId: string
+  /** The link this was booked through — the one fact a calendar cannot supply. */
+  linkName: string
+  participantName: string
+  participantEmail: string
+  /** The PARTICIPANT's zone, as they gave it. Never the organizer's. */
+  participantTimeZone: string
+  calendarSynced: boolean
+  /** Lowercase provider name, or null when nothing was ever written. */
+  calendarProvider: string | null
+  calendarError: string | null
+}
+
+/**
+ * One render of the meetings tab.
+ *
+ * `links` is the filter's options and does NOT narrow with the filters — a
+ * dropdown that collapsed to the link just chosen would be a filter with no way
+ * back out of itself.
+ */
+export type Meetings = {
+  /** The ORGANIZER's zone, from Settings. Every time on the page renders in it. */
+  timeZone: string
+  links: MeetingLink[]
+  meetings: Meeting[]
+}
+
+/**
+ * Every meeting, newest last, narrowed by whatever is given.
+ *
+ * `from` and `to` are ISO calendar dates in the ORGANIZER's zone and are
+ * inclusive at both ends. Every filter is optional; sending none asks for the
+ * lot. Answers 401 when the operator's session has expired, which is a sign-in
+ * and not an error to render.
+ */
+export function listMeetings(
+  filter: { linkId?: string; from?: string; to?: string },
+  signal?: AbortSignal,
+): Promise<Meetings> {
+  const query = new URLSearchParams()
+  if (filter.linkId !== undefined) query.set('linkId', filter.linkId)
+  if (filter.from !== undefined) query.set('from', filter.from)
+  if (filter.to !== undefined) query.set('to', filter.to)
+
+  const search = query.toString()
+  return request<Meetings>(`/admin/meetings${search === '' ? '' : `?${search}`}`, { signal })
+}
