@@ -1194,8 +1194,8 @@
     border-radius: var(--radius-full);
     border: var(--border-width) dashed var(--border-default);
     background: transparent;
-    /* This class also dresses a <select> in a later task — the one element
-       here that carries a background-image arrow — so strip it explicitly. */
+    /* Dresses a <select>, which is the one control here that arrives with an
+       arrow painted on. */
     background-image: none;
     color: var(--text-secondary);
     font-size: var(--text-sm);
