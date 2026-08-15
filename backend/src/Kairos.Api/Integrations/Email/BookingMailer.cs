@@ -79,7 +79,19 @@ public sealed class BookingMailer(
 
         try
         {
-            await sender.SendAsync(Compose(booking, manageToken), cancellationToken);
+            var message = Compose(booking, manageToken);
+            var response = await sender.SendAsync(message, cancellationToken);
+
+            // Said at Information, not Debug. Silence on the happy path is what let a message
+            // Kairos had not sent be read twice as proof that Kairos could send: the only visible
+            // difference between a working relay and a broken one was mail that may or may not
+            // have come from somewhere else. The Message-Id and the relay's own response are the
+            // two handles that settle it from a log line alone.
+            logger.LogInformation(
+                "Confirmation for booking {Booking} accepted by the relay as {MessageId}: {Response}",
+                booking.Id,
+                message.MessageId,
+                response);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
