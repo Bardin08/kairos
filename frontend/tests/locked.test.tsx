@@ -20,6 +20,7 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 const ADMIN_BASE = '/admin'
 const SIGN_IN_PATH = '/sign-in'
 const UNAUTHORIZED = 401
+const PATTERN_PATH = '/admin/availability/b0a5f0e2-0000-7000-8000-000000000001'
 
 const settings = {
   timeZone: 'UTC',
@@ -158,6 +159,29 @@ test('a page whose own call is refused locks the shell that mounted it', async (
   expect(await screen.findByRole('link', { name: 'Sign in' })).toBeDefined()
   expect(chrome(container).rail).toBeNull()
   expect(screen.queryByRole('button', { name: /New link/ })).toBeNull()
+})
+
+/**
+ * The editor is a route of its own now, and a route of its own is an address
+ * somebody can arrive at directly — from a bookmark, hours after the session
+ * ran out. Its read goes through patterns.ts for exactly this: fetching on its
+ * own it would draw a heading, a way back and two empty panes at an operator
+ * who was never allowed to ask what the pattern is.
+ */
+test('a pattern editor reached with no session shows the locked screen, not a frame', async () => {
+  // The shell's own settings read succeeds here, so the rail would have drawn:
+  // the only refused call is the editor's list read, which is the one that has
+  // to do the locking.
+  const container = await mount(PATTERN_PATH, (path, fail) => {
+    if (path === SIGN_IN_PATH) return Promise.resolve({ signInUrl: '/admin/login' })
+    if (path === '/admin/settings') return Promise.resolve(settings)
+    return Promise.reject(fail(UNAUTHORIZED))
+  })
+
+  expect(await screen.findByRole('link', { name: 'Sign in' })).toBeDefined()
+  expect(chrome(container).pageHeaders).toBe(0)
+  expect(screen.queryByRole('link', { name: /Back to Availability/ })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Weekly hours' })).toBeNull()
 })
 
 /**

@@ -486,6 +486,18 @@
     height: 100dvh;
   }
   @media (max-width: 900px) { .admin-shell { grid-template-columns: 1fr; } }
+
+  /* The pattern editor: the week being edited beside what it produces.
+     900px rather than the booking page's 860, because this pane lives inside
+     `.admin-shell` — splitting at any other width would leave one viewport
+     where the rail has collapsed and these two panes have not, or the reverse.
+     The week is first in the source, so it is also first when they stack, and
+     the preview is capped rather than free: it holds a month, which DESIGN.md
+     forbids stretching to a fraction. */
+  .editor-cols { display: grid; gap: var(--space-5); grid-template-columns: 1fr; }
+  @media (min-width: 901px) {
+    .editor-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 340px); }
+  }
 }
 
 /* ==========================================================================

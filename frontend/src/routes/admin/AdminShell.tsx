@@ -6,6 +6,7 @@ import Availability from './Availability'
 import Links from './Links'
 import Locked from './Locked'
 import Meetings from './Meetings'
+import PatternEditor from './PatternEditor'
 import Settings from './Settings'
 import { isLocked, subscribeToLock } from './session'
 
@@ -253,6 +254,9 @@ export default function AdminShell() {
         <div className="admin-main">
           <Switch>
             <Route path="/links" component={Links} />
+            {/* Ahead of the list route: `<Switch>` renders the first match, so
+                the more specific path is the one it has to try first. */}
+            <Route path="/availability/:patternId" component={PatternEditor} />
             <Route path="/availability" component={Availability} />
             <Route path="/meetings" component={Meetings} />
             <Route path="/settings" component={Settings} />
