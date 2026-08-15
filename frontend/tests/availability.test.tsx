@@ -10,9 +10,9 @@ import Availability from '../src/routes/admin/Availability'
 // look for would be replaced with "could not reach the server".
 import { ApiError } from '../src/lib/api'
 import {
+  createPattern,
   deletePattern,
   listPatterns,
-  savePatternOverride,
   type Pattern,
 } from '../src/routes/admin/patterns'
 import { getSettings, type Settings } from '../src/routes/admin/adminSettings'
@@ -20,8 +20,8 @@ import { getSettings, type Settings } from '../src/routes/admin/adminSettings'
 vi.mock('../src/routes/admin/patterns', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/patterns')>()),
   listPatterns: vi.fn(),
+  createPattern: vi.fn(),
   deletePattern: vi.fn(),
-  savePatternOverride: vi.fn(),
 }))
 
 vi.mock('../src/routes/admin/adminSettings', async (importOriginal) => ({
@@ -37,7 +37,6 @@ const CONFLICT = 409
 const MONDAY = 1
 const NINE_AM = 9 * 60
 const FIVE_PM = 17 * 60
-const HOLIDAY = '2026-12-25'
 
 const weekdays: Pattern = {
   id: 'b0a5f0e2-0000-7000-8000-000000000001',
@@ -45,11 +44,6 @@ const weekdays: Pattern = {
   rules: [{ id: 'r1', isoDayOfWeek: MONDAY, startMinute: NINE_AM, endMinute: FIVE_PM }],
   overrides: [],
   usedBy: ['Mentorship'],
-}
-
-async function openEditor() {
-  render(<Availability />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
 }
 
 const ORGANIZER_ZONE = 'Europe/Warsaw'
@@ -66,63 +60,51 @@ const settings: Settings = {
 
 beforeEach(() => {
   vi.mocked(listPatterns).mockResolvedValue([weekdays])
-  vi.mocked(savePatternOverride).mockResolvedValue(weekdays)
+  vi.mocked(createPattern).mockResolvedValue(weekdays)
   vi.mocked(getSettings).mockResolvedValue(settings)
 })
 
 afterEach(cleanup)
 
 /**
- * The case a form that only offers "change the hours" cannot express.
- *
- * A blocked date is how a holiday is taken, and it is the one an operator
- * reaches for most. What is pinned is the request: both minutes null, sent
- * together, without either time control having been filled in — because that
- * is what the endpoint reads as "closed" rather than as a half-filled form.
- */
-test('a date can be blocked outright, not only given different hours', async () => {
-  await openEditor()
-
-  fireEvent.change(screen.getByLabelText('Date'), { target: { value: HOLIDAY } })
-  fireEvent.click(screen.getByRole('button', { name: 'Set date' }))
-
-  await waitFor(() =>
-    expect(vi.mocked(savePatternOverride)).toHaveBeenCalledWith(weekdays.id, HOLIDAY, {
-      startMinute: null,
-      endMinute: null,
-    }),
-  )
-})
-
-/** And the other half of that choice, which the same control has to reach. */
-test('the same date form can replace the hours instead', async () => {
-  await openEditor()
-
-  fireEvent.change(screen.getByLabelText('Date'), { target: { value: HOLIDAY } })
-  fireEvent.click(screen.getByRole('button', { name: 'Different hours' }))
-  fireEvent.change(screen.getByLabelText('Opens at on this date'), { target: { value: '10:00' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Set date' }))
-
-  await waitFor(() =>
-    expect(vi.mocked(savePatternOverride)).toHaveBeenCalledWith(weekdays.id, HOLIDAY, {
-      startMinute: 10 * 60,
-      endMinute: FIVE_PM,
-    }),
-  )
-})
-
-/**
  * The hours on a card carry the zone they are read in.
  *
  * A card is the unit somebody screenshots, quotes and argues with, and
  * 09:00–17:00 with no zone on it is a time that means four different things.
- * Task 4 could not put it here — the only endpoint exposing the zone needed a
- * link to exist — and shipped a sentence at the top of the page instead.
  */
 test('a pattern card names the organizer zone beside its hours', async () => {
   render(<Availability />)
 
   expect(await screen.findByText(/09:00–17:00 · Europe\/Warsaw/)).toBeDefined()
+})
+
+/**
+ * The card is a summary, so the one thing it has to do is lead somewhere.
+ *
+ * The path is relative on purpose: the shell is mounted with `nest`, so wouter
+ * prefixes `/admin`, and an absolute href here would resolve to
+ * `/admin/admin/availability/…`.
+ */
+test('a card leads to that pattern’s editor', async () => {
+  render(<Availability />)
+
+  const edit = await screen.findByRole('link', { name: 'Edit' })
+
+  expect(edit.getAttribute('href')).toBe(`/availability/${weekdays.id}`)
+})
+
+/**
+ * Naming a new pattern is a field in a card, not a naked input in the header.
+ * The header holds a heading and one control, here as on every other screen.
+ */
+test('the header button opens a name field and creates from it', async () => {
+  render(<Availability />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'New pattern' }))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Evenings' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create pattern' }))
+
+  await waitFor(() => expect(vi.mocked(createPattern)).toHaveBeenCalledWith('Evenings'))
 })
 
 /**
@@ -141,8 +123,8 @@ test('a refused delete is shown with the links the server named', async () => {
     ),
   )
 
-  await openEditor()
-  fireEvent.click(screen.getByRole('button', { name: 'Delete pattern' }))
+  render(<Availability />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
 
   expect((await screen.findByRole('alert')).textContent).toContain('Mentorship')
   // Still there. A refusal that removed the card anyway would report success
@@ -153,13 +135,13 @@ test('a refused delete is shown with the links the server named', async () => {
 /**
  * No CSS was added by this task, so a class this markup invents is a class that
  * styles nothing — and it fails silently: the card simply stops being a card,
- * in a viewport no unit test can see. The editor is opened first, because half
- * of what this page renders is behind that button.
+ * in a viewport no unit test can see. The name form is opened first, because it
+ * is the one part of the page that is not drawn on arrival.
  */
 test('every class the page renders exists in kairos.css', async () => {
   const css = readFileSync(stylesheet, 'utf8')
   const { container } = render(<Availability />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'New pattern' }))
 
   const used = new Set(
     [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),

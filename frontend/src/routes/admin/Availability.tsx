@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'wouter'
 
 import { getSettings } from './adminSettings'
 import Failure from './Failure'
@@ -6,41 +7,27 @@ import {
   createPattern,
   deletePattern,
   listPatterns,
-  removePatternOverride,
-  renamePattern,
-  replacePatternRules,
-  savePatternOverride,
   type Pattern,
-  type PatternOverride,
   type PatternRule,
 } from './patterns'
 
 /**
- * The seven chips on a pattern card, Monday first, indexed by ISO day − 1.
- * Short in the chip and long in the sentence beside it, because the chips are
- * a picture of the week and the sentence is what a screen reader gets.
+ * Monday first, indexed by ISO day − 1. Short in the chip and long in the
+ * sentence beside it: the chips are a picture of the week, and the sentence is
+ * what a screen reader gets.
  */
 const WEEKDAYS = [
-  { short: 'Mo', long: 'Mon', full: 'Monday' },
-  { short: 'Tu', long: 'Tue', full: 'Tuesday' },
-  { short: 'We', long: 'Wed', full: 'Wednesday' },
-  { short: 'Th', long: 'Thu', full: 'Thursday' },
-  { short: 'Fr', long: 'Fri', full: 'Friday' },
-  { short: 'Sa', long: 'Sat', full: 'Saturday' },
-  { short: 'Su', long: 'Sun', full: 'Sunday' },
+  { short: 'Mo', long: 'Mon' },
+  { short: 'Tu', long: 'Tue' },
+  { short: 'We', long: 'Wed' },
+  { short: 'Th', long: 'Thu' },
+  { short: 'Fr', long: 'Fri' },
+  { short: 'Sa', long: 'Sat' },
+  { short: 'Su', long: 'Sun' },
 ]
 
 const MINUTES_PER_HOUR = 60
-const LAST_HOUR = 23
 const MONDAY = 1
-
-// The hours an operator most often means, so the add form opens on a working
-// day rather than on 00:00–00:00, which the server would refuse.
-const DEFAULT_START = '09:00'
-const DEFAULT_END = '17:00'
-
-/** Which action is in flight, and which one a failure belongs under. */
-type Action = 'create' | 'name' | 'rule' | 'override' | 'delete'
 
 /** `540` → `09:00`. Zero-padded, so a column of them keeps one width. */
 function clock(minuteOfDay: number): string {
@@ -50,58 +37,23 @@ function clock(minuteOfDay: number): string {
 }
 
 /**
- * `09:00` → `540`, and null for anything else.
- *
- * `<input type="time">` answers with an empty string while it is empty and
- * with `HH:MM` once it is not, so null here means "not filled in yet" and is
- * what keeps the Add button from offering to send a half-typed window.
- */
-function minuteOfDay(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (match === null) return null
-
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (hour > LAST_HOUR || minute >= MINUTES_PER_HOUR) return null
-
-  return hour * MINUTES_PER_HOUR + minute
-}
-
-/** `09:00–17:00`, an en dash, as every window in this product is written. */
-function windowText(startMinute: number, endMinute: number): string {
-  return `${clock(startMinute)}–${clock(endMinute)}`
-}
-
-/** `Mon, Tue, Wed` — the days a pattern is open, in week order. */
-function openDays(rules: PatternRule[]): string[] {
-  return WEEKDAYS
-    .filter((_, index) => rules.some((rule) => rule.isoDayOfWeek === index + MONDAY))
-    .map((weekday) => weekday.long)
-}
-
-/**
- * The card's one line of hours.
+ * `Mon, Tue, Wed · 09:00–17:00` — the card's one line of hours.
  *
  * Distinct windows rather than one per rule: a Monday-to-Friday nine-to-five is
  * five rules and one sentence, and a split day is two windows however many days
- * carry it. The chips above already say which days.
+ * carry it.
  */
-function hours(rules: PatternRule[]): string {
+function summarize(rules: PatternRule[]): string {
+  const days = WEEKDAYS.filter((_, index) =>
+    rules.some((rule) => rule.isoDayOfWeek === index + MONDAY),
+  ).map((weekday) => weekday.long)
+
   const windows = rules
     .slice()
     .sort((left, right) => left.startMinute - right.startMinute)
-    .map((rule) => windowText(rule.startMinute, rule.endMinute))
+    .map((rule) => `${clock(rule.startMinute)}–${clock(rule.endMinute)}`)
 
-  return [...new Set(windows)].join(', ')
-}
-
-/** A date override in one phrase. The blocked case reads as a closure, not as missing data. */
-function describeOverride(replacement: PatternOverride): string {
-  if (replacement.startMinute === null || replacement.endMinute === null) {
-    return 'blocked — nothing bookable'
-  }
-
-  return windowText(replacement.startMinute, replacement.endMinute)
+  return `${days.join(', ')} · ${[...new Set(windows)].join(', ')}`
 }
 
 /** `Mentorship, Consulting and Quick sync`. */
@@ -111,309 +63,29 @@ function listNames(names: string[]): string {
 }
 
 /**
- * One pattern's whole editable surface, opened in place inside its own card.
+ * The operator's patterns, as a wall of read-only cards.
  *
- * Not a modal, on purpose: DESIGN.md refuses one for a task that needs neither
- * interruption nor protected focus, and this is a task an operator abandons
- * halfway more often than they finish it. Remounted per pattern — `editing` is
- * a single id — so the draft fields reset when a different card is opened
- * rather than carrying one pattern's half-typed window into another's form.
- */
-function PatternEditor({
-  pattern,
-  pending,
-  failure,
-  apply,
-  remove,
-  close,
-}: {
-  pattern: Pattern
-  pending: Action | null
-  failure: { action: Action; error: unknown } | null
-  apply: (action: Action, work: () => Promise<Pattern>) => void
-  remove: () => void
-  close: () => void
-}) {
-  const [name, setName] = useState(pattern.name)
-  const [isoDayOfWeek, setIsoDayOfWeek] = useState(MONDAY)
-  const [ruleStart, setRuleStart] = useState(DEFAULT_START)
-  const [ruleEnd, setRuleEnd] = useState(DEFAULT_END)
-  const [date, setDate] = useState('')
-  // Blocked first, and true by default. A date override exists mostly because
-  // somebody is taking a day off; the form that opens on "different hours"
-  // makes the common case the one you have to go and find.
-  const [blocked, setBlocked] = useState(true)
-  const [overrideStart, setOverrideStart] = useState(DEFAULT_START)
-  const [overrideEnd, setOverrideEnd] = useState(DEFAULT_END)
-
-  const field = useId()
-
-  const ruleFrom = minuteOfDay(ruleStart)
-  const ruleTo = minuteOfDay(ruleEnd)
-  const overrideFrom = minuteOfDay(overrideStart)
-  const overrideTo = minuteOfDay(overrideEnd)
-
-  const canAddRule = ruleFrom !== null && ruleTo !== null
-  const canSaveOverride =
-    date !== '' && (blocked || (overrideFrom !== null && overrideTo !== null))
-
-  // Whether the window is the right way round is the server's answer, not this
-  // form's. It holds the same bound the booking page reads availability
-  // through, and a second copy here is the copy that goes stale.
-  function addRule() {
-    if (ruleFrom === null || ruleTo === null) return
-    apply('rule', () =>
-      replacePatternRules(pattern.id, [
-        ...pattern.rules,
-        { isoDayOfWeek, startMinute: ruleFrom, endMinute: ruleTo },
-      ]),
-    )
-  }
-
-  function saveOverride() {
-    if (!canSaveOverride) return
-    apply('override', () =>
-      savePatternOverride(pattern.id, date, {
-        // Both null is the blocked day. Sent as nulls rather than omitted,
-        // because the endpoint refuses one time without the other and this is
-        // the shape that says "neither" out loud.
-        startMinute: blocked ? null : overrideFrom,
-        endMinute: blocked ? null : overrideTo,
-      }),
-    )
-  }
-
-  /**
-   * The failure under the control that produced it, and null under every other.
-   *
-   * DESIGN.md refuses a banner at the top of a form, and the refusals this
-   * editor gets are the reason why: "this pattern is the availability of
-   * Mentorship" means something under the Delete button and nothing at the top
-   * of a card that also has a name field and two add forms in it.
-   */
-  function errorFor(action: Action): unknown {
-    return failure?.action === action ? failure.error : null
-  }
-
-  return (
-    <div className="stack mt-4 sep-top">
-      <div className="field">
-        <label htmlFor={`${field}-name`}>Name</label>
-        <div className="row gap-2">
-          <input
-            className="input grow"
-            id={`${field}-name`}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <button
-            className="btn"
-            type="button"
-            data-loading={pending === 'name' || undefined}
-            onClick={() => apply('name', () => renamePattern(pattern.id, name))}
-          >
-            Rename
-          </button>
-        </div>
-        <Failure error={errorFor('name')} className="mt-3" />
-      </div>
-
-      <div>
-        <h3 className="title-section mb-3">Weekly hours</h3>
-
-        {pattern.rules.length === 0 ? (
-          <div className="empty mb-3">
-            <p>No hours yet, so every link on this pattern offers nothing. Add a window below.</p>
-          </div>
-        ) : (
-          <ul className="stack mb-3">
-            {pattern.rules.map((rule) => (
-              <li className="row gap-2" key={rule.id}>
-                <span className="grow numeric t-sm">
-                  {WEEKDAYS[rule.isoDayOfWeek - MONDAY].long}{' '}
-                  {windowText(rule.startMinute, rule.endMinute)}
-                </span>
-                <button
-                  className="btn btn-ghost btn-danger"
-                  type="button"
-                  onClick={() =>
-                    apply('rule', () =>
-                      replacePatternRules(
-                        pattern.id,
-                        pattern.rules.filter((kept) => kept.id !== rule.id),
-                      ),
-                    )
-                  }
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="row gap-2 wrap">
-          <select
-            className="select select-inline"
-            aria-label="Day of the week"
-            value={isoDayOfWeek}
-            onChange={(event) => setIsoDayOfWeek(Number(event.target.value))}
-          >
-            {WEEKDAYS.map((weekday, index) => (
-              <option key={weekday.full} value={index + MONDAY}>
-                {weekday.full}
-              </option>
-            ))}
-          </select>
-          <input
-            className="input"
-            type="time"
-            aria-label="Opens at"
-            value={ruleStart}
-            onChange={(event) => setRuleStart(event.target.value)}
-          />
-          <input
-            className="input"
-            type="time"
-            aria-label="Closes at"
-            value={ruleEnd}
-            onChange={(event) => setRuleEnd(event.target.value)}
-          />
-          <button
-            className="btn"
-            type="button"
-            aria-disabled={canAddRule ? undefined : true}
-            data-loading={pending === 'rule' || undefined}
-            onClick={addRule}
-          >
-            Add window
-          </button>
-        </div>
-        <Failure error={errorFor('rule')} className="mt-3" />
-      </div>
-
-      <div>
-        <h3 className="title-section mb-3">Single dates</h3>
-        <p className="fine mb-3">
-          A date here replaces the weekly hours rather than adding to them. Blocked means the day
-          is closed entirely — that is how a holiday is taken.
-        </p>
-
-        {pattern.overrides.length > 0 && (
-          <ul className="stack mb-3">
-            {pattern.overrides.map((replacement) => (
-              <li className="row gap-2" key={replacement.date}>
-                <span className="grow numeric t-sm">
-                  {replacement.date} · {describeOverride(replacement)}
-                </span>
-                <button
-                  className="btn btn-ghost btn-danger"
-                  type="button"
-                  onClick={() =>
-                    apply('override', () =>
-                      removePatternOverride(pattern.id, replacement.date),
-                    )
-                  }
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="row gap-2 wrap">
-          <input
-            className="input"
-            type="date"
-            aria-label="Date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
-          {/* Two named choices rather than a pair of time fields somebody has
-              to guess they may leave empty. A form that only offered "change
-              the hours" could not say "closed", which is the case this whole
-              section exists for. */}
-          <div className="segmented" role="group" aria-label="What this date does">
-            <button type="button" aria-pressed={blocked} onClick={() => setBlocked(true)}>
-              Blocked
-            </button>
-            <button type="button" aria-pressed={!blocked} onClick={() => setBlocked(false)}>
-              Different hours
-            </button>
-          </div>
-          {!blocked && (
-            <>
-              <input
-                className="input"
-                type="time"
-                aria-label="Opens at on this date"
-                value={overrideStart}
-                onChange={(event) => setOverrideStart(event.target.value)}
-              />
-              <input
-                className="input"
-                type="time"
-                aria-label="Closes at on this date"
-                value={overrideEnd}
-                onChange={(event) => setOverrideEnd(event.target.value)}
-              />
-            </>
-          )}
-          <button
-            className="btn"
-            type="button"
-            aria-disabled={canSaveOverride ? undefined : true}
-            data-loading={pending === 'override' || undefined}
-            onClick={saveOverride}
-          >
-            Set date
-          </button>
-        </div>
-        <Failure error={errorFor('override')} className="mt-3" />
-      </div>
-
-      <div className="row gap-2 wrap sep-top">
-        <button className="btn grow" type="button" onClick={close}>
-          Done
-        </button>
-        <button
-          className="btn btn-ghost btn-danger"
-          type="button"
-          data-loading={pending === 'delete' || undefined}
-          onClick={remove}
-        >
-          Delete pattern
-        </button>
-      </div>
-      <Failure error={errorFor('delete')} className="mt-3" />
-    </div>
-  )
-}
-
-/**
- * The operator's availability: patterns, the weekly windows inside them, and
- * the single dates that deviate.
- *
- * A pattern is a reusable shape, not a schedule of things that will happen.
- * There is deliberately no booking on this screen and no way to edit a link
- * from it — which pattern a link stands on is the link's own field, and a
- * booking is something that already happened to a shape. Both have been
- * proposed for this tab, and either one turns a reusable object into a diary of
- * exactly one.
+ * Everything that changes one pattern lives at `/admin/availability/{id}`; this
+ * page holds only what is true of the set — what exists, what each one is for,
+ * and which links would break if one went away. No booking and no link editing
+ * either: both have been proposed for this tab, and either one turns a reusable
+ * shape into a diary of exactly one.
  */
 export default function Availability() {
   const [patterns, setPatterns] = useState<Pattern[]>([])
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<string | null>(null)
+  const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
-  const [pending, setPending] = useState<Action | null>(null)
+  const [creating, setCreating] = useState(false)
   // The error itself, not a sentence made from it: `Failure` branches on the
   // status, and a string has already thrown that away.
-  const [failure, setFailure] = useState<{ action: Action; error: unknown } | null>(null)
-  // The organizer's zone, named on every card beside the hours it makes sense
-  // of. Empty until it arrives, and the line then reads as hours alone rather
-  // than as hours followed by a gap where a zone should be.
+  const [failure, setFailure] = useState<unknown>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  // Kept per pattern: the refusal names that pattern's links, and means nothing
+  // over the top of a grid of cards.
+  const [refused, setRefused] = useState<{ patternId: string; error: unknown } | null>(null)
+  // Empty until it arrives, so the hours line reads as hours alone rather than
+  // as hours followed by a gap where a zone should be.
   const [zone, setZone] = useState('')
 
   useEffect(() => {
@@ -427,48 +99,24 @@ export default function Availability() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setLoading(false)
-        setFailure({ action: 'create', error })
+        setFailure(error)
       })
 
-    // Its own request and its own silence. A zone that does not arrive costs
-    // this page a suffix; a zone that turned the page red would be a failure
-    // report about the label on a screen whose subject is elsewhere.
+    // Its own request and its own silence: a zone that does not arrive costs
+    // this page a suffix, and one that turned the page red would be a failure
+    // report about a label on a screen whose subject is elsewhere.
     getSettings(controller.signal)
       .then((settings) => setZone(settings.timeZone))
-      .catch(() => {
-        // Hours without the zone beside them, which is where this page started.
-      })
+      .catch(() => undefined)
 
     return () => controller.abort()
   }, [])
 
-  /**
-   * A write, and the one copy of what happens around one.
-   *
-   * Every write answers with the whole pattern, so the card is replaced rather
-   * than patched — which is what keeps `usedBy` and the rule list from drifting
-   * out of step with the row a mutation actually changed.
-   */
-  function apply(action: Action, work: () => Promise<Pattern>) {
-    setPending(action)
-    setFailure(null)
-
-    work()
-      .then((updated) => {
-        setPatterns((list) =>
-          list.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
-        )
-        setPending(null)
-      })
-      .catch((error: unknown) => {
-        setPending(null)
-        setFailure({ action, error })
-      })
-  }
-
-  function create() {
+  function create(event: FormEvent) {
+    event.preventDefault()
     if (name.trim() === '') return
-    setPending('create')
+
+    setCreating(true)
     setFailure(null)
 
     createPattern(name)
@@ -480,12 +128,12 @@ export default function Availability() {
           [...list, created].sort((left, right) => left.name.localeCompare(right.name)),
         )
         setName('')
-        setPending(null)
-        setEditing(created.id)
+        setNaming(false)
+        setCreating(false)
       })
       .catch((error: unknown) => {
-        setPending(null)
-        setFailure({ action: 'create', error })
+        setCreating(false)
+        setFailure(error)
       })
   }
 
@@ -497,18 +145,17 @@ export default function Availability() {
    * verbatim because it is the one that has the link names in it.
    */
   function remove(patternId: string) {
-    setPending('delete')
-    setFailure(null)
+    setDeleting(patternId)
+    setRefused(null)
 
     deletePattern(patternId)
       .then(() => {
         setPatterns((list) => list.filter((candidate) => candidate.id !== patternId))
-        setPending(null)
-        setEditing(null)
+        setDeleting(null)
       })
       .catch((error: unknown) => {
-        setPending(null)
-        setFailure({ action: 'delete', error })
+        setDeleting(null)
+        setRefused({ patternId, error })
       })
   }
 
@@ -516,37 +163,60 @@ export default function Availability() {
     <>
       <div className="page-header">
         <h1 className="title-page">Availability</h1>
-        <div className="row gap-2">
-          <input
-            className="input"
-            aria-label="Name of the new pattern"
-            placeholder="Weekdays 09–17"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <button
-            className="btn btn-primary"
-            type="button"
-            aria-disabled={name.trim() === '' ? true : undefined}
-            data-loading={pending === 'create' || undefined}
-            onClick={create}
+        <button
+          className="btn btn-primary"
+          type="button"
+          aria-expanded={naming}
+          onClick={() => setNaming(!naming)}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            New pattern
-          </button>
-        </div>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New pattern
+        </button>
       </div>
 
-      {failure?.action === 'create' && <Failure error={failure.error} className="mb-5" />}
+      {/* A name is all a pattern needs to exist; its hours are set in the editor
+          the new card links to. In a card rather than loose in the header,
+          because the header is a heading and one control here as everywhere. */}
+      {naming && (
+        <form className="card card-pad stack mb-5" onSubmit={create}>
+          <div className="field">
+            <label htmlFor="pattern-name">Name</label>
+            <input
+              id="pattern-name"
+              className="input"
+              placeholder="Weekdays 09–17"
+              value={name}
+              autoFocus
+              onChange={(event) => setName(event.target.value)}
+            />
+            <p className="fine">What you will pick this shape by when you point a link at it.</p>
+          </div>
+          <div className="row gap-2 wrap">
+            <button
+              className="btn btn-primary"
+              type="submit"
+              aria-disabled={name.trim() === '' ? true : undefined}
+              data-loading={creating || undefined}
+            >
+              Create pattern
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => setNaming(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      <Failure error={failure} className="mb-5" />
 
       {loading ? (
         <p className="prose t-sm">Reading your patterns…</p>
@@ -563,9 +233,8 @@ export default function Availability() {
             <article className="card card-pad-sm" key={pattern.id}>
               <h2 className="title-section mb-3">{pattern.name}</h2>
 
-              {/* A picture of the week, and only a picture: the sentence under
-                  it names the same days in words, so nothing here is carried by
-                  the chip's fill alone. */}
+              {/* A picture of the week, and only a picture: the line under it
+                  names the same days in words, so nothing is carried by fill. */}
               <div className="pattern-days mb-3" aria-hidden="true">
                 {WEEKDAYS.map((weekday, index) => (
                   <span
@@ -575,7 +244,7 @@ export default function Availability() {
                         ? 'true'
                         : undefined
                     }
-                    key={weekday.full}
+                    key={weekday.short}
                   >
                     {weekday.short}
                   </span>
@@ -585,22 +254,12 @@ export default function Availability() {
               {pattern.rules.length === 0 ? (
                 <p className="muted t-sm">No hours yet — nothing bookable.</p>
               ) : (
-                // The hours, and the zone they are read in. The zone belongs on
-                // the card rather than in one sentence at the top: a card is
-                // the unit somebody screenshots, quotes and argues with, and
-                // 09:00–17:00 with no zone on it is a time that means four
-                // different things.
+                // The zone on every card rather than once at the top: a card is
+                // the unit somebody screenshots, and 09:00–17:00 with no zone
+                // on it is a time that means four different things.
                 <p className="muted numeric t-sm">
-                  {openDays(pattern.rules).join(', ')} · {hours(pattern.rules)}
+                  {summarize(pattern.rules)}
                   {zone === '' ? '' : ` · ${zone}`}
-                </p>
-              )}
-
-              {pattern.overrides.length > 0 && (
-                <p className="fine mt-3">
-                  {pattern.overrides.length === 1
-                    ? '1 single date set'
-                    : `${pattern.overrides.length} single dates set`}
                 </p>
               )}
 
@@ -610,22 +269,24 @@ export default function Availability() {
                   : `Used by ${listNames(pattern.usedBy)}`}
               </p>
 
-              {editing === pattern.id ? (
-                <PatternEditor
-                  pattern={pattern}
-                  pending={pending}
-                  failure={failure}
-                  apply={apply}
-                  remove={() => remove(pattern.id)}
-                  close={() => setEditing(null)}
-                />
-              ) : (
-                <div className="row gap-2 mt-4">
-                  <button className="btn" type="button" onClick={() => setEditing(pattern.id)}>
-                    Edit
-                  </button>
-                </div>
-              )}
+              <div className="row gap-2 mt-4">
+                <Link className="btn grow" href={`/availability/${pattern.id}`}>
+                  Edit
+                </Link>
+                <button
+                  className="btn btn-ghost btn-danger"
+                  type="button"
+                  data-loading={deleting === pattern.id || undefined}
+                  onClick={() => remove(pattern.id)}
+                >
+                  Delete
+                </button>
+              </div>
+
+              <Failure
+                error={refused?.patternId === pattern.id ? refused.error : null}
+                className="mt-3"
+              />
             </article>
           ))}
         </div>
