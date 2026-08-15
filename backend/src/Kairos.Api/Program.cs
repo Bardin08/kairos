@@ -1,4 +1,5 @@
 using Kairos.Api.Availability;
+using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Integrations;
 using Kairos.Api.Features.Links;
@@ -207,6 +208,10 @@ v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
 v1.MapIntegrations();
+
+// The operator's workbench. Mapped through MapAdmin and never through v1, because that call is
+// the only thing standing between an anonymous caller and every one of these routes.
+app.MapAdmin().MapMeetingsAdmin();
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the

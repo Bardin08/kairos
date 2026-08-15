@@ -137,6 +137,13 @@ export function shortDate(day: string): string {
   }).format(new Date(day + START_OF_DAY))
 }
 
+/** `2026-09-07` → `Sep`. The month as a record's date chip prints it. */
+export function shortMonth(day: string): string {
+  return formatter('shortMonth', 'UTC', { month: 'short' }).format(
+    new Date(day + START_OF_DAY),
+  )
+}
+
 /** `2026-09-07` → `September 2026`. */
 export function monthLabel(day: string): string {
   return formatter('month', 'UTC', { month: 'long', year: 'numeric' }).format(
@@ -157,6 +164,19 @@ export function todayIn(zone: string): string {
 /** The first day of the month a date key belongs to. */
 export function startOfMonth(day: string): string {
   return `${day.slice(0, MONTH_KEY_LENGTH)}-01`
+}
+
+/**
+ * The date key `delta` days from this one. Negative goes back.
+ *
+ * Days rather than milliseconds: `setUTCDate` rolls the month and the year on
+ * its own, and the key it produces is a civil date with no zone, so a clock
+ * that shifted an hour in between cannot move it.
+ */
+export function shiftDays(day: string, delta: number): string {
+  const date = new Date(day + START_OF_DAY)
+  date.setUTCDate(date.getUTCDate() + delta)
+  return date.toISOString().slice(0, DATE_KEY_LENGTH)
 }
 
 /** The first day of the month `delta` months from this one. */
