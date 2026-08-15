@@ -5,6 +5,7 @@ import AlertIcon from '../components/AlertIcon'
 import {
   asApiError,
   connectIntegration,
+  CREDENTIAL_UNREADABLE,
   listIntegrations,
   PROVIDER_NOT_CONFIGURED,
   type Integration,
@@ -91,6 +92,25 @@ const LOCKED_MESSAGE =
   'Your session has expired, or you were never signed in — so there is nothing here to read yet.'
 
 /**
+ * What the page can offer about a failure, and never more than the failure
+ * actually has.
+ *
+ * A control that cannot work is worse than none: it invites a press, spends a
+ * round trip and comes back with the same sentence. So the three answers are
+ * separate, and `none` is a real one — a Connect refused with
+ * `provider_not_configured` is fixed in a configuration file and a restart, and
+ * neither retrying nor reconnecting touches it.
+ */
+type Recovery = 'none' | 'sign-in' | 'retry'
+
+/**
+ * Said out loud rather than left implied, because the alternative is a red
+ * sentence describing a fault with nothing beside it — which is what the
+ * operator met and reasonably read as a dead end.
+ */
+const RETRY_MESSAGE = 'Nothing on this page can put that right. Read it again, and check the server log if it keeps failing.'
+
+/**
  * A provider name as a heading, without knowing any provider.
  *
  * The API sends the lowercase enum name because that is what the connect path
@@ -103,7 +123,29 @@ function label(provider: string): string {
 }
 
 function describe(integration: Integration): Presentation {
-  // Asked first, because it outranks everything below it: with no client
+  // Asked before `configured`, and that order is the point. This row holds a
+  // credential that cannot be read, so there IS something to put right here,
+  // and reconnecting is what puts it right — which is not true of the ordinary
+  // unconfigured row below, where there is nothing stored and nothing broken.
+  // The button is offered either way: on a deployment that also lacks client
+  // credentials the sentence says so first, and pressing it says so again in
+  // `connectMessage`. A control that names the next blocker beats a state with
+  // no way out of it, which is what this row was.
+  if (integration.fault === CREDENTIAL_UNREADABLE) {
+    const missing = integration.configured
+      ? ''
+      : ' This deployment also holds no client credentials for it, so those have to go into configuration and the process restart before a consent screen can open.'
+
+    return {
+      live: false,
+      state: 'Reconnect needed',
+      detail:
+        `Kairos cannot read the credential stored for ${integration.accountLabel ?? 'this provider'}: it was encrypted with a different Security:SecretKey than this deployment runs with now. Connecting again replaces it.${missing}`,
+      action: 'Connect again',
+    }
+  }
+
+  // Asked next, because it outranks everything below it: with no client
   // credentials on this deployment there is nothing to connect to, and a
   // Connect button here would be a button whose only outcome is
   // `provider_not_configured`. The row explains itself instead.
@@ -194,6 +236,12 @@ export default function Integrations() {
   const [rows, setRows] = useState<Integration[]>([])
   const [phase, setPhase] = useState<Phase>('loading')
   const [failure, setFailure] = useState('')
+  const [recovery, setRecovery] = useState<Recovery>('none')
+  // Bumped by Try again. The read lives in an effect keyed on this rather than
+  // in a handler that repeats it, so one copy of the request keeps one copy of
+  // the abort handling — and an operator pressing twice cancels the first read
+  // instead of racing it.
+  const [attempt, setAttempt] = useState(0)
   // The provider whose Connect is in flight. It is never cleared on success:
   // the browser is leaving for the consent screen, and a button that stops
   // spinning while the page is still there reads as a press that did nothing.
@@ -201,6 +249,9 @@ export default function Integrations() {
 
   useEffect(() => {
     const controller = new AbortController()
+    setPhase('loading')
+    setFailure('')
+    setRecovery('none')
 
     listIntegrations(controller.signal)
       .then((list) => {
@@ -210,12 +261,19 @@ export default function Integrations() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         const failed = asApiError(error)
-        setPhase(failed.status === UNAUTHORIZED ? 'locked' : 'broken')
-        setFailure(failed.status === UNAUTHORIZED ? LOCKED_MESSAGE : failed.message)
+        const locked = failed.status === UNAUTHORIZED
+
+        setPhase(locked ? 'locked' : 'broken')
+        // The server's own sentence, then what can be done about it. A stored
+        // credential that will not decrypt no longer arrives here at all — it
+        // comes back on its row with a Connect button beside it — so everything
+        // that reaches this branch is a fault the page cannot act on.
+        setFailure(locked ? LOCKED_MESSAGE : `${failed.message} ${RETRY_MESSAGE}`)
+        setRecovery(locked ? 'sign-in' : 'retry')
       })
 
     return () => controller.abort()
-  }, [])
+  }, [attempt])
 
   async function connect(provider: string) {
     setPending(provider)
@@ -232,6 +290,10 @@ export default function Integrations() {
       const failed = asApiError(error)
       setPending('')
       setFailure(connectMessage(failed.status, failed.code))
+      // A refused Connect leaves the table standing, and the button that was
+      // pressed is still on the row — so the only recovery worth adding here is
+      // the one this page cannot draw twice: signing in again.
+      setRecovery(failed.status === UNAUTHORIZED ? 'sign-in' : 'none')
     }
   }
 
@@ -280,9 +342,9 @@ export default function Integrations() {
             <span>
               {failure}
               {/* Both routes into this message — the read that came back 401 and
-                  the Connect that did — set the same sentence, so one test
+                  the Connect that did — set the same recovery, so one test
                   covers both places the operator can meet it. */}
-              {failure === LOCKED_MESSAGE && (
+              {recovery === 'sign-in' && (
                 <>
                   {' '}
                   <a href={SIGN_IN}>Sign in</a> and come back.
@@ -290,6 +352,23 @@ export default function Integrations() {
               )}
             </span>
           </p>
+        )}
+
+        {/* The action the sentence above just described. Its own block rather
+            than a child of the alert: `.field-error` is a centred flex row
+            sized for an icon and a sentence, and a 44px control inside it
+            stretches the row it is meant to sit under. */}
+        {recovery === 'retry' && (
+          <div className="mb-5">
+            <button
+              className="btn"
+              type="button"
+              data-loading={phase === 'loading' || undefined}
+              onClick={() => setAttempt((previous) => previous + 1)}
+            >
+              Read it again
+            </button>
+          </div>
         )}
 
         {/* `locked` and `broken` render no table at all: both have already put

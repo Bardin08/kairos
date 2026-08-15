@@ -307,6 +307,18 @@ export function rescheduleBooking(
 export const PROVIDER_NOT_CONFIGURED = 'provider_not_configured'
 
 /**
+ * The stored credential will not decrypt: it was written under a different
+ * `Security:SecretKey` than the deployment is running with now, so the row is
+ * there and unusable.
+ *
+ * Arrives on `fault` rather than as a failed request, and that is the whole
+ * point of it being a code on a row: reconnecting is the fix, the Connect
+ * button is what does it, and a listing that refused would have taken the
+ * button away with it.
+ */
+export const CREDENTIAL_UNREADABLE = 'credential_unreadable'
+
+/**
  * One provider and where its connection stands.
  *
  * `provider` is the lowercase enum name — the same string the connect path
@@ -330,6 +342,15 @@ export type Integration = {
   /** Extended-ISO instant, `2026-08-14T22:29:14Z`, or null when not connected. */
   connectedAt: string | null
   reconnectRequired: boolean
+  /**
+   * A code for a stored credential this deployment cannot use, or null. Today
+   * the only one is `CREDENTIAL_UNREADABLE`. It is a separate field from
+   * `reconnectRequired` because the two have different causes and want
+   * different sentences — one is the provider refusing a grant, the other is
+   * this deployment being unable to read what it stored — even though both end
+   * at the same button.
+   */
+  fault: string | null
 }
 
 /** Every provider this build can connect, with its state. Never a fixed list. */

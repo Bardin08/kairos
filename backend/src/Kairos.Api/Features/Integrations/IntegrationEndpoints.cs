@@ -14,13 +14,20 @@ namespace Kairos.Api.Features.Integrations;
 /// One provider as the Integrations page renders it. Every field is provider-neutral, which is
 /// what lets the page list whatever the backend returns instead of hard-coding a Google button.
 /// </summary>
+/// <param name="Fault">
+/// A machine-readable code for a stored credential this deployment cannot use, or null when
+/// there is nothing wrong with it. A code and never a sentence: the page turns codes into copy
+/// everywhere else — <c>?error=</c> on the callback does exactly this — and prose from the server
+/// is prose no designer ever sees.
+/// </param>
 public sealed record IntegrationResponse(
     string Provider,
     bool Configured,
     bool Connected,
     string? AccountLabel,
     string? ConnectedAt,
-    bool ReconnectRequired);
+    bool ReconnectRequired,
+    string? Fault);
 
 /// <summary>Where to send the browser. The page navigates to it; it does not fetch it.</summary>
 public sealed record ConnectIntegrationResponse(string ConsentUrl);
@@ -115,7 +122,28 @@ public static class IntegrationEndpoints
         foreach (var connector in connectors.OrderBy(candidate => candidate.Provider))
         {
             var row = connections.FirstOrDefault(candidate => candidate.Provider == connector.Provider);
-            var reconnect = row is not null && await connector.IsReconnectRequiredAsync(cancellationToken);
+            var reconnect = false;
+            string? fault = null;
+
+            if (row is not null)
+            {
+                try
+                {
+                    reconnect = await connector.IsReconnectRequiredAsync(cancellationToken);
+                }
+                catch (DomainException failure)
+                    when (failure.Code == IntegrationCredentialStore.CredentialUnreadableCode)
+                {
+                    // One provider's unusable credential is not the listing's failure. Answered on
+                    // the row rather than thrown, because the whole point of this screen is to
+                    // show what can be connected and what is connected — and a page that refuses
+                    // to draw is a page with no button on it, which is where the operator was
+                    // left: a sentence naming a key mismatch and nothing to press. The fix is
+                    // reconnecting, the Connect button is what does it, and it only exists if the
+                    // table gets drawn.
+                    fault = failure.Code;
+                }
+            }
 
             responses.Add(new IntegrationResponse(
                 Name(connector.Provider),
@@ -123,7 +151,8 @@ public static class IntegrationEndpoints
                 row is not null,
                 row?.AccountLabel,
                 row is null ? null : Format(row.ConnectedAt),
-                reconnect));
+                reconnect,
+                fault));
         }
 
         return responses;
