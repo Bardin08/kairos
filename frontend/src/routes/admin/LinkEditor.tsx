@@ -14,6 +14,7 @@ import {
   type LinkLimits,
 } from './adminLinks'
 import Failure from './Failure'
+import { LIMIT_COPY, LIMIT_KEYS } from './limitCopy'
 
 /** The four limits of a link that does not exist yet: all inherited. */
 const NEW_LIMITS: LinkLimits = {
@@ -25,15 +26,6 @@ const NEW_LIMITS: LinkLimits = {
 
 /** What a new link starts as. One duration, because zero is not a link. */
 const NEW_DURATIONS = [30]
-
-/** The floor for three of the four. See InheritableNumber's `min`. */
-const NO_FLOOR = 0
-
-/**
- * The start increment's floor. Zero there is not a smaller step, it is the step
- * that makes the generator's `PlusMinutes(step)` never advance.
- */
-const INCREMENT_FLOOR = 1
 
 /**
  * One link, in full: what it is called, where it lives, how long it runs, which
@@ -192,38 +184,21 @@ export default function LinkEditor({
           no notice, nothing bookable that day.
         </p>
 
-        <InheritableNumber
-          label="Margin between meetings"
-          unit="minutes"
-          value={limits.marginMinutes}
-          globalValue={globals.marginMinutes}
-          min={NO_FLOOR}
-          onChange={limit('marginMinutes')}
-        />
-        <InheritableNumber
-          label="Minimum notice"
-          unit="minutes"
-          value={limits.minNoticeMinutes}
-          globalValue={globals.minNoticeMinutes}
-          min={NO_FLOOR}
-          onChange={limit('minNoticeMinutes')}
-        />
-        <InheritableNumber
-          label="Booking cap"
-          unit="a day"
-          value={limits.dailyCap}
-          globalValue={globals.dailyCap}
-          min={NO_FLOOR}
-          onChange={limit('dailyCap')}
-        />
-        <InheritableNumber
-          label="Start increment"
-          unit="minutes"
-          value={limits.startIncrementMinutes}
-          globalValue={globals.startIncrementMinutes}
-          min={INCREMENT_FLOOR}
-          onChange={limit('startIncrementMinutes')}
-        />
+        {LIMIT_KEYS.map((key) => {
+          const copy = LIMIT_COPY[key]
+          return (
+            <InheritableNumber
+              key={key}
+              label={copy.label}
+              short={copy.short}
+              help={copy.help}
+              value={limits[key]}
+              globalValue={globals[key]}
+              min={copy.floor}
+              onChange={limit(key)}
+            />
+          )
+        })}
 
         <Failure error={failure} />
 

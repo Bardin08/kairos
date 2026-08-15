@@ -9,8 +9,16 @@ import InheritableNumber from '../src/components/InheritableNumber'
 // control exists.
 const GLOBAL = 15
 
-const CHECKBOX = 'Use the global default — 15 minutes'
+/** Margin's floor. Zero is a real margin — no gap between two meetings. */
+const NO_FLOOR = 0
+
+/** The value that a two-state control cannot tell apart from "inherit". */
+const EXPLICIT_ZERO = '0'
+
 const FIELD = 'Margin between meetings'
+const OVERRIDE = `Override ${FIELD}`
+const INHERIT = `Use global ${FIELD}`
+const INHERITED = 'inherit'
 
 /**
  * The component plus the value it last emitted, since what leaves it is the
@@ -25,13 +33,13 @@ function Harness({ start }: { start: number | null }) {
     <>
       <InheritableNumber
         label={FIELD}
-        unit="minutes"
+        short="min"
         value={value}
         globalValue={GLOBAL}
-        min={0}
+        min={NO_FLOOR}
         onChange={setValue}
       />
-      <output>{value === null ? 'inherit' : String(value)}</output>
+      <output>{value === null ? INHERITED : String(value)}</output>
     </>
   )
 }
@@ -46,42 +54,70 @@ function sent() {
 
 afterEach(cleanup)
 
-test('while inherited the box shows the global, greyed out, and null is what leaves', () => {
+test('while inherited the global is stated as a fact and null is what leaves', () => {
   render(<Harness start={null} />)
 
-  // Not an empty box. An operator seeing "15" they cannot type into understands
-  // it is the global; an operator seeing nothing wonders whether the setting is
-  // missing, and the first thing they do about it is type 15 — which is the
-  // default-copying bug, entered by hand.
+  // Not a disabled input showing a number nobody typed. The value is read-only
+  // prose with the word Global beside it, so the state is legible without
+  // colour and without having to try the field to discover it is dead.
+  expect(screen.queryByLabelText(FIELD)).toBeNull()
+  expect(screen.getByText('Global')).toBeTruthy()
+  expect(screen.getByText(String(GLOBAL), { exact: false })).toBeTruthy()
+  expect(sent()).toBe(INHERITED)
+})
+
+test('overriding seeds the field with the global rather than with an empty box', () => {
+  render(<Harness start={null} />)
+
+  fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
+
+  // The value the link is on right now is the honest starting point for
+  // editing it, and an empty box is indistinguishable from one nobody filled in.
   expect(box().value).toBe(String(GLOBAL))
-  expect(box().disabled).toBe(true)
-  expect(sent()).toBe('inherit')
+  expect(sent()).toBe(String(GLOBAL))
 })
 
 test('an explicit zero leaves as zero rather than as inherit', () => {
   render(<Harness start={null} />)
 
-  fireEvent.click(screen.getByLabelText(CHECKBOX))
-  fireEvent.change(box(), { target: { value: '0' } })
+  fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
+  fireEvent.change(box(), { target: { value: EXPLICIT_ZERO } })
 
   // The state a two-state control cannot hold apart from "inherit", and the one
-  // Part A's design turns on: zero margin is no gap between meetings, and a link
-  // that means it must not be read as a link that never said anything.
-  expect(box().disabled).toBe(false)
-  expect(sent()).toBe('0')
+  // the whole limits design turns on: zero margin is no gap between meetings,
+  // and a link that means it must not read as a link that never said anything.
+  expect(sent()).toBe(EXPLICIT_ZERO)
 })
 
 test('inheriting again after an explicit zero goes back to null, not to 0', () => {
   render(<Harness start={null} />)
 
-  fireEvent.click(screen.getByLabelText(CHECKBOX))
-  fireEvent.change(box(), { target: { value: '0' } })
-  fireEvent.click(screen.getByLabelText(CHECKBOX))
+  fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
+  fireEvent.change(box(), { target: { value: EXPLICIT_ZERO } })
+  fireEvent.click(screen.getByRole('button', { name: INHERIT }))
 
   // The round trip closes: three states reachable through two controls, in both
-  // directions. A component that kept the 0 and only disabled the input would
-  // pass the first two tests and still write 0 to a link that asked to inherit.
-  expect(sent()).toBe('inherit')
-  expect(box().value).toBe(String(GLOBAL))
-  expect(box().disabled).toBe(true)
+  // directions. A component that kept the 0 and only hid the input would pass
+  // the first three tests and still write 0 to a link that asked to inherit.
+  expect(sent()).toBe(INHERITED)
+  expect(screen.queryByLabelText(FIELD)).toBeNull()
+})
+
+test('pressing override moves focus into the field it just created', () => {
+  render(<Harness start={null} />)
+
+  fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
+
+  // A button that replaces itself with a field and drops focus to the body
+  // sends a keyboard user back to the top of the form to find where they were.
+  expect(document.activeElement).toBe(box())
+})
+
+test('pressing use global returns focus to the button that replaced the field', () => {
+  render(<Harness start={null} />)
+
+  fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
+  fireEvent.click(screen.getByRole('button', { name: INHERIT }))
+
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: OVERRIDE }))
 })

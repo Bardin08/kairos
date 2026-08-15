@@ -1,42 +1,50 @@
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 
 /**
- * Three states through a control that natively offers two.
+ * Three states through controls that natively offer two.
  *
- * A limit can be inherited, an explicit zero, or a value — and Part A built the
- * whole global-then-override design on the first two being different: `null`
+ * A limit can be inherited, an explicit zero, or a value — and the whole
+ * global-then-override design rests on the first two being different: `null`
  * inherits the global, `0` is a deliberate zero. A plain number input expresses
  * two of the three. It cannot hold "inherit" at all, and the obvious substitute
  * — an empty box — is indistinguishable from a box the operator has not filled
  * in yet, so the moment anything coerces it the link silently stops tracking
  * the global and nothing on screen says so.
  *
- * So the third state gets its own control. The checkbox owns "inherit" and the
- * number owns the value, and they are wired so that exactly one of them is
- * live at a time:
+ * The first version of this component solved that with a checkbox under a
+ * disabled input. It held all three states and read backwards: the control that
+ * governed the field sat below it in the faintest type on the page, and the
+ * inherited state was a box showing a number the operator had never typed and
+ * could not edit.
  *
- * - checked  → the number is disabled and `null` is what leaves this component
- * - unchecked → whatever the number reads leaves this component, `0` included
+ * So the two states become two different things rather than one thing twice:
  *
- * While it is checked the box still SHOWS the global, greyed out by `disabled`,
- * rather than sitting empty. That is the difference between a control that
- * expresses three states and one that merely permits them: the operator reads
- * "15", sees it is not editable, and understands where the 15 came from.
+ * - inherited  → the global, stated as read-only prose, with a Global chip and
+ *                an Override button. There is no input at all.
+ * - overridden → a number field the width of its longest value, with the unit
+ *                inside it and a button back to the global.
+ *
+ * Nothing here is carried by colour. The states differ in shape and in the word
+ * `Global`, so the control survives a monochrome screenshot — DESIGN.md's
+ * Second Channel Rule.
  */
 export default function InheritableNumber({
   label,
-  unit,
+  short,
+  help,
   value,
   globalValue,
   min,
   onChange,
 }: {
   label: string
-  /** What the number means — "minutes", "meetings a day". Named in the checkbox's line. */
-  unit: string
+  /** The unit at affix width — "min", "a day". Shown, never spoken. */
+  short: string
+  /** One line under the label. Omitted on screens that carry it elsewhere. */
+  help?: string
   /** `null` inherits the global. A number, `0` included, is this link's own. */
   value: number | null
-  /** The global this inherits when `value` is null. Shown, disabled, while it does. */
+  /** The global this inherits when `value` is null. Stated, not editable. */
   globalValue: number
   /**
    * The floor. Zero for margin, minimum notice and daily cap — no gap, book
@@ -50,43 +58,97 @@ export default function InheritableNumber({
   const id = useId()
   const inherited = value === null
 
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        className="input numeric"
-        type="number"
-        min={min}
-        step={1}
-        disabled={inherited}
-        // The global while inherited, so the box is never empty and never lies.
-        value={inherited ? globalValue : value}
-        onChange={(event) => onChange(floor(event.target.value, min))}
-      />
-      {/* The third state, and the only control that can reach it. Unchecking
-          seeds the number with the global rather than with an empty box: it is
-          the value the link is on right now, so it is the honest starting
-          point for editing it.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const overrideRef = useRef<HTMLButtonElement>(null)
+  // Which control the operator should land on after the swap.
+  const follow = useRef<'input' | 'override' | null>(null)
 
-          Clamped on the way out, because the global and this link's floor are
-          set by two different endpoints and can disagree. A global start
-          increment below one would otherwise leave this box the moment the
-          checkbox is cleared, and the PUT that carried it would come back as an
-          opaque 400 about a value the operator never typed. */}
-      <label className="fine row gap-2">
-        <input
-          type="checkbox"
-          checked={inherited}
-          onChange={(event) =>
-            onChange(event.target.checked ? null : Math.max(min, globalValue))
-          }
-        />
-        Use the global default — {globalValue} {unit}
-      </label>
+  useEffect(() => {
+    if (follow.current === 'input') inputRef.current?.focus()
+    if (follow.current === 'override') overrideRef.current?.focus()
+    follow.current = null
+  }, [inherited])
+
+  return (
+    <div className="field-row">
+      <div className="field-row-label">
+        {/* A label needs a control. While inherited there is none, so the name
+            is a span and the value beside it is plain text. */}
+        {inherited ? (
+          <span className="field-row-name">{label}</span>
+        ) : (
+          <label htmlFor={id}>{label}</label>
+        )}
+        {help !== undefined && <p className="fine">{help}</p>}
+      </div>
+
+      <div className="field-row-control">
+        {inherited ? (
+          <>
+            <span className="numeric">
+              {globalValue} <span className="unit-inline">{short}</span>
+            </span>
+            <span className="badge">Global</span>
+            <button
+              ref={overrideRef}
+              className="btn btn-ghost"
+              type="button"
+              // Named in full, because `Override` four times in one group is
+              // unusable by voice control and by a screen reader's element list.
+              aria-label={`Override ${label}`}
+              onClick={() => {
+                follow.current = 'input'
+                // Seeded with the global rather than an empty box: it is the
+                // value the link is on right now. Clamped because the global and
+                // this link's floor are set by two different endpoints and can
+                // disagree, and the PUT carrying an under-floor value would come
+                // back as an opaque 400 about a number nobody typed.
+                onChange(Math.max(min, globalValue))
+              }}
+            >
+              Override
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="affix">
+              <input
+                ref={inputRef}
+                id={id}
+                className="input numeric ctl-num"
+                type="number"
+                inputMode="numeric"
+                min={min}
+                step={1}
+                value={value}
+                onChange={(event) => onChange(floor(event.target.value, min))}
+              />
+              {/* Shown, not spoken — the label already carries the unit, and
+                  hearing "minutes" twice is worse than not seeing it once. */}
+              <span className="affix-unit" aria-hidden="true">
+                {short}
+              </span>
+            </span>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              aria-label={`Use global ${label}`}
+              onClick={() => {
+                follow.current = 'override'
+                onChange(null)
+              }}
+            >
+              Use global
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
+
+/** The base a whole number of minutes is parsed in. */
+const DECIMAL = 10
 
 /**
  * A whole number at or above the floor, never NaN and never negative.
@@ -98,6 +160,6 @@ export default function InheritableNumber({
  * does not depend on how faithfully the test environment implements it.
  */
 function floor(raw: string, min: number): number {
-  const parsed = Number.parseInt(raw, 10)
+  const parsed = Number.parseInt(raw, DECIMAL)
   return Number.isNaN(parsed) ? min : Math.max(min, parsed)
 }
