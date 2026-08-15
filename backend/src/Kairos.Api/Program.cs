@@ -54,8 +54,8 @@ builder.Services.AddSingleton(new SecretProtector(
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
 
-// Pocket ID, and with it the whole of the operator's authentication. Read here rather than bound
-// to an options class because all three values are needed while the handlers are being
+// The identity provider, and with it the whole of the operator's authentication. Read here rather
+// than bound to an options class because all three values are needed while the handlers are being
 // configured, and read with a throw for the same reason the secret key above has one: an absent
 // authority does not announce itself, it surfaces later as a redirect to nowhere.
 var authority = RequiredForSignIn("Authority");
@@ -64,8 +64,8 @@ var clientSecret = RequiredForSignIn("ClientSecret");
 
 string RequiredForSignIn(string key) =>
     builder.Configuration[$"Authentication:{key}"] ?? throw new InvalidOperationException(
-        $"Authentication:{key} is not configured. The admin surface is authenticated against "
-        + "Pocket ID, so Kairos needs its issuer URL and an OIDC client registered there.");
+        $"Authentication:{key} is not configured. The admin surface is authenticated against an "
+        + "OIDC provider, so Kairos needs its issuer URL and a client registered there.");
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -96,6 +96,18 @@ builder.Services
         // The handler still defaults to the implicit id_token flow, which is what having a client
         // secret at all is an argument against. Code flow, with the PKCE the handler adds to it.
         options.ResponseType = OpenIdConnectResponseType.Code;
+
+        // Development only, and gated so that production cannot reach it however the
+        // configuration is written. The local provider in compose.dev.yaml serves discovery and
+        // its JWKS over plain HTTP on loopback, and the handler refuses to fetch either without
+        // this. It relaxes the TRANSPORT the metadata is fetched over and nothing else: the
+        // signature on every token is still verified against that JWKS, the issuer and audience
+        // are still checked, and no request skips authentication because of this line. It is not
+        // an authentication bypass and must never be widened into one.
+        if (builder.Environment.IsDevelopment())
+        {
+            options.RequireHttpsMetadata = false;
+        }
     });
 
 builder.Services.AddAuthorization(options =>
