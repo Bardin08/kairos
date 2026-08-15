@@ -189,3 +189,227 @@ Ascending lexicographically, every version nibble a 7. The inserts went through 
 ### 11. The full suite — pass
 
 16 passed, 0 skipped, 0 failed.
+
+---
+
+# Part B
+
+What Part B's eight acceptance conditions actually do when they are run against a real Google account, a real relay and a real receiver. Same rule as Part A: every line below is something that was observed, and where an observation contradicted an earlier claim the observation is what is written down.
+
+Measured 2026-08-15 at `d019f1b` on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish. Two instances were used. The **live** one on port 5199 runs against `backend/src/Kairos.Api/kairos.db` with the operator's Google account `vbardin810@gmail.com` connected (`connectedAt 2026-08-15T00:08:48Z`, `reconnectRequired false`) and the Gmail relay configured; conditions 1, 2, 5 and 7 are its. A **scratch** instance on port 5399 runs against a copy of that database with the credential row deleted, so nothing it does can reach the operator's calendar; conditions 3, 4, 6 and 8 are its, because each of them needs either a dead credential, a webhook receiver or a booking that has already ended.
+
+## How Part B was built
+
+`main` holds 40 commits: one initial commit and 39 squash merges, each carrying its pull request number. **Nothing was pushed to `main` directly.** Part A was #1–#30; Part B is **#31–#41 — eleven merges for nine tasks**, the two extra being fixes (#35, which made `ship.sh` prove a fetch actually moved `origin/main`, and #41, which bounded the `meeting.ended` sweep to meetings not yet announced). #2 and #3 are dependabot bumps and are still open.
+
+## Headline
+
+```
+backend tests    136 passed, 0 failed     (Part A left it at 87)
+frontend tests    32 passed, 0 failed
+bundle            70,691 bytes gzipped    (budget 76,800)
+verify.sh         16 passed, 0 skipped, 0 failed
+conditions        6 pass, 2 partial, 0 fail
+```
+
+The bundle moved from Part A's 69,152 to 70,691 — **+1,539 bytes gzipped for the integrations page**, which is the only screen Part B adds. 6,109 bytes of headroom left.
+
+## The eight conditions
+
+### 1. An external event suppresses its slots and dims the day — pass
+
+Two events were written into the connected calendar **through the Google Calendar API directly, not through Kairos**, so no `Booking` row existed for either and the only thing that could suppress a slot was the freebusy read. Google normalised both into `Europe/Kiev`, which is that calendar's own zone:
+
+```
+kairostaskten1   2026-09-02  10:00-12:00 Warsaw   stored 2026-09-02T11:00:00+03:00 .. 13:00+03:00
+kairostaskten2   2026-09-03  08:30-17:30 Warsaw   stored 2026-09-03T09:30:00+03:00 .. 18:30+03:00
+```
+
+`GET /links/consulting/slots?duration=25` over both days, before and after:
+
+```
+2026-09-02   before  16: 07:00 07:30 08:00 08:30 09:00 09:30 10:00 10:30 11:00 … 14:30   (UTC)
+2026-09-02   after   10: 07:00                                     10:30 11:00 … 14:30
+2026-09-03   before  16
+2026-09-03   after    0
+```
+
+Exactly the six starts 07:30–10:00Z went. The busy block is 08:00–10:00Z and the global margin is 15, but `consulting`'s own margin is 30 and `SlotGenerator` takes the larger, so the shadow is 07:30–10:30Z: 07:00 survives because a 25 ends at 07:25, before the shadow opens, and 10:30 survives because the interval is half-open. Nothing in the local database changed between the two reads.
+
+The dimming, read out of a real browser at `Europe/Warsaw` on the September grid:
+
+```
+1 September   data-state=available     enabled    "Tuesday 1 September, 16 times available"    color rgb(23,26,32)
+2 September   data-state=available     enabled    "Wednesday 2 September, 10 times available"  color rgb(23,26,32)
+3 September   data-state=unavailable   disabled   "Thursday 3 September, no times available"   color rgb(155,161,176)
+4 September   data-state=available     enabled    "Friday 4 September, 16 times available"     color rgb(23,26,32)
+```
+
+Both events were deleted afterwards and both days went back to 16.
+
+### 2. The booking lands in the calendar at the right instant, with a Meet — pass
+
+Booking `01a002c9-6690-75ad-b172-651b478067bf`, `2026-09-07T07:00:00Z`–`07:25:00Z`. The event Google returns when it is read back:
+
+```
+id            01a002c9669075adb172651b478067bf      the booking id as hex, so the write is idempotent
+start         2026-09-07T10:00:00+03:00 (Europe/Kiev)     = 2026-09-07T07:00:00Z
+end           2026-09-07T10:25:00+03:00 (Europe/Kiev)     = 2026-09-07T07:25:00Z
+summary       Consulting call with Vlad Bardin
+hangoutLink   https://meet.google.com/mnd-tvyf-wkw
+conferenceData.createRequest.status.statusCode  success
+```
+
+and the row Kairos wrote beside it:
+
+```
+CalendarEntries   State 20 (Synced)   ExternalEventId 01a002c9669075adb172651b478067bf   LastError NULL
+ConferenceLinks   ExternalId mnd-tvyf-wkw   JoinUrl https://meet.google.com/mnd-tvyf-wkw
+```
+
+The instant is the assertion, and three surfaces agree on it. The manage page rendered in `Europe/Warsaw` reads **`Monday 7 September, 09:00–09:25 · Times in Europe/Warsaw`**; the confirmation's subject reads `Monday 7 September 2026 at 09:00 (Europe/Warsaw)`; the calendar holds `07:00:00Z`. 09:00 CEST is 07:00Z is 10:00 EEST, one moment named three ways.
+
+**One thing an operator should know rather than discover.** The account's Google Calendar is set to `Europe/Kiev` and Kairos's organizer zone is `Europe/Warsaw`, so the event the organizer sees in Google's own UI reads 10:00 for a slot the booking page offered at 09:00. That is not a Kairos defect — `GoogleCalendarAdapter` writes an offset-carrying instant and names no zone at all, which is why the instant survives the disagreement — but the two settings disagree by an hour and only one of them is Kairos's to fix.
+
+### 3. A failed calendar write leaves the booking standing — pass
+
+Reproduced independently of Task 8, on the scratch instance, without touching the live credential. A well-formed credential was planted: real AES-GCM under the real `Security__SecretKey`, holding a refresh token that has never existed, against a `client_id` that has never existed. Then one ordinary `POST /bookings`:
+
+```
+HTTP 201
+Bookings         Status 10 (Confirmed)   1788850800..1788852300   intact
+CalendarEntries  State 30 (Failed)       ExternalEventId NULL
+                 LastError  Error:"invalid_client", Description:"The OAuth client was not found.", Uri:""
+ConferenceLinks  0 rows
+log              warn  Calendar sync failed for booking 01a002cc-…. The booking stands.
+```
+
+No 500, and the freebusy read on the same request logged its own warning and returned no opinion rather than failing the page — the two halves of the adapter failing differently, as documented.
+
+**What "marked not synced" means today, precisely:** it is `CalendarSyncState.Failed` on a `CalendarEntry` row, and a warning in the log. Nothing in the API or in the UI surfaces per-booking sync state — `GET /integrations` reports whether the provider is connected, not whether a given meeting made it. An operator learns that a meeting never reached the calendar by reading the database or the log.
+
+### 4. `.ics` `DTEND` and the reschedule `SEQUENCE` — partial
+
+The .ics is right. Nothing delivers the second one.
+
+Both dumps below come from `BookingMailer.Compose` — the production composition path, the one whose remarks say "exactly as it goes on the wire" — run over the real `Booking` row, written out to bytes and parsed back before anything was read off it. Booking `01a002c8-7804-7d51-a736-a5e604e79982`, 25 minutes, rescheduled through `POST /bookings/{token}/reschedule`:
+
+```
+                  before                          after
+booking.Sequence  0                               1
+StartUtc          1788505200                      1788512400
+UID               01a002c8-7804-…-a5e604e79982    01a002c8-7804-…-a5e604e79982     unchanged
+DTSTART           20260904T070000Z                20260904T090000Z
+DTEND             20260904T072500Z                20260904T092500Z                 25 minutes both times
+SEQUENCE          0                               1
+METHOD            REQUEST                         REQUEST      (MIME method= agrees)
+attachment        application/ics invite.ics      application/ics invite.ics
+```
+
+`DTEND − DTSTART` is 1500 seconds in both, the UID is byte-identical across the move, and `SEQUENCE` advanced by one. That is the condition as written, and it holds.
+
+**Why this is partial.** `RescheduleAsync` takes neither `BookingMailer` nor `CalendarSyncService` — grep the file: `SendConfirmationAsync` and `SyncAsync` have exactly one call site each, both inside `CreateAsync`. So moving a meeting increments a `SEQUENCE` that is never sent to anybody and leaves the Google event at the old time. The invitee keeps an invitation for a slot that no longer exists, and the organizer's calendar keeps a meeting nobody is coming to. The .ics is correct; the delivery of it does not happen.
+
+### 5. Confirmation in the inbox, with a working accept/decline — partial
+
+**Gmail: confirmed by the operator, visually, in their own inbox.** Not by this run — that mailbox is not readable from here. What they reported seeing:
+
+```
+Subject      Confirmed: Consulting call, Monday 7 September 2026 at 09:00 (Europe/Warsaw)
+Placement    inbox, not spam
+Controls     Yes / No / Maybe / Propose a new time
+Organizer    vbardin.homelab@gmail.com
+Body         the manage link, http://localhost:5199/manage/<64 hex>
+Attachment   one, "Scanned by Gmail"
+```
+
+The RSVP controls rendering is the load-bearing part: Gmail only draws them when the MIME `method=` parameter and the .ics `METHOD` agree, which is the one thing `BookingMailer` derives from a single constant rather than writing twice.
+
+Gmail also printed **"On your Google Calendar — Conflict with Consulting call with Vlad Bardin at 9:00 AM – 9:25 AM"**, which is the calendar event from condition 2 and the .ics from condition 4 agreeing on the same instant, the same zone and the same 25 minutes, having reached Gmail by two entirely different code paths. It corroborates all three conditions better than any of them does alone.
+
+**Outlook: not tested.** The operator has no Outlook or Hotmail address and asked for it to be skipped. This is the half more likely to fail: Microsoft's consumer filters score a `gmail.com` sender to an `outlook.com` recipient considerably harder than Gmail scores mail arriving from Google's own infrastructure, and the sending domain here is a free Gmail account rather than the `vbardin.com` the spec assumed. Nothing about the Gmail result predicts it.
+
+**And the message that arrived was relayed by hand, because Kairos could not send it.** See the defect below; the bytes were Kairos's own, the SMTP client was not.
+
+### 6. `meeting.ended` fires once and only once — pass
+
+Scratch instance, webhook receiver on 127.0.0.1:5388, one booking hand-inserted with an end time ten minutes in the past.
+
+```
+00:13:22Z   booking 01A002C4-…-0000000000E6 inserted, EndUtc 2026-08-15T00:03:22Z, Status 10
+00:14:13Z   poller queued it        one "Queued meeting.ended" line, one outbox row
+00:14:23Z   dispatcher delivered it 61 s after the insert
+00:17:17Z   six poller sweeps in the log, still one queued line, still one delivery
+```
+
+Three further sweeps ran after the announcement and produced nothing. The outbox row shows why: `Type 30, Attempts 0, DispatchedAt 1786752863`, one row, and the poller's candidate filter excludes any booking that already has a `MeetingEnded` message. End to end that is 51 s of noticing and 10 s of delivering, against a worst case of 70 (60 s poller + 10 s dispatcher).
+
+The `booking.created` half is the same queue on the same tick and was measured alongside: queued 00:12:46Z, delivered 00:12:53Z, seven seconds, one dispatcher tick.
+
+### 7. Neither fact lives on `Booking` — pass
+
+Storage first, because it is the level that cannot be talked around:
+
+```sql
+CREATE TABLE "Bookings" (
+    "Id", "LinkId", "StartUtc", "EndUtc", "Notes", "Status", "ManageTokenHash",
+    "Sequence", "CreatedAt", "CancelledAt", "SeriesId", "RecurrenceRule", "RecurrenceId"
+);
+```
+
+No event id, no join URL, no sync state, and no nullable column standing in for one. The entity matches — `Booking` has thirteen properties and one navigation, `Participants`, and no navigation to either new table. `BookingResponse`, which is what every booking endpoint answers with, names none of them either.
+
+The two facts live where they belong, each under a unique index on `(BookingId, Provider)` so a provider can say each thing about a booking exactly once:
+
+```
+booking synced to a calendar   -> CalendarEntries  01A002C9-6DCE-…  State 20  ExternalEventId 01a002c9669075adb172651b478067bf
+booking with a Meet link       -> ConferenceLinks  01A002C9-6F97-…  JoinUrl https://meet.google.com/mnd-tvyf-wkw
+booking whose calendar refused -> CalendarEntries  01A002CC-E1E3-…  State 30  ExternalEventId NULL, and no ConferenceLink at all
+```
+
+The third row is the one that shows the split is load-bearing rather than decorative: a booking can have a calendar entry and no conference, and the absence of a `ConferenceLink` row is what "no join link" is made of — there is no state column on it to mean anything else.
+
+### 8. The HMAC verifies — pass
+
+Verified against an independent receiver written from the contract rather than from the code, checked first against the published vector — secret `a-shared-secret`, timestamp `1788000000`, body `{"type":"meeting.ended"}` → `sha256=2947a6ec…45fd0d` — and reproduced exactly before any Kairos delivery was trusted.
+
+The `meeting.ended` delivery as it arrived:
+
+```
+Content-Type       application/json; charset=utf-8
+X-Kairos-Timestamp 1786752863
+X-Kairos-Signature sha256=8f5865dc1952867b9954eb617e31c14910c270c16805c8efa4c0e9d518e3fd4b
+body               177 bytes
+{"Event":"meeting.ended","BookingId":"01a002c4-0000-7000-8000-0000000000e6","Slug":"consulting","Start":"2026-08-14T23:38:22Z","End":"2026-08-15T00:03:22Z","DurationMinutes":25}
+```
+
+Recomputing `HMAC-SHA256(secret, "{timestamp}.{body}")` over the raw received bytes reproduced that signature exactly. Four negative controls, each of which must fail and each of which did:
+
+```
+one bit different in the secret          rejected
+one byte appended to the body            rejected
+timestamp advanced by one second         rejected
+body signed without the timestamp        rejected
+```
+
+The last is the one that matters: it is what proves the timestamp is inside the signature rather than merely beside it, which is what stops a captured delivery being replayable forever. `booking.created` verified on the same terms, 179 bytes, `sha256=ab6c9755…c037653`.
+
+## What Part B does not do yet
+
+Four things, none of which any of the eight conditions asks for, and all of which someone will meet.
+
+**`ICalendarWriter.CancelEventAsync` has no caller.** It is declared, implemented against Google, and faked in the tests; `grep` finds no production call site. Cancelling a booking removes it from Kairos and leaves the Google event where it was.
+
+**A reschedule notifies nobody and moves nothing.** Covered under condition 4. Of the two, this is the worse one: cancelling at least leaves an event the organizer can recognise as stale, while a reschedule leaves two plausible times and no way to tell which is real.
+
+**Confirmation email fails at the TLS handshake on this host — every time, not intermittently.** MailKit's `SmtpClient` defaults `CheckCertificateRevocation` to true and treats an *incomplete* OCSP lookup as fatal:
+
+```
+MailKit.Security.SslHandshakeException
+  • The server certificate has the following errors:
+    • An incomplete certificate revocation check occurred.
+```
+
+Across both live logs, **five bookings, five send attempts, five failures, zero successes.** The chain is fine — `smtp.gmail.com` presented a valid Google Trust Services WE2 certificate over TLS 1.3, and an independent client on the same machine at the same moment completed STARTTLS, authenticated with the same credential and delivered a 2,744-byte message. So this is not a network problem, not a credential problem and not interception; it is one library default meeting a platform that cannot complete an online revocation check. The message the operator found in their inbox is that hand-relayed one, carrying Kairos's own composed bytes. A fix is in flight as its own pull request.
+
+**The sender is `vbardin.homelab@gmail.com`, not `vbardin.com`.** The spec assumed a relay with SPF and DKIM for `vbardin.com`; there is none, and a free Gmail account cannot send as a foreign domain with aligned DKIM. SPF and DKIM are Google's and are aligned, which is what the Gmail result rests on. Accepted by the operator. Related and also accepted: the relay credential is a Gmail app password shared with the identity stack and cannot be scoped send-only — it authenticates over IMAP too — which is documented in `homelab/docs/runbooks/credential-rotation.md` with the dedicated `vbardin.homelab@gmail.com` account as the mitigation.
