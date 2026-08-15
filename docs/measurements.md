@@ -21,7 +21,7 @@ verify.sh       16 checks, 0 failed
 
 ## Bundle
 
-`bash scripts/bundle-budget.sh` is the only place the budget number lives, and it weighs everything the build writes into `wwwroot/assets/` — JavaScript and CSS alike.
+`bash scripts/bundle-budget.sh` is the only place the budget number lives. It charges the budget for what the booking route loads on first paint — the entry chunk, every chunk it imports eagerly, and their CSS — read out of Vite's manifest; lazily-loaded chunks are weighed and printed alongside it and are not charged. The readings in this section were taken before the admin code split, when the script weighed everything in `wwwroot/assets/` at once and the two numbers were still one.
 
 ```
 bundle-budget: 69152 bytes gzipped across 1 file(s), budget 76800
