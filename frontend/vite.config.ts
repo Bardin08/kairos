@@ -50,6 +50,11 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: false, // kairos.css lives there and is not ours to delete
+    // Written for scripts/bundle-budget.sh, which has to tell the chunks the
+    // booking route loads on first paint from the admin chunks it never fetches.
+    // Nothing at runtime reads it — index.html is generated with the hashes
+    // baked in — so this is a build artefact, and wwwroot/* is gitignored.
+    manifest: true,
   },
   server: { proxy: { '/api': 'http://localhost:5000' } },
   test: {
