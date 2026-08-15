@@ -1,8 +1,14 @@
 import type { AdminLink, LinkLimits } from './adminLinks'
 import { LIMIT_KEYS } from './limitCopy'
 
-/** Everything the editor can change, and nothing it cannot. `active` has its own route. */
-export type LinkDraft = {
+/**
+ * The editor's working copy of everything the form can change: the five fields
+ * `adminLinks`' `LinkDraft` also carries, plus the four limits it does not.
+ * That other `LinkDraft` is a request body — the subset the API accepts on
+ * create and update. This one is form state, wider by four fields and never
+ * sent as-is. `active` has its own route and belongs to neither.
+ */
+export type EditorDraft = {
   name: string
   slug: string
   description: string
@@ -34,7 +40,7 @@ const ONE_FIELD = 1
  * so a null here is this module's own null and never a value some later edit
  * resolved.
  */
-export function draftOf(link: AdminLink | null, firstPatternId: string): LinkDraft {
+export function draftOf(link: AdminLink | null, firstPatternId: string): EditorDraft {
   if (link === null) {
     return {
       name: '',
@@ -72,7 +78,7 @@ export function draftOf(link: AdminLink | null, firstPatternId: string): LinkDra
  * The durations count as one field however many of them moved, and order counts
  * — it is the order of the booking page's tabs, not an ascending list.
  */
-export function changedCount(baseline: LinkDraft, draft: LinkDraft): number {
+export function changedCount(baseline: EditorDraft, draft: EditorDraft): number {
   let changed = CLEAN
 
   if (baseline.name !== draft.name) changed += ONE_FIELD

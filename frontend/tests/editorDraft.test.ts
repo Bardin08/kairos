@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 
 import type { AdminLink } from '../src/routes/admin/adminLinks'
-import { changedCount, draftOf, unsavedLabel, type LinkDraft } from '../src/routes/admin/linkDraft'
+import { changedCount, draftOf, unsavedLabel, type EditorDraft } from '../src/routes/admin/editorDraft'
 
 // A link that offers a short call and a long one, overrides its margin, and
 // inherits the other three. Named rather than inlined so a reader of an
@@ -18,7 +18,7 @@ const CLEAN = 0
 const ONE_FIELD = 1
 const TWO_FIELDS = 2
 
-const BASE: LinkDraft = {
+const BASE: EditorDraft = {
   name: 'Consulting call',
   slug: 'consulting',
   description: 'A chat about your system.',
@@ -98,7 +98,7 @@ const EXISTING_LINK: AdminLink = {
 test('draftOf an existing link carries its nine editable values', () => {
   const draft = draftOf(EXISTING_LINK, NEW_LINK_FIRST_PATTERN_ID)
 
-  expect(draft).toEqual<LinkDraft>({
+  expect(draft).toEqual<EditorDraft>({
     name: EXISTING_LINK_NAME,
     slug: EXISTING_LINK_SLUG,
     description: EXISTING_LINK_DESCRIPTION,
