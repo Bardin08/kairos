@@ -340,6 +340,17 @@ public class MeetingsAdminTests
             CancellationToken cancellationToken) =>
             Task.FromException<string>(new InvalidOperationException(Refusal));
 
+        /// <summary>
+        /// Refuses like the create does, because this calendar refuses. No test here moves a
+        /// meeting — the refusal these tests need is the one at creation — but a stub that
+        /// accepted a write its own name says it rejects would quietly pass the day one did.
+        /// </summary>
+        public Task UpdateEventAsync(
+            string externalEventId,
+            CalendarEventRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException(Refusal));
+
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
     }

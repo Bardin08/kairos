@@ -188,6 +188,40 @@ public sealed class GoogleCalendarAdapter(
         return created.Id;
     }
 
+    /// <summary>The same event, at the new time.</summary>
+    /// <remarks>
+    /// <c>Patch</c> rather than <c>Update</c>, and the difference is the whole of this method's
+    /// correctness. Update replaces the resource: every field absent from the body is cleared,
+    /// which on this body would be the attendee list, the answers those attendees have already
+    /// given, and the <c>conferenceData</c> carrying the Meet the invitee has a link to. Patch
+    /// merges, so what is not written here is not touched.
+    ///
+    /// The attendees are deliberately not written even though the request carries one. A
+    /// reschedule keeps its booker — the duration is fixed and the identifier is the same, so
+    /// there is nobody new to add — and re-sending the list is how a Google event loses everyone's
+    /// RSVP for no gain. <c>conferenceDataVersion</c> is likewise absent, because it is only read
+    /// when the body touches conference data and this one does not.
+    /// </remarks>
+    public async Task UpdateEventAsync(
+        string externalEventId,
+        CalendarEventRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+
+        var moved = new Event
+        {
+            Summary = request.Title,
+            Description = request.Description,
+            Start = new EventDateTime { DateTimeDateTimeOffset = request.Start.ToDateTimeOffset() },
+            End = new EventDateTime { DateTimeDateTimeOffset = request.End.ToDateTimeOffset() },
+        };
+
+        await service.Events
+            .Patch(moved, PrimaryCalendarId, externalEventId)
+            .ExecuteAsync(cancellationToken);
+    }
+
     public async Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken)
     {
         using var service = CreateService(await RequireCredentialAsync(cancellationToken));

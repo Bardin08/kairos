@@ -40,6 +40,11 @@ public class EndpointTests
     private const string ThirdSlotTime = "T10:00:00Z";
     private const string NeverOfferedTime = "T03:00:00Z";
 
+    /// <summary>Thirty-two lowercase hex, the shape the Google adapter derives from a booking id.</summary>
+    private const string ExternalEventId = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0";
+
+    private const string JoinUrl = "https://meet.example.com/abc-defg-hij";
+
     /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
     private const int WellAhead = 30;
 
@@ -342,6 +347,86 @@ public class EndpointTests
         app.Read(context => context.CalendarEntries.Count()).ShouldBe(0);
         app.Read(context => context.ConferenceLinks.Count()).ShouldBe(0);
         app.Read(context => context.OutboxMessages.Count()).ShouldBe(1);
+
+        // And the read says so rather than guessing. Absent is not "failed": a UI that rendered
+        // the two the same would put a red mark on every booking of every Kairos that was never
+        // asked to sync, which is the whole reason nothing is written above.
+        var created = await ReadJsonAsync(response);
+        created.GetProperty("calendarSync").ValueKind.ShouldBe(JsonValueKind.Null);
+        created.GetProperty("conferenceUrl").ValueKind.ShouldBe(JsonValueKind.Null);
+    }
+
+    /// <summary>
+    /// Gap 3's contract, in the shape Part C's Meetings tab consumes: the sync state as a word and
+    /// the join URL beside it, so a page can say "this meeting is not in your calendar" and offer
+    /// the second channel without a second request. The provider's own error text is deliberately
+    /// not here — it is unfiltered third-party prose on a response an invitee's manage token can
+    /// read, and the state alone answers the only question a UI asks.
+    /// </summary>
+    [Fact]
+    public async Task GetBooking_SyncedWithAConference_ReportsBothOnTheRead()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+        SeedCalendar(app, BookingIdOf(created), CalendarSyncState.Synced, withConference: true);
+
+        var booking = await ReadJsonAsync(await app.Client.GetAsync(
+            $"{ApiVersions.V1}/bookings/{token}", TestContext.Current.CancellationToken));
+
+        booking.GetProperty("calendarSync").GetString().ShouldBe("synced");
+        booking.GetProperty("conferenceUrl").GetString().ShouldBe(JoinUrl);
+    }
+
+    /// <summary>
+    /// Gap 1 at the layer that had it. Both call sites for the calendar were in create, so a
+    /// meeting that moved left its event exactly where it was and the invitee held two plausible
+    /// times. The harness connects no Google, so reaching the calendar from here looks like the
+    /// entry going <c>failed</c> — an attempt that could not complete — where an endpoint that
+    /// never called at all leaves it <c>synced</c> and untouched.
+    /// </summary>
+    [Fact]
+    public async Task RescheduleBooking_MeetingAlreadyInACalendar_ReachesTheCalendarToMoveIt()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+        SeedCalendar(app, BookingIdOf(created), CalendarSyncState.Synced, withConference: false);
+
+        var response = await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + ThirdSlotTime },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("calendarSync").GetString().ShouldBe("failed");
+
+        // Still there, because it is the only handle for fixing the stale event by hand.
+        app.Read(context => context.CalendarEntries.AsNoTracking().Single().ExternalEventId)
+            .ShouldBe(ExternalEventId);
+    }
+
+    /// <summary>
+    /// Gap 2, same argument. A cancellation that never reached the calendar left the meeting in
+    /// the organizer's day for an appointment nobody was coming to.
+    /// </summary>
+    [Fact]
+    public async Task CancelBooking_MeetingAlreadyInACalendar_ReachesTheCalendarToWithdrawIt()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+        SeedCalendar(app, BookingIdOf(created), CalendarSyncState.Synced, withConference: false);
+
+        var response = await app.Client.PostAsync(
+            $"{ApiVersions.V1}/bookings/{token}/cancel", null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("calendarSync").GetString().ShouldBe("failed");
     }
 
     /// <summary>
@@ -439,6 +524,42 @@ public class EndpointTests
             .ThenBy(message => message.Id)
             .Select(message => message.Type)
             .ToList());
+
+    /// <summary>
+    /// A booking that is already in somebody's calendar, which is the state the harness cannot
+    /// reach on its own: no Google is connected, so nothing writes these rows for it.
+    /// </summary>
+    private static void SeedCalendar(
+        KairosApp app,
+        Guid bookingId,
+        CalendarSyncState state,
+        bool withConference) =>
+        app.Seed(context =>
+        {
+            context.CalendarEntries.Add(new CalendarEntry
+            {
+                BookingId = bookingId,
+                Provider = IntegrationProvider.Google,
+                ExternalEventId = ExternalEventId,
+                State = state,
+            });
+
+            if (!withConference)
+            {
+                return;
+            }
+
+            context.ConferenceLinks.Add(new ConferenceLink
+            {
+                BookingId = bookingId,
+                Provider = IntegrationProvider.Google,
+                ExternalId = "abc-defg-hij",
+                JoinUrl = JoinUrl,
+            });
+        });
+
+    private static Guid BookingIdOf(JsonElement booking) =>
+        booking.GetProperty("id").GetGuid();
 
     private static KairosApp NewApp()
     {
