@@ -516,6 +516,56 @@ public class EndpointTests
         QueuedTypes(app).ShouldBe([OutboxMessageType.BookingCreated, OutboxMessageType.BookingCancelled]);
     }
 
+    /// <summary>
+    /// The invariant the whole .ics side rests on: <c>Booking.Sequence</c> is the SEQUENCE of the
+    /// last iCalendar message composed for this booking, so it only ever goes up. A client keeps
+    /// the highest sequence it has seen and drops anything that does not outrank it, without
+    /// telling anybody — so a cancellation that reused the reschedule's number would leave the
+    /// meeting sitting in the invitee's calendar for a booking that is off, and RFC 5546 requires
+    /// the CANCEL to outrank the REQUEST it withdraws for exactly that reason.
+    /// </summary>
+    [Fact]
+    public async Task Booking_CreatedThenMovedThenCancelled_AdvancesTheSequenceEveryTime()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var moved = await ReadJsonAsync(await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + ThirdSlotTime },
+            TestContext.Current.CancellationToken));
+
+        var cancelled = await ReadJsonAsync(await app.Client.PostAsync(
+            $"{ApiVersions.V1}/bookings/{token}/cancel", null, TestContext.Current.CancellationToken));
+
+        created.GetProperty("sequence").GetInt32().ShouldBe(0);
+        moved.GetProperty("sequence").GetInt32().ShouldBe(1);
+        cancelled.GetProperty("sequence").GetInt32().ShouldBe(2);
+    }
+
+    /// <summary>
+    /// The other half of the same rule, and the reason the advance sits behind the idempotency
+    /// guard rather than in front of it. A double-clicked cancel button must not walk the sequence
+    /// twice — there is one cancellation, so there is one message and one number for it.
+    /// </summary>
+    [Fact]
+    public async Task CancelBooking_Twice_AdvancesTheSequenceOnce()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+        var url = $"{ApiVersions.V1}/bookings/{token}/cancel";
+
+        await app.Client.PostAsync(url, null, TestContext.Current.CancellationToken);
+        var again = await app.Client.PostAsync(url, null, TestContext.Current.CancellationToken);
+
+        (await ReadJsonAsync(again)).GetProperty("sequence").GetInt32().ShouldBe(1);
+    }
+
     /// <summary>Oldest first, which is also the order the dispatcher delivers them in.</summary>
     private static List<OutboxMessageType> QueuedTypes(KairosApp app) =>
         app.Read(context => context.OutboxMessages

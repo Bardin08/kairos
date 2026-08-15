@@ -14,14 +14,20 @@ using NodaTime.Text;
 namespace Kairos.Api.Integrations.Email;
 
 /// <summary>
-/// The confirmation an invitee gets: what was booked, when it is, the link that lets them undo
-/// it, and the .ics that makes their client offer accept and decline.
+/// What an invitee is told about their meeting: that it is booked, that it has moved, or that it
+/// is off — each with the times, the link that lets them act, and the .ics that makes their
+/// client add, update or remove the event.
 /// </summary>
 /// <remarks>
 /// Composition is separated from sending because composition is the half that can be proved. The
 /// MIME structure, the agreement between the .ics METHOD and the MIME <c>method=</c> parameter,
 /// and the manage link are all assertable without a relay; whether the message lands in an inbox
 /// is not assertable at all and is verified by sending real mail to real accounts.
+///
+/// One composer for all three notices rather than three. The MIME shape, the transfer encodings,
+/// the Message-Id and the zone the times are rendered in are identical across them and are the
+/// parts that are delicate; what actually differs is three strings and the METHOD. Three
+/// composers would be three places for the folded .ics to get its encoding wrong.
 /// </remarks>
 public sealed class BookingMailer(
     EmailSender sender,
@@ -46,24 +52,61 @@ public sealed class BookingMailer(
     private static readonly ZonedDateTimePattern TimePattern =
         ZonedDateTimePattern.CreateWithInvariantCulture("HH:mm", DateTimeZoneProviders.Tzdb);
 
+    /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
+    public Task SendConfirmationAsync(
+        Booking booking,
+        string manageToken,
+        CancellationToken cancellationToken) =>
+        SendAsync(BookingNotice.Confirmation, booking, manageToken, cancellationToken);
+
     /// <summary>
-    /// Sends the confirmation, or does not, and either way returns.
+    /// The booking moved. <c>METHOD:REQUEST</c> again, with the same <c>UID</c> and a
+    /// <see cref="Booking.Sequence"/> the caller has already advanced — which is precisely what
+    /// makes a client treat this as a change to the meeting it is holding rather than as a second
+    /// invitation. A stale sequence is not an error anybody is told about: the client discards the
+    /// update without a word, nobody reports a reschedule that did not arrive, and the invitee
+    /// turns up at the old time.
+    /// </summary>
+    public Task SendRescheduleAsync(
+        Booking booking,
+        string manageToken,
+        CancellationToken cancellationToken) =>
+        SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
+
+    /// <summary>
+    /// The booking is off. <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
+    /// <c>STATUS:CANCELLED</c> — both, because Outlook removes the event on the status and leaves
+    /// one marked CONFIRMED in place however the message was labelled.
+    /// </summary>
+    public Task SendCancellationAsync(
+        Booking booking,
+        string manageToken,
+        CancellationToken cancellationToken) =>
+        SendAsync(BookingNotice.Cancellation, booking, manageToken, cancellationToken);
+
+    /// <summary>
+    /// Sends the notice, or does not, and either way returns.
     /// </summary>
     /// <remarks>
-    /// Ground rule 14, at the only place it can be enforced: the booking is committed before this
-    /// is called, and nothing in here can reach back and undo it. Both ways out are silent to the
-    /// caller — no relay configured is the ordinary state of a fresh deployment, and a relay that
-    /// refused is a delivery problem rather than a booking problem. A booking that answered 500
-    /// because SMTP was down would cost the organizer every meeting rather than one notification.
+    /// Ground rule 14, at the only place it can be enforced: the booking has been written, moved
+    /// or cancelled before this is called, and nothing in here can reach back and undo it. Both
+    /// ways out are silent to the caller — no relay configured is the ordinary state of a fresh
+    /// deployment, and a relay that refused is a delivery problem rather than a booking problem. A
+    /// cancellation that answered 500 because SMTP was down would leave the invitee pressing the
+    /// button again on a meeting that is already off.
     ///
     /// What that trades away, said plainly: a failed send is not retried and the invitee gets
     /// nothing. It is logged at Warning with the booking id so the organizer can resend by hand.
     /// The outbox would give retries for free and is the right home for the webhook, but not for
     /// this: an email row would have to carry the raw manage token in its payload, and Part A
     /// stores only that token's SHA-256 on purpose. Persisting the plaintext to buy a retry would
-    /// make one database read worth cancel-and-reschedule on every booking in the file.
+    /// make one database read worth cancel-and-reschedule on every booking in the file. That is
+    /// why all three of these run on the request that caused them, where the plaintext is already
+    /// in hand — from the 201 for a confirmation, and from the URL the invitee just opened for the
+    /// other two.
     /// </remarks>
-    public async Task SendConfirmationAsync(
+    private async Task SendAsync(
+        BookingNotice notice,
         Booking booking,
         string manageToken,
         CancellationToken cancellationToken)
@@ -71,25 +114,30 @@ public sealed class BookingMailer(
         if (!options.Value.IsConfigured)
         {
             logger.LogDebug(
-                "{Section} is not configured; booking {Booking} was written without a confirmation.",
+                "{Section} is not configured; booking {Booking} changed without a {Notice} being sent.",
                 EmailOptions.SectionName,
-                booking.Id);
+                booking.Id,
+                notice);
             return;
         }
 
         try
         {
-            var message = Compose(booking, manageToken);
+            var message = Compose(booking, manageToken, notice);
             var response = await sender.SendAsync(message, cancellationToken);
 
             // Said at Information, not Debug. Silence on the happy path is what let a message
             // Kairos had not sent be read twice as proof that Kairos could send: the only visible
             // difference between a working relay and a broken one was mail that may or may not
             // have come from somewhere else. The Message-Id and the relay's own response are the
-            // two handles that settle it from a log line alone.
+            // two handles that settle it from a log line alone, and the sequence is the third —
+            // it is what decides whether a client acts on the message or drops it.
             logger.LogInformation(
-                "Confirmation for booking {Booking} accepted by the relay as {MessageId}: {Response}",
+                "{Notice} for booking {Booking} at sequence {Sequence} accepted by the relay as "
+                + "{MessageId}: {Response}",
+                notice,
                 booking.Id,
+                booking.Sequence,
                 message.MessageId,
                 response);
         }
@@ -97,8 +145,9 @@ public sealed class BookingMailer(
         {
             logger.LogWarning(
                 exception,
-                "Could not send the confirmation for booking {Booking}. The booking stands and the "
-                + "invitee has not been told; there is no retry, so resend by hand if it matters.",
+                "Could not send the {Notice} for booking {Booking}. The booking stands as it is and "
+                + "the invitee has not been told; there is no retry, so resend by hand if it matters.",
+                notice,
                 booking.Id);
         }
     }
@@ -120,7 +169,7 @@ public sealed class BookingMailer(
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
     /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
     /// </remarks>
-    public MimeMessage Compose(Booking booking, string manageToken)
+    public MimeMessage Compose(Booking booking, string manageToken, BookingNotice notice)
     {
         var settings = options.Value;
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
@@ -135,9 +184,9 @@ public sealed class BookingMailer(
         var zone = DateTimeZoneProviders.Tzdb[booker.TimeZoneId];
 
         // One value, two readers. The .ics METHOD and the MIME method= parameter are derived from
-        // this single constant rather than written out twice, because a message labelled one way
+        // this single expression rather than written out twice, because a message labelled one way
         // around a body labelled the other is discarded by clients without a word to either side.
-        const IcsMethod method = IcsMethod.Request;
+        var method = Method(notice);
 
         var ics = calendar.Build(new IcsRequest(
             BookingId: booking.Id,
@@ -151,7 +200,8 @@ public sealed class BookingMailer(
             Method: method));
 
         var body = new TextPart(TextFormat.Plain);
-        body.SetText(Encoding.UTF8, Body(booker.Name, booking.Link.Name, start, end, zone, manageUrl));
+        body.SetText(
+            Encoding.UTF8, Body(notice, booker.Name, booking.Link.Name, start, end, zone, manageUrl));
 
         var invitation = new TextPart(CalendarSubtype)
         {
@@ -174,7 +224,7 @@ public sealed class BookingMailer(
 
         var message = new MimeMessage
         {
-            Subject = Subject(booking.Link.Name, start, zone),
+            Subject = Subject(notice, booking.Link.Name, start, zone),
             Body = new Multipart(MixedSubtype)
             {
                 new Multipart(AlternativeSubtype) { body, invitation },
@@ -203,34 +253,81 @@ public sealed class BookingMailer(
     private static string ManageUrl(string baseUrl, string manageToken) =>
         $"{baseUrl.TrimEnd('/')}/{ManagePath}/{Uri.EscapeDataString(manageToken)}";
 
-    private static string Subject(string linkName, Instant start, DateTimeZone zone)
+    /// <summary>
+    /// A confirmation and a reschedule are both REQUEST — the second is the first at a new time,
+    /// which is the entire mechanism by which a calendar client updates in place instead of
+    /// showing two meetings.
+    /// </summary>
+    private static IcsMethod Method(BookingNotice notice) =>
+        notice == BookingNotice.Cancellation ? IcsMethod.Cancel : IcsMethod.Request;
+
+    /// <summary>
+    /// The times in the subject are always the booking's current ones, so a reschedule is
+    /// readable as a reschedule from the subject line alone and a cancellation names the slot it
+    /// is releasing.
+    /// </summary>
+    private static string Subject(BookingNotice notice, string linkName, Instant start, DateTimeZone zone)
     {
         var local = start.InZone(zone);
-        return $"Confirmed: {linkName}, {DatePattern.Format(local)} at {TimePattern.Format(local)} ({zone.Id})";
+        var lead = notice switch
+        {
+            BookingNotice.Confirmation => "Confirmed",
+            BookingNotice.Reschedule => "Moved",
+            BookingNotice.Cancellation => "Cancelled",
+            _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
+        };
+
+        return $"{lead}: {linkName}, {DatePattern.Format(local)} at {TimePattern.Format(local)} ({zone.Id})";
     }
 
     /// <summary>
     /// Plain text, and no HTML alternative. There is nothing here that needs a font, and a
     /// text-only body is one fewer thing for a filter to score.
     /// </summary>
+    /// <remarks>
+    /// The manage link is in all three, the cancellation included. It costs nothing and it is the
+    /// only way an invitee can check that a cancellation they are reading about is real, rather
+    /// than taking the word of an email — which is the same reason the link exists at all.
+    /// </remarks>
     private static string Body(
+        BookingNotice notice,
         string bookerName,
         string linkName,
         Instant start,
         Instant end,
         DateTimeZone zone,
-        string manageUrl) =>
-        $"""
-        Hi {bookerName},
+        string manageUrl)
+    {
+        var (headline, closing) = notice switch
+        {
+            BookingNotice.Confirmation =>
+                ($"{linkName} is confirmed.", "The attached invitation adds it to your calendar."),
+            BookingNotice.Reschedule =>
+                ($"{linkName} has moved. It is now:",
+                    "The attached invitation updates the one already in your calendar."),
+            BookingNotice.Cancellation =>
+                ($"{linkName} has been cancelled. It was:",
+                    "The attached invitation removes it from your calendar."),
+            _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
+        };
 
-        {linkName} is confirmed.
+        return $"""
+            Hi {bookerName},
 
-        {DatePattern.Format(start.InZone(zone))}
-        {TimePattern.Format(start.InZone(zone))}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
+            {headline}
 
-        To move or cancel this booking, open:
-        {manageUrl}
+            {DatePattern.Format(start.InZone(zone))}
+            {TimePattern.Format(start.InZone(zone))}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
 
-        The attached invitation adds it to your calendar.
-        """;
+            {Action(notice)}
+            {manageUrl}
+
+            {closing}
+            """;
+    }
+
+    private static string Action(BookingNotice notice) =>
+        notice == BookingNotice.Cancellation
+            ? "This booking:"
+            : "To move or cancel this booking, open:";
 }
