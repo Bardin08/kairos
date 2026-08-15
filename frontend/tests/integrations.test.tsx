@@ -164,12 +164,18 @@ test('the callback reports success and refusal from the query string', async () 
   expect(await screen.findByText(/closed without granting access/)).toBeTruthy()
 })
 
-// Breaks if a 401 starts rendering as "could not reach the server". There is no
-// login UI, so the page has to name the token that is refusing it.
-test('a 401 names the admin token instead of an empty table', async () => {
+// Breaks if a 401 starts rendering as "could not reach the server", and breaks
+// if the recovery goes stale again: this sentence used to name a configuration
+// key Task 1 had already deleted, so it told the operator to unset something
+// that no longer existed. Signing in is the fix, and the link is the assertion.
+test('a 401 offers the sign-in instead of an empty table', async () => {
   vi.mocked(listIntegrations).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
   renderPage()
 
-  expect(await screen.findByText(/Integrations:AdminToken/)).toBeTruthy()
+  const signIn = await screen.findByRole('link', { name: 'Sign in' })
+
+  // A plain anchor, not a router link: /admin/login is a server route under a
+  // path the single page nests on, and wouter would swallow the navigation.
+  expect(signIn.getAttribute('href')).toBe('/admin/login')
   expect(screen.queryByRole('table')).toBeNull()
 })

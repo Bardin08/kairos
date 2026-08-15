@@ -1,6 +1,5 @@
 import { useState } from 'react'
 
-import AlertIcon from '../../components/AlertIcon'
 import DurationEditor from '../../components/DurationEditor'
 import InheritableNumber from '../../components/InheritableNumber'
 import {
@@ -14,7 +13,7 @@ import {
   type GlobalLimits,
   type LinkLimits,
 } from './adminLinks'
-import { asApiError } from '../../lib/api'
+import Failure from './Failure'
 
 /** The four limits of a link that does not exist yet: all inherited. */
 const NEW_LIMITS: LinkLimits = {
@@ -77,7 +76,9 @@ export default function LinkEditor({
   )
 
   const [saving, setSaving] = useState(false)
-  const [failure, setFailure] = useState('')
+  // The error itself, not a sentence made from it: `Failure` branches on the
+  // status, and a string has already thrown that away.
+  const [failure, setFailure] = useState<unknown>(null)
 
   function limit(key: keyof LinkLimits) {
     return (value: number | null) => setLimits({ ...limits, [key]: value })
@@ -85,7 +86,7 @@ export default function LinkEditor({
 
   async function save() {
     setSaving(true)
-    setFailure('')
+    setFailure(null)
 
     try {
       const draft = { slug, name, description, patternId, durations }
@@ -97,7 +98,7 @@ export default function LinkEditor({
       // provoke — a taken slug, a pattern that vanished, a duration out of range
       // — already names itself better than a generic line would.
       setSaving(false)
-      setFailure(asApiError(error).message)
+      setFailure(error)
     }
   }
 
@@ -105,14 +106,14 @@ export default function LinkEditor({
     if (link === null) return
 
     setSaving(true)
-    setFailure('')
+    setFailure(null)
 
     try {
       await (active ? restoreLink(link.id) : archiveLink(link.id))
       onSaved()
     } catch (error: unknown) {
       setSaving(false)
-      setFailure(asApiError(error).message)
+      setFailure(error)
     }
   }
 
@@ -224,12 +225,7 @@ export default function LinkEditor({
           onChange={limit('startIncrementMinutes')}
         />
 
-        {failure !== '' && (
-          <p className="field-error" role="alert">
-            <AlertIcon />
-            {failure}
-          </p>
-        )}
+        <Failure error={failure} />
 
         <div className="row gap-2 wrap">
           <button className="btn btn-primary" type="submit" data-loading={saving || undefined}>

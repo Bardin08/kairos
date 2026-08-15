@@ -1,8 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 
-import AlertIcon from '../../components/AlertIcon'
-import { asApiError } from '../../lib/api'
 import { getSettings } from './adminSettings'
+import Failure from './Failure'
 import {
   addPatternRule,
   createPattern,
@@ -113,25 +112,6 @@ function listNames(names: string[]): string {
 }
 
 /**
- * The message under the control that produced it.
- *
- * DESIGN.md refuses a banner at the top of a form, and the refusals this page
- * gets are the reason why: "this pattern is the availability of Mentorship"
- * means something under the Delete button and nothing at the top of a card
- * that also has a name field and two add forms in it.
- */
-function Failure({ message }: { message: string | null }) {
-  if (message === null) return null
-
-  return (
-    <p className="field-error mt-3" role="alert">
-      <AlertIcon />
-      {message}
-    </p>
-  )
-}
-
-/**
  * One pattern's whole editable surface, opened in place inside its own card.
  *
  * Not a modal, on purpose: DESIGN.md refuses one for a task that needs neither
@@ -150,7 +130,7 @@ function PatternEditor({
 }: {
   pattern: Pattern
   pending: Action | null
-  failure: { action: Action; message: string } | null
+  failure: { action: Action; error: unknown } | null
   apply: (action: Action, work: () => Promise<Pattern>) => void
   remove: () => void
   close: () => void
@@ -205,8 +185,16 @@ function PatternEditor({
     )
   }
 
-  function messageFor(action: Action): string | null {
-    return failure?.action === action ? failure.message : null
+  /**
+   * The failure under the control that produced it, and null under every other.
+   *
+   * DESIGN.md refuses a banner at the top of a form, and the refusals this
+   * editor gets are the reason why: "this pattern is the availability of
+   * Mentorship" means something under the Delete button and nothing at the top
+   * of a card that also has a name field and two add forms in it.
+   */
+  function errorFor(action: Action): unknown {
+    return failure?.action === action ? failure.error : null
   }
 
   return (
@@ -229,7 +217,7 @@ function PatternEditor({
             Rename
           </button>
         </div>
-        <Failure message={messageFor('name')} />
+        <Failure error={errorFor('name')} className="mt-3" />
       </div>
 
       <div>
@@ -296,7 +284,7 @@ function PatternEditor({
             Add window
           </button>
         </div>
-        <Failure message={messageFor('rule')} />
+        <Failure error={errorFor('rule')} className="mt-3" />
       </div>
 
       <div>
@@ -377,7 +365,7 @@ function PatternEditor({
             Set date
           </button>
         </div>
-        <Failure message={messageFor('override')} />
+        <Failure error={errorFor('override')} className="mt-3" />
       </div>
 
       <div className="row gap-2 wrap sep-top">
@@ -393,7 +381,7 @@ function PatternEditor({
           Delete pattern
         </button>
       </div>
-      <Failure message={messageFor('delete')} />
+      <Failure error={errorFor('delete')} className="mt-3" />
     </div>
   )
 }
@@ -415,7 +403,9 @@ export default function Availability() {
   const [editing, setEditing] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [pending, setPending] = useState<Action | null>(null)
-  const [failure, setFailure] = useState<{ action: Action; message: string } | null>(null)
+  // The error itself, not a sentence made from it: `Failure` branches on the
+  // status, and a string has already thrown that away.
+  const [failure, setFailure] = useState<{ action: Action; error: unknown } | null>(null)
   // The organizer's zone, named on every card beside the hours it makes sense
   // of. Empty until it arrives, and the line then reads as hours alone rather
   // than as hours followed by a gap where a zone should be.
@@ -432,7 +422,7 @@ export default function Availability() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setLoading(false)
-        setFailure({ action: 'create', message: asApiError(error).message })
+        setFailure({ action: 'create', error })
       })
 
     // Its own request and its own silence. A zone that does not arrive costs
@@ -467,7 +457,7 @@ export default function Availability() {
       })
       .catch((error: unknown) => {
         setPending(null)
-        setFailure({ action, message: asApiError(error).message })
+        setFailure({ action, error })
       })
   }
 
@@ -490,7 +480,7 @@ export default function Availability() {
       })
       .catch((error: unknown) => {
         setPending(null)
-        setFailure({ action: 'create', message: asApiError(error).message })
+        setFailure({ action: 'create', error })
       })
   }
 
@@ -513,7 +503,7 @@ export default function Availability() {
       })
       .catch((error: unknown) => {
         setPending(null)
-        setFailure({ action: 'delete', message: asApiError(error).message })
+        setFailure({ action: 'delete', error })
       })
   }
 
@@ -551,12 +541,7 @@ export default function Availability() {
         </div>
       </div>
 
-      {failure?.action === 'create' && (
-        <p className="field-error mb-5" role="alert">
-          <AlertIcon />
-          {failure.message}
-        </p>
-      )}
+      {failure?.action === 'create' && <Failure error={failure.error} className="mb-5" />}
 
       {loading ? (
         <p className="prose t-sm">Reading your patterns…</p>

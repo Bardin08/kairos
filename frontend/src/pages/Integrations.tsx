@@ -31,8 +31,9 @@ const ERROR_PARAMETER = 'error'
 /**
  * Whether the page has a list to render.
  *
- * `locked` is its own answer rather than a variety of `broken` because nothing
- * on this page can fix it. See `LOCKED_MESSAGE`.
+ * `locked` is its own answer rather than a variety of `broken` because the
+ * recovery is different: nothing on this page fixes it, and signing in does.
+ * See `LOCKED_MESSAGE`.
  */
 type Phase = 'loading' | 'ready' | 'locked' | 'broken'
 
@@ -53,18 +54,24 @@ type Presentation = {
 }
 
 /**
- * There is no login UI to send anyone to.
+ * A server route under a path the single page nests on, so it is reached with a
+ * plain anchor and never a wouter `<Link>` — the router would swallow the
+ * navigation. It issues the OIDC challenge; there is no login form anywhere in
+ * this application.
+ */
+const SIGN_IN = '/admin/login'
+
+/**
+ * A 401 here means one thing now, and it has a fix.
  *
- * `Integrations:AdminToken` is a stopgap the backend documents as one, and Part
- * C replaces it with Pocket ID. Building a token box here would mean inventing
- * an authentication surface that Part C then deletes, and parking a bearer
- * credential in browser storage to do it. So the page does the one honest thing
- * a page with no credential can do: it names the header the deployment is
- * asking for and stops. The operator who set that token is the operator who can
- * unset it, and they are the only person who ever sees this.
+ * Until Part C this named `Integrations:AdminToken` and told the operator to
+ * clear it from configuration and restart — a stopgap Task 1 deleted along with
+ * the setting, which left this page instructing people to unset something that
+ * no longer exists. Pocket ID is what stands here now, so the recovery is to
+ * sign in, and the link beside this sentence is where.
  */
 const LOCKED_MESSAGE =
-  'This Kairos is protected by an admin token, and the page has no way to send one — sign-in arrives with Pocket ID. Until then, clear Integrations:AdminToken from the configuration and restart to use this page.'
+  'Your session has expired, or you were never signed in — so there is nothing here to read yet.'
 
 /**
  * A provider name as a heading, without knowing any provider.
@@ -244,7 +251,18 @@ export default function Integrations() {
         {failure !== '' && phase !== 'loading' && (
           <p className="field-error mb-5" role="alert">
             <AlertIcon />
-            {failure}
+            <span>
+              {failure}
+              {/* Both routes into this message — the read that came back 401 and
+                  the Connect that did — set the same sentence, so one test
+                  covers both places the operator can meet it. */}
+              {failure === LOCKED_MESSAGE && (
+                <>
+                  {' '}
+                  <a href={SIGN_IN}>Sign in</a> and come back.
+                </>
+              )}
+            </span>
           </p>
         )}
 

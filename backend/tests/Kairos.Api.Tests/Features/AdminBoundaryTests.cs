@@ -44,7 +44,8 @@ public class AdminBoundaryTests
 
     /// <summary>
     /// Part B's operator routes were written "behind the admin boundary" before one existed, and
-    /// answered 200 to anyone when no token was configured. This is the promise being kept.
+    /// answered 200 to anyone when no token was configured. This is the promise being kept, now
+    /// under the prefix as well as under the policy.
     /// </summary>
     [Fact]
     public async Task ListIntegrations_WithoutASession_IsUnauthorizedRatherThanARedirect()
@@ -52,9 +53,29 @@ public class AdminBoundaryTests
         using var app = new KairosApp();
 
         var response = await app.Client.GetAsync(
-            $"{ApiVersions.V1}/integrations", TestContext.Current.CancellationToken);
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// The old path answers nothing at all.
+    /// </summary>
+    /// <remarks>
+    /// Worth pinning because the failure it guards against is quiet: a route left mapped in both
+    /// places is a second, ungated way in that no test hits, and the whole reason these two moved
+    /// is that <see cref="AdminGroup"/>'s docstring has to be readable as the whole answer to
+    /// "what is public?".
+    /// </remarks>
+    [Fact]
+    public async Task ListIntegrations_AtItsOldPathOutsideThePrefix_IsNotMappedAtAll()
+    {
+        using var app = new KairosApp();
+
+        var response = await app.Client.GetAsync(
+            $"{ApiVersions.V1}/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     /// <summary>

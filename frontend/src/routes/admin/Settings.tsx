@@ -2,8 +2,8 @@ import { useEffect, useId, useState } from 'react'
 import { Link } from 'wouter'
 
 import AlertIcon from '../../components/AlertIcon'
-import { asApiError } from '../../lib/api'
 import { applyChoice, readChoice, type ThemeChoice } from '../../lib/theme'
+import Failure from './Failure'
 import {
   getSettings,
   listTimeZones,
@@ -59,6 +59,18 @@ const LIMITS = [
 ] as const
 
 type LimitKey = (typeof LIMITS)[number]['key']
+
+/**
+ * Ends the Kairos session and not the identity provider's.
+ *
+ * A server route under a path the single page nests on, so it is reached with a
+ * plain anchor: a wouter `<Link>` would be swallowed by the router and render
+ * its own not-found. Signing out of Pocket ID as well would be a second
+ * redirect and a second URL registered there, to log the operator out of
+ * everything else they were using it for — which is not what pressing sign out
+ * on a scheduling app asks for.
+ */
+const SIGN_OUT = '/admin/logout'
 
 /** The three the stylesheet actually models. `system` sets no attribute at all. */
 const THEMES: { value: ThemeChoice; label: string }[] = [
@@ -119,7 +131,9 @@ export default function Settings() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(readChoice)
   const [phase, setPhase] = useState<Phase>('loading')
-  const [failure, setFailure] = useState('')
+  // The error itself, not a sentence made from it: `Failure` branches on the
+  // status, and a string has already thrown that away.
+  const [failure, setFailure] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -136,7 +150,7 @@ export default function Settings() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setPhase('broken')
-        setFailure(asApiError(error).message)
+        setFailure(error)
       })
 
     // Its own request, and its own failure: the picker's options are every zone
@@ -186,7 +200,7 @@ export default function Settings() {
     }
 
     setSaving(true)
-    setFailure('')
+    setFailure(null)
     setSaved(false)
 
     saveSettings(body)
@@ -202,7 +216,7 @@ export default function Settings() {
       })
       .catch((error: unknown) => {
         setSaving(false)
-        setFailure(asApiError(error).message)
+        setFailure(error)
       })
   }
 
@@ -226,12 +240,7 @@ export default function Settings() {
         </button>
       </div>
 
-      {failure !== '' && (
-        <p className="field-error mb-5" role="alert">
-          <AlertIcon />
-          {failure}
-        </p>
-      )}
+      <Failure error={failure} className="mb-5" />
 
       {saved && (
         <p className="status mb-5" data-state="live" role="status">
@@ -338,6 +347,21 @@ export default function Settings() {
               This one is a preference of this browser and is not saved to the server. Light and
               dark override the system setting in both directions; matching it follows the device.
             </p>
+          </div>
+
+          <div className="page-header section-break">
+            <h2 className="title-section">Session</h2>
+          </div>
+          <div className="card card-pad">
+            <p className="prose t-sm mb-4">
+              {settings.signedInAs === null
+                ? 'Signed in. Your identity provider sent no name, so there is none to show.'
+                : `Signed in as ${settings.signedInAs}.`}{' '}
+              Signing out ends this Kairos session and leaves your identity provider alone.
+            </p>
+            <a className="btn" href={SIGN_OUT}>
+              Sign out
+            </a>
           </div>
 
           <div className="page-header section-break">

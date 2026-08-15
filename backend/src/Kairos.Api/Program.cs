@@ -207,7 +207,11 @@ var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
-v1.MapIntegrations();
+// The OAuth return leg, and the only route here that is not an invitee's. It is public because
+// the browser arriving on it holds a provider's redirect rather than a session of ours, and its
+// path is registered with that provider — so it is the one integration route that stays outside
+// the admin prefix. The other two moved under it.
+v1.MapIntegrationCallback();
 
 // The operator's workbench. Mapped through MapAdmin and never through v1, because that call is
 // the only thing standing between an anonymous caller and every one of these routes. One group,
@@ -217,7 +221,8 @@ app.MapAdmin()
     .MapLinksAdmin()
     .MapMeetingsAdmin()
     .MapPatternsAdmin()
-    .MapSettingsAdmin();
+    .MapSettingsAdmin()
+    .MapIntegrationsAdmin();
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the

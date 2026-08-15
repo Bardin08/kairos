@@ -4,18 +4,18 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import Meetings from '../src/routes/admin/Meetings'
-import { listMeetings } from '../src/lib/api'
-import type { Meeting, Meetings as List } from '../src/lib/api'
+import { ApiError } from '../src/lib/api'
+import { listMeetings } from '../src/routes/admin/adminMeetings'
+import type { Meeting, Meetings as List } from '../src/routes/admin/adminMeetings'
 
-vi.mock('../src/lib/api', async (importOriginal) => ({
-  // ApiError and asApiError stay real: the page reads a failure through
-  // `asApiError`, which branches on `instanceof`.
-  ...(await importOriginal<typeof import('../src/lib/api')>()),
+// ApiError and asApiError are never mocked and are not in this module: the page
+// reads a failure through `asApiError`, which branches on `instanceof`.
+vi.mock('../src/routes/admin/adminMeetings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/routes/admin/adminMeetings')>()),
   listMeetings: vi.fn(),
 }))
 
-// Same file the running app loads. Nothing in this task may add CSS, so the
-// stylesheet is the authority on which class names exist.
+// Same file the running app loads, and the authority on which class names exist.
 const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kairos.css')
 
 // The organizer's, and deliberately neither UTC nor whatever zone the machine
@@ -210,4 +210,24 @@ test('the page reads the organizer zone back and settles rather than refetching 
   await waitFor(() => {
     expect(vi.mocked(listMeetings).mock.calls.length).toBeLessThanOrEqual(2)
   })
+})
+
+/**
+ * The second page asserting the same recovery, and the reason there is a shared
+ * `Failure` at all.
+ *
+ * Every admin page can be looking at an expired cookie, and before this one of
+ * them said "Open /admin/login and come back", one said nothing about it, and
+ * two rendered "The server answered 401." Four opinions about one status is
+ * three too many, so the branch lives in one component and this pins that this
+ * page is wired to it.
+ */
+test('an expired session is a way back in rather than a status code', async () => {
+  vi.mocked(listMeetings).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+  render(<Meetings />)
+
+  const signIn = await screen.findByRole('link', { name: 'Sign in again' })
+
+  expect(signIn.getAttribute('href')).toBe('/admin/login')
+  expect(screen.queryByRole('table')).toBeNull()
 })
