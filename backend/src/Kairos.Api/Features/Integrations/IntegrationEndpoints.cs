@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 using Kairos.Api.Integrations;
 using Kairos.Api.Persistence.Entities;
@@ -32,13 +31,13 @@ public sealed record ConnectIntegrationResponse(string ConsentUrl);
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What protects these endpoints.</b> Part A shipped no authentication and Part C brings
-/// Pocket ID, so the honest answer today is a shared token from configuration: set
-/// <c>Integrations:AdminToken</c> and the two operator-driven routes require it in the
-/// <c>X-Kairos-Admin-Token</c> header; leave it unset and they are open, and the application says
-/// so in a warning at startup. The callback cannot carry a header — a browser arrives there on a
-/// redirect from Google — so it is guarded by <c>state</c> instead, which only a caller that got
-/// past the token could have been issued. This is a stopgap and is marked as one.
+/// <b>What protects these endpoints.</b> The two operator-driven routes require a session, under
+/// the same <see cref="AdminGroup.Policy"/> every admin route uses — Part B wrote them "behind
+/// the admin boundary" before there was one, and this is where that promise is kept. Their paths
+/// stay where they are rather than moving under <c>/api/v1/admin</c>: the callback path is
+/// registered byte-for-byte with Google, and a boundary is a policy rather than a prefix. The
+/// callback itself is anonymous by necessity — a browser arrives there on a redirect from Google
+/// — so it is guarded by <c>state</c> instead.
 /// </para>
 /// <para>
 /// <b>state.</b> Not a row in a table and not a cache entry: the value is the provider and an
@@ -70,24 +69,20 @@ public static class IntegrationEndpoints
     /// <summary>The exchange failed. The reason is in the log; there is nothing safe to put here.</summary>
     public const string ConnectFailedCode = "connect_failed";
 
-    public const string AdminTokenHeader = "X-Kairos-Admin-Token";
-
     private const string ConnectedParameter = "connected";
     private const string ErrorParameter = "error";
     private const char StateSeparator = ':';
     private const int StateLifetimeMinutes = 10;
 
-    public static RouteGroupBuilder MapIntegrations(this RouteGroupBuilder group, string? adminToken)
+    public static RouteGroupBuilder MapIntegrations(this RouteGroupBuilder group)
     {
-        var guard = Authorize(adminToken);
-
         group.MapGet("/integrations", ListAsync)
             .WithName("ListIntegrations")
-            .AddEndpointFilter(guard);
+            .RequireAuthorization(AdminGroup.Policy);
 
         group.MapPost("/integrations/{provider}/connect", Connect)
             .WithName("ConnectIntegration")
-            .AddEndpointFilter(guard);
+            .RequireAuthorization(AdminGroup.Policy);
 
         // No guard: the caller is Google's redirect, and the ticket it presents is the state.
         group.MapGet("/integrations/{provider}/callback", CallbackAsync)
@@ -192,22 +187,6 @@ public static class IntegrationEndpoints
 
         return RedirectToPage(ConnectedParameter, Name(known));
     }
-
-    /// <summary>
-    /// A stopgap, and the smallest one that is not a pretence. Unset means open, and
-    /// <c>Program.cs</c> warns about it at startup rather than letting it be discovered.
-    /// </summary>
-    private static Func<EndpointFilterInvocationContext, EndpointFilterDelegate, ValueTask<object?>>
-        Authorize(string? adminToken) =>
-        (context, next) =>
-            adminToken is null
-            || Matches(context.HttpContext.Request.Headers[AdminTokenHeader].ToString(), adminToken)
-                ? next(context)
-                : ValueTask.FromResult<object?>(TypedResults.Unauthorized());
-
-    private static bool Matches(string presented, string expected) =>
-        CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(presented), Encoding.UTF8.GetBytes(expected));
 
     /// <summary>
     /// The route segment is matched against the connectors rather than parsed into

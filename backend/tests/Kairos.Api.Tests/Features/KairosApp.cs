@@ -77,6 +77,15 @@ public sealed class KairosApp : WebApplicationFactory<KairosDbContext>
         builder.UseSetting(
             "Security:SecretKey",
             Convert.ToBase64String(RandomNumberGenerator.GetBytes(SecretProtector.KeyBytes)));
+
+        // Same rule for Pocket ID: the application refuses to start without an issuer and a
+        // client, so the harness supplies them. Nothing here is ever contacted — a request that
+        // has no session is refused before anything is challenged, and that is the only side of
+        // the gate these tests are on.
+        builder.UseSetting("Authentication:Authority", "https://id.kairos.test");
+        builder.UseSetting("Authentication:ClientId", "kairos-tests");
+        builder.UseSetting("Authentication:ClientSecret", "kairos-tests");
+
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<KairosDbContext>>();
