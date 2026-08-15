@@ -22,7 +22,13 @@ namespace Kairos.Api.Tests.Features;
 /// from the application's assembly to find its entry point, and using one that already exists
 /// saves Program.cs a public partial class that has no other reason to be there.
 /// </remarks>
-public sealed class KairosApp : WebApplicationFactory<KairosDbContext>
+/// <param name="webRoot">
+/// A directory to serve static files from, for the one test that needs an <c>index.html</c> to
+/// exist. The single page is built by the other CI job and never by this one, so the web root is
+/// empty while these tests run — and a test about the single-page fallback would then pass whether
+/// or not the route that makes it true is there. Left null, nothing changes.
+/// </param>
+public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
 {
     private readonly string _path =
         Path.Combine(Path.GetTempPath(), $"kairos-api-{Guid.CreateVersion7():N}.db");
@@ -70,6 +76,11 @@ public sealed class KairosApp : WebApplicationFactory<KairosDbContext>
         var connectionString = $"Data Source={_path}";
 
         builder.UseSetting("ConnectionStrings:Db", connectionString);
+
+        if (webRoot is not null)
+        {
+            builder.UseWebRoot(webRoot);
+        }
 
         // The application refuses to start without a key, so the harness supplies one the same
         // way an operator does. A throwaway key generated per run, because nothing in these

@@ -214,6 +214,7 @@ v1.MapIntegrations();
 // chained: a second MapAdmin() beside this one would be a second place to read when asking what
 // is public, which is the question this shape exists to keep answerable in one line.
 app.MapAdmin()
+    .MapLinksAdmin()
     .MapMeetingsAdmin()
     .MapPatternsAdmin();
 
@@ -228,6 +229,13 @@ if (!app.Services.GetRequiredService<IOptions<EmailOptions>>().Value.IsConfigure
         + $"{EmailOptions.SectionName}:PublicBaseUrl to turn confirmations on.",
         EmailOptions.SectionName);
 }
+
+// The API prefix ends here. Without this line the fallback below claims every extensionless path,
+// /api included, so an unmapped API route answered 200 with the single page — a mistyped admin
+// path looked authorized and reached a fetch as HTML that failed on a JSON parse error rather than
+// as the 404 it was. Precedence is deterministic rather than lucky: a literal segment beats a
+// wildcard, so every route mapped above still wins this one.
+app.Map("/api/{**rest}", () => Results.NotFound());
 
 // React owns client routing, so anything that is not an API route and not a file on disk is the
 // single page. Mapped last, so it can never shadow a route above it.
