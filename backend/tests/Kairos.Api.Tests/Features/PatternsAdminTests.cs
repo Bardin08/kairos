@@ -1,0 +1,285 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+
+using Kairos.Api.Features.Admin;
+using Kairos.Api.Persistence;
+using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Shared;
+
+using Microsoft.EntityFrameworkCore;
+
+using NodaTime;
+using NodaTime.Text;
+
+using Shouldly;
+
+// Aliased because ASP.NET Core's authentication namespace brings its own SystemClock, and the one
+// this suite means is the one every instant in the application is read from.
+using SystemClock = NodaTime.SystemClock;
+
+namespace Kairos.Api.Tests.Features;
+
+/// <summary>
+/// The availability write side over the real pipeline. Only the rules that are wrong in ways
+/// nothing else would notice are pinned here: a rename works or it visibly does not, but an
+/// overlapping window and a cascaded delete both look like success and are found weeks later —
+/// one as a duplicated time on the booking page, the other as a link that quietly stopped
+/// offering anything.
+/// </summary>
+public class PatternsAdminTests
+{
+    private const string Slug = "consulting";
+    private const string LinkName = "Consulting call";
+    private const int DurationMinutes = 25;
+    private const int NineAm = 9 * 60;
+    private const int Noon = 12 * 60;
+    private const int OnePm = 13 * 60;
+    private const int FivePm = 17 * 60;
+
+    /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
+    private const int WellAhead = 30;
+
+    private static readonly Guid PatternId = Guid.CreateVersion7();
+    private static readonly Guid LinkId = Guid.CreateVersion7();
+
+    /// <summary>
+    /// The window this whole endpoint exists to refuse. Two rules covering 09:00-17:00 and
+    /// 13:00-17:00 on one Monday do not produce a longer day — they produce every 13:00-onwards
+    /// start twice, which reaches the invitee as a list with duplicates in it and reads as a
+    /// rendering fault rather than as the data fault it is.
+    /// </summary>
+    [Fact]
+    public async Task AddRule_OverlappingAnotherWindowOnTheSameDay_IsRefusedAsAConflict()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await AddRuleAsync(client, IsoDayOfWeek.Monday, OnePm, FivePm);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.RuleOverlapsCode);
+        app.Read(context => context.PatternRules.Count()).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The other side of that boundary, and the reason the check is written on half-open windows.
+    /// A split day — mornings, a gap, late afternoons — is the ordinary shape of an operator's
+    /// week, and 09:00-12:00 beside 12:00-17:00 touches without overlapping: each start is still
+    /// generated once. A check spelled with &lt;= would refuse it and be indistinguishable from
+    /// the test above.
+    /// </summary>
+    [Fact]
+    public async Task AddRule_TouchingAnotherWindowOnTheSameDay_IsAccepted()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        // The seeded Monday first shrinks to a morning, so the afternoon can meet it at noon.
+        var rules = await PatternAsync(client);
+        await client.DeleteAsync(
+            $"{PatternUrl}/rules/{RuleIdOf(rules)}", TestContext.Current.CancellationToken);
+        await AddRuleAsync(client, IsoDayOfWeek.Monday, NineAm, Noon);
+
+        var response = await AddRuleAsync(client, IsoDayOfWeek.Monday, Noon, FivePm);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        app.Read(context => context.PatternRules.Count()).ShouldBe(2);
+    }
+
+    /// <summary>
+    /// A window of no length. The range attributes cannot see it — both minutes are inside
+    /// 0-1439 — and <see cref="Kairos.Api.Availability.AvailabilityQuery"/> throws on it at read
+    /// time, which would turn one bad save into a booking page that 400s for everybody.
+    /// </summary>
+    [Fact]
+    public async Task AddRule_EndingWhenItStarts_IsRefusedBeforeItCanBeStored()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await AddRuleAsync(client, IsoDayOfWeek.Tuesday, NineAm, NineAm);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.WindowInvertedCode);
+        app.Read(context => context.PatternRules.Count()).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The refusal that has to name names. A cascade here would delete the pattern and leave the
+    /// link resolvable, active and offering nothing — an outage the operator did not ask for and
+    /// cannot see the cause of. Which links, not how many: the operator has to go and repoint
+    /// them, and a count sends them hunting through the links table for the answer this request
+    /// already has.
+    /// </summary>
+    [Fact]
+    public async Task DeletePattern_WhileALinkStandsOnIt_IsRefusedAndNamesTheLink()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.DeleteAsync(PatternUrl, TestContext.Current.CancellationToken);
+
+        // Read once. The body is a stream, and a second ReadFromJsonAsync on the same response
+        // finds it closed rather than rewound.
+        var problem = await ReadJsonAsync(response);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        problem.GetProperty("code").GetString().ShouldBe(PatternsAdminEndpoints.PatternInUseCode);
+        problem.GetProperty("title").GetString().ShouldNotBeNull().ShouldContain(LinkName);
+        app.Read(context => context.Patterns.Count()).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The blocked day, proved where it matters rather than in the row that stores it. An
+    /// override with both times absent is the holiday case, and a form that only offered "change
+    /// the times" could not express it — so what is pinned is the public booking page: a Monday
+    /// that offered slots offers none once the date is blocked, through the same HTTP the
+    /// invitee's browser uses.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithNoTimesAtAll_TakesTheDateOffThePublicBookingPage()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = LocalDatePattern.Iso.Format(Day());
+
+        var before = await SlotsAsync(app, day);
+
+        var response = await client.PutAsJsonAsync(
+            $"{PatternUrl}/overrides/{day}",
+            new { startMinute = (int?)null, endMinute = (int?)null },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        before.ShouldNotBeEmpty();
+        (await SlotsAsync(app, day)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The seam the whole tab exists to move: a pattern built here, through the admin API, and
+    /// then read by an anonymous browser as times it can book. Nothing in between is stubbed —
+    /// the link is repointed the way it would be from the links editor, and the last read is the
+    /// public endpoint with no session on it.
+    /// </summary>
+    [Fact]
+    public async Task CreatePatternAndRule_OnceALinkStandsOnIt_ChangesWhatTheBookingPageOffers()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        // A Tuesday, so the seeded Monday-only pattern offers nothing on it and the new pattern
+        // is the only thing that could put a time there.
+        var day = Day().PlusDays(1);
+        var date = LocalDatePattern.Iso.Format(day);
+
+        var before = await SlotsAsync(app, date);
+
+        var created = await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns",
+            new { name = "Tuesdays" },
+            TestContext.Current.CancellationToken);
+        var patternId = (await ReadJsonAsync(created)).GetProperty("id").GetString();
+
+        var ruled = await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns/{patternId}/rules",
+            new { isoDayOfWeek = (int)IsoDayOfWeek.Tuesday, startMinute = NineAm, endMinute = FivePm },
+            TestContext.Current.CancellationToken);
+
+        // Attached through the database rather than through an editor this screen does not have:
+        // which pattern a link stands on is the link's own field, and editing it here would be
+        // the link editing this tab is not allowed to grow.
+        app.Seed(context => context.Links
+            .Where(link => link.Id == LinkId)
+            .ExecuteUpdate(link => link.SetProperty(
+                candidate => candidate.PatternId, Guid.Parse(patternId!))));
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        ruled.StatusCode.ShouldBe(HttpStatusCode.OK);
+        before.ShouldBeEmpty();
+        (await SlotsAsync(app, date)).ShouldNotBeEmpty();
+    }
+
+    private static string PatternUrl => $"{ApiVersions.V1}/admin/patterns/{PatternId}";
+
+    private static Task<HttpResponseMessage> AddRuleAsync(
+        HttpClient client,
+        IsoDayOfWeek day,
+        int startMinute,
+        int endMinute) =>
+        client.PostAsJsonAsync(
+            $"{PatternUrl}/rules",
+            new { isoDayOfWeek = (int)day, startMinute, endMinute },
+            TestContext.Current.CancellationToken);
+
+    private static async Task<JsonElement> PatternAsync(HttpClient client)
+    {
+        var patterns = await client.GetFromJsonAsync<JsonElement>(
+            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+
+        return patterns.EnumerateArray().Single();
+    }
+
+    private static string? RuleIdOf(JsonElement pattern) =>
+        pattern.GetProperty("rules").EnumerateArray().Single().GetProperty("id").GetString();
+
+    /// <summary>The public read, unauthenticated, exactly as an invitee's browser makes it.</summary>
+    private static async Task<string[]> SlotsAsync(KairosApp app, string day)
+    {
+        var slots = await app.Client.GetFromJsonAsync<string[]>(
+            $"{ApiVersions.V1}/links/{Slug}/slots?from={day}&to={day}&duration={DurationMinutes}",
+            TestContext.Current.CancellationToken);
+
+        return slots ?? [];
+    }
+
+    private static KairosApp NewApp()
+    {
+        var app = new KairosApp();
+        app.Seed(Seed);
+        return app;
+    }
+
+    /// <summary>
+    /// One pattern with one Monday window, and one link standing on it. The link is what makes
+    /// the delete refusal reachable and what makes the blocked date observable from outside.
+    /// </summary>
+    private static void Seed(KairosDbContext context)
+    {
+        context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" });
+        context.PatternRules.Add(new PatternRule
+        {
+            Id = Guid.CreateVersion7(),
+            PatternId = PatternId,
+            IsoDayOfWeek = (int)IsoDayOfWeek.Monday,
+            StartMinute = NineAm,
+            EndMinute = FivePm,
+        });
+        context.Links.Add(new Link
+        {
+            Id = LinkId,
+            Slug = Slug,
+            Name = LinkName,
+            PatternId = PatternId,
+            Active = true,
+        });
+        context.LinkDurations.Add(new LinkDuration
+        {
+            LinkId = LinkId,
+            Minutes = DurationMinutes,
+            SortOrder = 0,
+        });
+    }
+
+    /// <summary>
+    /// Computed rather than written down. The application reads the real clock, so a literal date
+    /// would turn these tests into a suite that passes until it silently stops.
+    /// </summary>
+    private static LocalDate Day() =>
+        SystemClock.Instance.GetCurrentInstant().InUtc().Date.PlusDays(WellAhead).Next(IsoDayOfWeek.Monday);
+
+    private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
+        (await ReadJsonAsync(response)).GetProperty("code").GetString();
+
+    private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
+        await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+}

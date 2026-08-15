@@ -210,8 +210,12 @@ v1.MapBookings();
 v1.MapIntegrations();
 
 // The operator's workbench. Mapped through MapAdmin and never through v1, because that call is
-// the only thing standing between an anonymous caller and every one of these routes.
-app.MapAdmin().MapMeetingsAdmin();
+// the only thing standing between an anonymous caller and every one of these routes. One group,
+// chained: a second MapAdmin() beside this one would be a second place to read when asking what
+// is public, which is the question this shape exists to keep answerable in one line.
+app.MapAdmin()
+    .MapMeetingsAdmin()
+    .MapPatternsAdmin();
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the

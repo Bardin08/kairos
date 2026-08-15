@@ -179,10 +179,29 @@ async function toError(response: Response): Promise<ApiError> {
   )
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * One request, and the only place a failure becomes an ApiError.
+ *
+ * Exported so a module outside this file can make a call without reimplementing
+ * `fetch` — which is the whole reason this module exists. The admin surface's
+ * own calls live in the admin chunk rather than here: they are useless to an
+ * invitee, and code reachable from the booking route is code every invitee
+ * downloads on mobile data whether they can use it or not.
+ */
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, init)
   if (!response.ok) throw await toError(response)
   return (await response.json()) as T
+}
+
+/**
+ * The same, for a response with no body to parse — a 204. `request` would
+ * choke on the empty body with a SyntaxError that `asApiError` cannot tell
+ * apart from a proxy returning HTML.
+ */
+export async function requestNothing(path: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(BASE + path, init)
+  if (!response.ok) throw await toError(response)
 }
 
 function post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {

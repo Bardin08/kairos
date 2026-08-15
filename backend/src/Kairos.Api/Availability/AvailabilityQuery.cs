@@ -30,7 +30,12 @@ public sealed class AvailabilityQuery(KairosDbContext context)
     /// <see cref="LocalTime"/>, which has no 24:00, so midnight would silently become 00:00 and
     /// erase the day. "Until the end of the day" is 1439.
     /// </summary>
-    private const int LastMinuteOfDay = (24 * MinutesPerHour) - 1;
+    /// <remarks>
+    /// Public because the admin write side declares the same bound, and a window this class
+    /// refuses to expand must be one the operator was never able to save. Two copies of 1439 is
+    /// one of them going stale.
+    /// </remarks>
+    public const int LastMinuteOfDay = (24 * MinutesPerHour) - 1;
 
     private static readonly Func<KairosDbContext, Guid, IAsyncEnumerable<PatternRule>> RulesOfPattern =
         EF.CompileAsyncQuery((KairosDbContext database, Guid patternId) =>
