@@ -152,18 +152,19 @@ test('the session can be ended, through a plain anchor and not a router link', a
 })
 
 /**
- * An expired cookie on a workbench left open overnight is the most ordinary
- * failure this surface has, and rendered generically it reads "The server
- * answered 401." — a status code, and no way out of it.
+ * A refused read is no longer this page's problem, and that is the change.
+ *
+ * A 401 latches session.ts on its way through `adminRequest`, AdminShell
+ * replaces itself with the locked screen, and this page is unmounted before it
+ * could draw a heading, a Save button or a banner apologising for either. It is
+ * pinned in tests/locked.test.tsx, where the mechanism lives; what stays here is
+ * that every OTHER failure is still the server's own sentence, said in place.
  */
-test('an expired session is a way back in rather than a status code', async () => {
-  vi.mocked(getSettings).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+test('a failure the shell cannot fix is reported in place, in the server words', async () => {
+  vi.mocked(getSettings).mockRejectedValue(new ApiError(503, null, 'The database is busy.'))
   render(<Settings />)
 
-  const signIn = await screen.findByRole('link', { name: 'Sign in again' })
-
-  expect(signIn.getAttribute('href')).toBe('/admin/login')
-  expect(screen.queryByText(/The server answered/)).toBeNull()
+  expect(await screen.findByText('The database is busy.')).toBeDefined()
 })
 
 test('every class this page renders exists in kairos.css', async () => {

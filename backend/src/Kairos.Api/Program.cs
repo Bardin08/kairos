@@ -62,6 +62,12 @@ var authority = RequiredForSignIn("Authority");
 var clientId = RequiredForSignIn("ClientId");
 var clientSecret = RequiredForSignIn("ClientSecret");
 
+// Where the locked admin screen sends the operator, and the one Authentication value that is
+// optional: it defaults to this application's own challenge route, which needs no provider name
+// because the handler discovers everything from the authority above. Overridden only by a
+// deployment that wants the operator to pass through something else first.
+var signInUrl = builder.Configuration[SignInEndpoints.ConfigurationKey] ?? SignInEndpoints.DefaultUrl;
+
 string RequiredForSignIn(string key) =>
     builder.Configuration[$"Authentication:{key}"] ?? throw new InvalidOperationException(
         $"Authentication:{key} is not configured. The admin surface is authenticated against an "
@@ -219,6 +225,10 @@ var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
+// Anonymous, and the whole reason it exists: the operator reading it has just been refused. It
+// answers one string — where to sign in — so the locked screen can draw a link without the URL
+// being baked into a bundle that is built once and deployed everywhere.
+v1.MapSignIn(signInUrl);
 // The OAuth return leg, and the only route here that is not an invitee's. It is public because
 // the browser arriving on it holds a provider's redirect rather than a session of ours, and its
 // path is registered with that provider — so it is the one integration route that stays outside

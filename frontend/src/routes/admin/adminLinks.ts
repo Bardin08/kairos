@@ -6,14 +6,15 @@
 // link on their phone — endpoints they can never call. This module is imported
 // only by Links.tsx and LinkEditor.tsx, both reachable only through the lazily
 // imported admin shell, so Rollup places it in the admin chunk. It still makes
-// no fetch of its own: `request` is the one place a failure becomes an
-// ApiError, and a second copy of that is the copy that gets it wrong.
+// no fetch of its own: it goes through `adminRequest`, which wraps lib/api's
+// `request` — still the one place a failure becomes an ApiError — and latches
+// session.ts on a 401 so the shell can replace itself with the locked screen.
 //
 // Named adminLinks rather than links, unlike its sibling patterns.ts, for one
 // dull reason: Links.tsx sits in this directory, and on a case-insensitive
 // filesystem `./links` and `./Links` are the same name to the module resolver.
 
-import { request } from '../../lib/api'
+import { adminRequest } from './session'
 
 const LINKS = '/admin/links'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -83,7 +84,7 @@ export type LinkDraft = {
 }
 
 function send<T>(path: string, method: string, body?: unknown): Promise<T> {
-  return request<T>(path, {
+  return adminRequest<T>(path, {
     method,
     headers: JSON_HEADERS,
     body: JSON.stringify(body ?? {}),
@@ -92,7 +93,7 @@ function send<T>(path: string, method: string, body?: unknown): Promise<T> {
 
 /** Every link, archived ones included — this is where one is brought back from. */
 export function listLinks(signal?: AbortSignal): Promise<LinksPage> {
-  return request<LinksPage>(LINKS, { signal })
+  return adminRequest<LinksPage>(LINKS, { signal })
 }
 
 export function createLink(draft: LinkDraft): Promise<AdminLink> {
