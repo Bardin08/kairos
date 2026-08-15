@@ -1,8 +1,10 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Security;
+using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +30,13 @@ public sealed class IntegrationCredentialStore(
     IClock clock)
 {
     /// <summary>
+    /// A stored credential that this deployment's key cannot open. Named because it is the one
+    /// failure here an operator can act on, and the action is on a button they are already
+    /// looking at.
+    /// </summary>
+    public const string CredentialUnreadableCode = "credential_unreadable";
+
+    /// <summary>
     /// Every connected provider, for the page's status column. The rows carry ciphertext and the
     /// caller has no way to read it, which is why handing back the entity is safe here.
     /// </summary>
@@ -46,7 +55,31 @@ public sealed class IntegrationCredentialStore(
             return null;
         }
 
-        var json = protector.Unprotect(row.ProtectedPayload);
+        string json;
+        try
+        {
+            json = protector.Unprotect(row.ProtectedPayload);
+        }
+        catch (Exception exception)
+            when (exception is CryptographicException
+                or FormatException
+                or ArgumentException
+                or OverflowException)
+        {
+            // AES-GCM authenticates, so a row written under a different Security:SecretKey does
+            // not decrypt to nonsense — it throws. Left to reach the pipeline it is a 500 whose
+            // ProblemDetails title is the framework's own "An error occurred while processing
+            // your request.", which is what the Integrations page rendered: an admin screen
+            // reporting a nameable, operator-fixable condition as an unexplained fault. Named
+            // here instead, so it arrives as the same reported failure every other admin slice
+            // sends — a sentence and a code — rather than as a trip to the logs.
+            throw DomainException.Invalid(
+                CredentialUnreadableCode,
+                $"The stored {provider} credential cannot be read: it was encrypted with a "
+                + "different Security:SecretKey than this deployment is configured with. "
+                + $"Connecting {provider} again replaces it.");
+        }
+
         return JsonSerializer.Deserialize<TPayload>(json)
             ?? throw new InvalidOperationException($"The stored {provider} credential is empty.");
     }

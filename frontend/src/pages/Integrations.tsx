@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'wouter'
+import { Link, useSearchParams } from 'wouter'
 
 import AlertIcon from '../components/AlertIcon'
 import {
@@ -60,6 +60,23 @@ type Presentation = {
  * this application.
  */
 const SIGN_IN = '/admin/login'
+
+/**
+ * Where this page is reached from, and the way back out of it.
+ *
+ * The route has to stay `/integrations` — `IntegrationEndpoints.ReturnPath` is
+ * that string and the provider redirects a browser to it — so this page renders
+ * outside the admin shell and inherits none of its chrome: no rail, no tab bar,
+ * nothing that leads anywhere. This link is that missing edge, and it is the
+ * page's own rather than the browser's Back button on purpose. Back only works
+ * when there is somewhere behind you, and on the two ways in that matter there
+ * is not: the OAuth callback arrives here as a redirect from another origin, and
+ * the same URL opened in a fresh tab has no history at all.
+ *
+ * A wouter `<Link>` and not an anchor, unlike `SIGN_IN` above: /admin/settings
+ * is a client route the single page owns, so this is a push and not a reload.
+ */
+const SETTINGS = '/admin/settings'
 
 /**
  * A 401 here means one thing now, and it has a fix.
@@ -224,6 +241,15 @@ export default function Integrations() {
   return (
     <div className="page">
       <main className="mt-6">
+        {/* Above the heading, where an "up one level" control belongs, and drawn
+            before anything is read — a page that has failed its one request is
+            exactly the page an operator most needs to be able to leave. */}
+        <div className="mb-4">
+          <Link className="btn" href={SETTINGS}>
+            Back to Settings
+          </Link>
+        </div>
+
         <div className="page-header">
           <h1 className="title-page">Integrations</h1>
         </div>
@@ -350,7 +376,11 @@ export default function Integrations() {
           </p>
         )}
       </main>
-      <footer className="fine page-foot">Scheduled with Kairos</footer>
+      {/* No `page-foot` here, deliberately. "Scheduled with Kairos" is the
+          invitee's attribution line — it belongs on the surfaces a stranger
+          holding a link reads, which is the booking page and the manage page.
+          An operator administering Kairos does not need to be told what they
+          are administering. */}
     </div>
   )
 }
