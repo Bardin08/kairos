@@ -164,6 +164,18 @@ test('the callback reports success and refusal from the query string', async () 
   expect(await screen.findByText(/closed without granting access/)).toBeTruthy()
 })
 
+// Breaks if the page loses its only edge back into the workbench, and breaks if
+// the invitee's attribution line returns. This page renders outside the admin
+// shell — no rail, no tab bar — so the link it draws itself is the whole of the
+// first, and the operator is not the reader the second was written for.
+test('offers the way back to Settings and carries no invitee footer', async () => {
+  renderPage()
+
+  const back = await screen.findByRole('link', { name: 'Back to Settings' })
+  expect(back.getAttribute('href')).toBe('/admin/settings')
+  expect(screen.queryByText('Scheduled with Kairos')).toBeNull()
+})
+
 // Breaks if a 401 starts rendering as "could not reach the server", and breaks
 // if the recovery goes stale again: this sentence used to name a configuration
 // key Task 1 had already deleted, so it told the operator to unset something
