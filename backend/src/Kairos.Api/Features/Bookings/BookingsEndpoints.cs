@@ -74,6 +74,19 @@ public sealed record RescheduleBookingRequest
 /// exactly once, in the 201 from create: after that only its hash exists, so nothing can hand it
 /// back a second time.
 /// </summary>
+/// <param name="CalendarSync">
+/// Where this booking is in the organizer's calendar, lower-cased from
+/// <see cref="CalendarSyncState"/>: <c>synced</c>, <c>failed</c>, <c>pending</c> or
+/// <c>cancelled</c>. Null means nothing was ever attempted — the ordinary state of a deployment
+/// with no calendar connected, and not a fault. Everything a UI needs to say "this meeting is not
+/// in your calendar", and nothing more: the provider's own error text stays out of a response an
+/// invitee's manage token can read, because it is unfiltered third-party prose that routinely
+/// carries the organizer's account address inside it.
+/// </param>
+/// <param name="ConferenceUrl">
+/// Where to join, or null if this meeting has no second channel. The invitee already has this URL
+/// in their invitation; it is here so a page can show it without one.
+/// </param>
 public sealed record BookingResponse(
     Guid Id,
     string Slug,
@@ -86,7 +99,9 @@ public sealed record BookingResponse(
     string Email,
     string TimeZone,
     string Notes,
-    string? ManageToken);
+    string? ManageToken,
+    string? CalendarSync,
+    string? ConferenceUrl);
 
 public static class BookingsEndpoints
 {
@@ -179,14 +194,16 @@ public static class BookingsEndpoints
         await mailer.SendConfirmationAsync(booking, result.ManageToken!, cancellationToken);
 
         return TypedResults.Created(
-            $"{ApiVersions.V1}/bookings/{result.ManageToken}", ToResponse(booking, result.ManageToken));
+            $"{ApiVersions.V1}/bookings/{result.ManageToken}",
+            await ToResponseAsync(context, booking, result.ManageToken, cancellationToken));
     }
 
     private static async Task<BookingResponse> GetAsync(
         string token,
         KairosDbContext context,
         CancellationToken cancellationToken) =>
-        ToResponse(await FindAsync(context, token, cancellationToken), null);
+        await ToResponseAsync(
+            context, await FindAsync(context, token, cancellationToken), null, cancellationToken);
 
     /// <summary>
     /// Idempotent: a manage link opened twice, or a double-clicked button, gets the same answer
@@ -204,13 +221,14 @@ public static class BookingsEndpoints
         string token,
         KairosDbContext context,
         OutboxWriter outbox,
+        CalendarSyncService calendars,
         IClock clock,
         CancellationToken cancellationToken)
     {
         var booking = await FindAsync(context, token, cancellationToken);
         if (booking.Status != BookingStatus.Confirmed)
         {
-            return ToResponse(booking, null);
+            return await ToResponseAsync(context, booking, null, cancellationToken);
         }
 
         booking.Status = BookingStatus.Cancelled;
@@ -237,9 +255,20 @@ public static class BookingsEndpoints
             // documented to survive. The other one committed first, so the booking is cancelled
             // and its announcement is queued; this call has nothing left to do but agree. Without
             // this catch, adding the outbox row would have turned an idempotent 200 into a 500.
+            //
+            // Returned from here rather than falling through, for a reason the withdrawal below
+            // makes concrete: the outbox row this save could not write is still tracked, so the
+            // sync service's own SaveChanges would raise the same violation again and lose the
+            // state change it was making. The other call is withdrawing the event anyway.
+            return await ToResponseAsync(context, booking, null, cancellationToken);
         }
 
-        return ToResponse(booking, null);
+        // After the cancellation is committed, so nothing withdraws an event for a booking that
+        // is still standing. It cannot fail this request — CancelAsync has no throwing path —
+        // and a Google that refuses leaves a Failed row rather than a 500.
+        await calendars.CancelAsync(booking.Id, cancellationToken);
+
+        return await ToResponseAsync(context, booking, null, cancellationToken);
     }
 
     private static async Task<BookingResponse> RescheduleAsync(
@@ -247,6 +276,7 @@ public static class BookingsEndpoints
         RescheduleBookingRequest request,
         KairosDbContext context,
         SlotQuery slots,
+        CalendarSyncService calendars,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -296,7 +326,15 @@ public static class BookingsEndpoints
         booking.Sequence++;
         await ConfirmAsync(context, booking, cancellationToken);
 
-        return ToResponse(booking, null);
+        // Here, at the end, and never in the release phase above. That release is bookkeeping —
+        // the booking is set cancelled and put back confirmed on every path out of this method,
+        // the failing ones included — so a calendar hook hung on the status change would withdraw
+        // the event for every meeting that merely moved, and an attendee who had already accepted
+        // would watch it vanish. Exactly the trap the booking.cancelled announcement is kept out
+        // of, and pinned by the same pair of tests.
+        await calendars.RescheduleAsync(booking, cancellationToken);
+
+        return await ToResponseAsync(context, booking, null, cancellationToken);
     }
 
     /// <summary>
@@ -361,11 +399,30 @@ public static class BookingsEndpoints
             .Include(booking => booking.Link)
             .Include(booking => booking.Participants);
 
-    private static BookingResponse ToResponse(Booking booking, string? manageToken)
+    /// <summary>
+    /// The booking, plus the two facts about it that live outside its own row.
+    /// </summary>
+    /// <remarks>
+    /// Two reads rather than a join. Both tables are keyed by booking id, both are empty on a
+    /// deployment with nothing connected, and both are read once per response on an endpoint
+    /// nobody hits in a loop — so the cost is two indexed lookups against SQLite, and what it buys
+    /// is that <see cref="Tracked"/> stays the query the write paths use.
+    /// </remarks>
+    private static async Task<BookingResponse> ToResponseAsync(
+        KairosDbContext context,
+        Booking booking,
+        string? manageToken,
+        CancellationToken cancellationToken)
     {
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
         var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
         var end = Instant.FromUnixTimeSeconds(booking.EndUtc);
+
+        var entry = await context.CalendarEntries.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.BookingId == booking.Id, cancellationToken);
+
+        var conference = await context.ConferenceLinks.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.BookingId == booking.Id, cancellationToken);
 
         return new BookingResponse(
             booking.Id,
@@ -379,7 +436,9 @@ public static class BookingsEndpoints
             booker.Email,
             booker.TimeZoneId,
             booking.Notes,
-            manageToken);
+            manageToken,
+            entry?.State.ToString().ToLowerInvariant(),
+            conference?.JoinUrl);
     }
 
     private static Instant ParseInstant(string value)

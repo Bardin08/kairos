@@ -34,6 +34,10 @@ const confirmed: Booking = {
   timeZone: 'Europe/Warsaw',
   notes: '',
   manageToken: null,
+  // The state this deployment is in until somebody connects a calendar: nothing
+  // was attempted, so there is nothing to report. Not the same as `failed`.
+  calendarSync: null,
+  conferenceUrl: null,
 }
 
 function renderManage() {

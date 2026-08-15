@@ -56,6 +56,20 @@ export type Booking = {
    * nobody can ever cancel or move.
    */
   manageToken: string | null
+  /**
+   * Where this meeting is in the organizer's calendar: `synced`, `failed`,
+   * `pending` or `cancelled`. Null means nothing was ever attempted — the
+   * ordinary state of a deployment with no calendar connected — so it must not
+   * be rendered the same as `failed`, or every booking on a Kairos that was
+   * never asked to sync carries a red mark.
+   *
+   * The provider's own error text is deliberately not exposed: it is unfiltered
+   * third-party prose on a response a manage token can read, and it routinely
+   * carries the organizer's account address.
+   */
+  calendarSync: string | null
+  /** Where to join, or null if this meeting has no second channel. */
+  conferenceUrl: string | null
 }
 
 /**
