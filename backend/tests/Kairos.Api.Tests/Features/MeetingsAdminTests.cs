@@ -53,6 +53,7 @@ public class MeetingsAdminTests
     private const string BookerZone = "Asia/Tokyo";
 
     private const string Refusal = "Google said no.";
+    private const string Revocation = "The grant was withdrawn.";
 
     /// <summary>
     /// Seeded meetings need instants and nothing else — they never pass through availability — so
@@ -136,6 +137,46 @@ public class MeetingsAdminTests
         // intact, and the link it came through is still on it.
         meeting.Status.ShouldBe(nameof(BookingStatus.Confirmed).ToLowerInvariant());
         meeting.LinkName.ShouldBe(LinkName);
+        app.Read(context => context.Bookings.Count(booking => booking.Status == BookingStatus.Confirmed))
+            .ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The same guarantee at the line a revoked grant actually reaches. The refusal above throws
+    /// from the write; a withdrawn grant never gets that far, because the connectivity check
+    /// refreshes the access token and Google answers <c>invalid_grant</c> there. Both throws land
+    /// in the same catch today, which is exactly why this is pinned rather than left to reading: a
+    /// check that answered false instead would write no row at all, and the operator would be told
+    /// no calendar was ever connected for an account they connected themselves and then revoked.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_TheGrantWasRevoked_ReadsNotSyncedWithTheReasonRatherThanAsNeverConnected()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient(services =>
+        {
+            services.RemoveAll<ICalendarWriter>();
+            services.AddScoped<ICalendarWriter>(_ => new RevokedCalendar());
+        });
+
+        var created = await BookAsync(client);
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.CalendarSynced.ShouldBeFalse();
+
+        // The sentence this test exists for. Not synced with no provider and no reason is what a
+        // deployment that never connected anything reads as, and it sends the operator to a
+        // setting rather than to the reconnect they actually need.
+        meeting.CalendarError.ShouldBe(Revocation);
+        meeting.CalendarProvider.ShouldBe(nameof(IntegrationProvider.Google).ToLowerInvariant());
+
+        var entry = app.Read(context => context.CalendarEntries.AsNoTracking().Single());
+        entry.State.ShouldBe(CalendarSyncState.Failed);
+        entry.LastError.ShouldBe(Revocation);
+
+        // Ground rule 14, read from the database rather than from the answer that reported it.
         app.Read(context => context.Bookings.Count(booking => booking.Status == BookingStatus.Confirmed))
             .ShouldBe(1);
     }
@@ -353,5 +394,33 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A calendar whose grant has been withdrawn. Everything throws, including the connectivity
+    /// check: the credential is refreshed before any of these can answer, so the refusal arrives
+    /// one line earlier than <see cref="RefusingCalendar"/>'s — which is the only line a revoked
+    /// grant ever reaches.
+    /// </summary>
+    private sealed class RevokedCalendar : ICalendarWriter
+    {
+        public IntegrationProvider Provider => IntegrationProvider.Google;
+
+        public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
+            Task.FromException<bool>(new InvalidOperationException(Revocation));
+
+        public Task<string> CreateEventAsync(
+            CalendarEventRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromException<string>(new InvalidOperationException(Revocation));
+
+        public Task UpdateEventAsync(
+            string externalEventId,
+            CalendarEventRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException(Revocation));
+
+        public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException(Revocation));
     }
 }

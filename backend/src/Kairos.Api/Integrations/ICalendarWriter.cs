@@ -24,6 +24,11 @@ public interface ICalendarWriter
     /// to tell them from a provider that was asked and refused — one is nothing to report and the
     /// other is a sync failure an operator needs to see. Without this the two are the same
     /// exception and every booking on a deployment that never intended to sync carries a red mark.
+    ///
+    /// False means nobody ever connected one. A grant that was connected and has since been
+    /// withdrawn throws from here instead, because the credential is refreshed to answer the
+    /// question at all — and it has to stay a throw: answering false would record no failure and
+    /// report a revoked account as a calendar that was never set up.
     /// </summary>
     public Task<bool> IsConnectedAsync(CancellationToken cancellationToken);
 
