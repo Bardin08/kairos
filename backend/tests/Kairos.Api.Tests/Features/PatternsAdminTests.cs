@@ -32,10 +32,19 @@ public class PatternsAdminTests
     private const string Slug = "consulting";
     private const string LinkName = "Consulting call";
     private const int DurationMinutes = 25;
-    private const int NineAm = 9 * 60;
-    private const int Noon = 12 * 60;
-    private const int OnePm = 13 * 60;
-    private const int FivePm = 17 * 60;
+
+    private const int MinutesPerHour = 60;
+
+    private const int Monday = (int)IsoDayOfWeek.Monday;
+    private const int Tuesday = (int)IsoDayOfWeek.Tuesday;
+    private const int Wednesday = (int)IsoDayOfWeek.Wednesday;
+
+    /// <summary>Minutes from local midnight, which is what the column stores.</summary>
+    private const int NineAm = 9 * MinutesPerHour;
+    private const int TenAm = 10 * MinutesPerHour;
+    private const int Noon = 12 * MinutesPerHour;
+    private const int FourPm = 16 * MinutesPerHour;
+    private const int FivePm = 17 * MinutesPerHour;
 
     /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
     private const int WellAhead = 30;
@@ -43,66 +52,116 @@ public class PatternsAdminTests
     private static readonly Guid PatternId = Guid.CreateVersion7();
     private static readonly Guid LinkId = Guid.CreateVersion7();
 
+    [Fact]
+    public async Task ReplaceRules_WithAWholeNewSet_StoresExactlyThatSet()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await ReplaceRulesAsync(
+            client,
+            pattern,
+            [
+                new { isoDayOfWeek = Tuesday, startMinute = TenAm, endMinute = FourPm },
+                new { isoDayOfWeek = Wednesday, startMinute = TenAm, endMinute = FourPm },
+            ]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var stored = await PatternOfAsync(response);
+        stored.Rules.Count.ShouldBe(2);
+        stored.Rules.ShouldAllBe(rule => rule.StartMinute == TenAm);
+        stored.Rules.Select(rule => rule.IsoDayOfWeek).ShouldBe([Tuesday, Wednesday]);
+    }
+
+    /// <summary>
+    /// One bad window in the set is the whole set refused. A day at a time, a half-applied save
+    /// leaves the operator looking at a week they did not ask for and cannot tell apart from one
+    /// they did — so the validation runs before anything is written.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceRules_WhenOneWindowIsInverted_StoresNoneOfThem()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await ReplaceRulesAsync(
+            client,
+            pattern,
+            [
+                new { isoDayOfWeek = Tuesday, startMinute = TenAm, endMinute = FourPm },
+                new { isoDayOfWeek = Wednesday, startMinute = FourPm, endMinute = TenAm },
+            ]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+
+        var after = await client.GetFromJsonAsync<IReadOnlyList<PatternResponse>>(
+            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+        var unchanged = after!.Single(candidate => candidate.Id == pattern.Id);
+        unchanged.Rules.Count.ShouldBe(1);
+        unchanged.Rules[0].IsoDayOfWeek.ShouldBe(Monday);
+    }
+
+    [Fact]
+    public async Task ReplaceRules_WithAnEmptySet_ClosesEveryDay()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await ReplaceRulesAsync(client, pattern, []);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await PatternOfAsync(response)).Rules.ShouldBeEmpty();
+    }
+
     /// <summary>
     /// The window this whole endpoint exists to refuse. Two rules covering 09:00-17:00 and
-    /// 13:00-17:00 on one Monday do not produce a longer day — they produce every 13:00-onwards
+    /// 10:00-16:00 on one Monday do not produce a longer day — they produce every 10:00-onwards
     /// start twice, which reaches the invitee as a list with duplicates in it and reads as a
     /// rendering fault rather than as the data fault it is.
     /// </summary>
     [Fact]
-    public async Task AddRule_OverlappingAnotherWindowOnTheSameDay_IsRefusedAsAConflict()
+    public async Task ReplaceRules_WithTwoWindowsOverlappingOnOneDay_IsRefused()
     {
-        using var app = NewApp();
+        using var app = new KairosApp();
         using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
 
-        var response = await AddRuleAsync(client, IsoDayOfWeek.Monday, OnePm, FivePm);
+        var response = await ReplaceRulesAsync(
+            client,
+            pattern,
+            [
+                new { isoDayOfWeek = Monday, startMinute = NineAm, endMinute = FivePm },
+                new { isoDayOfWeek = Monday, startMinute = TenAm, endMinute = FourPm },
+            ]);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.RuleOverlapsCode);
-        app.Read(context => context.PatternRules.Count()).ShouldBe(1);
     }
 
     /// <summary>
-    /// The other side of that boundary, and the reason the check is written on half-open windows.
-    /// A split day — mornings, a gap, late afternoons — is the ordinary shape of an operator's
-    /// week, and 09:00-12:00 beside 12:00-17:00 touches without overlapping: each start is still
-    /// generated once. A check spelled with &lt;= would refuse it and be indistinguishable from
-    /// the test above.
+    /// Without this, the overlap test passes on an implementation that refuses any second window
+    /// on a day — which would silently kill split days.
     /// </summary>
     [Fact]
-    public async Task AddRule_TouchingAnotherWindowOnTheSameDay_IsAccepted()
+    public async Task ReplaceRules_WithTwoWindowsTouchingOnOneDay_IsAccepted()
     {
-        using var app = NewApp();
+        using var app = new KairosApp();
         using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
 
-        // The seeded Monday first shrinks to a morning, so the afternoon can meet it at noon.
-        var rules = await PatternAsync(client);
-        await client.DeleteAsync(
-            $"{PatternUrl}/rules/{RuleIdOf(rules)}", TestContext.Current.CancellationToken);
-        await AddRuleAsync(client, IsoDayOfWeek.Monday, NineAm, Noon);
-
-        var response = await AddRuleAsync(client, IsoDayOfWeek.Monday, Noon, FivePm);
+        var response = await ReplaceRulesAsync(
+            client,
+            pattern,
+            [
+                new { isoDayOfWeek = Monday, startMinute = NineAm, endMinute = Noon },
+                new { isoDayOfWeek = Monday, startMinute = Noon, endMinute = FivePm },
+            ]);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        app.Read(context => context.PatternRules.Count()).ShouldBe(2);
-    }
-
-    /// <summary>
-    /// A window of no length. The range attributes cannot see it — both minutes are inside
-    /// 0-1439 — and <see cref="Kairos.Api.Availability.AvailabilityQuery"/> throws on it at read
-    /// time, which would turn one bad save into a booking page that 400s for everybody.
-    /// </summary>
-    [Fact]
-    public async Task AddRule_EndingWhenItStarts_IsRefusedBeforeItCanBeStored()
-    {
-        using var app = NewApp();
-        using var client = app.CreateOperatorClient();
-
-        var response = await AddRuleAsync(client, IsoDayOfWeek.Tuesday, NineAm, NineAm);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
-        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.WindowInvertedCode);
-        app.Read(context => context.PatternRules.Count()).ShouldBe(1);
+        (await PatternOfAsync(response)).Rules.Count.ShouldBe(2);
     }
 
     /// <summary>
@@ -178,12 +237,12 @@ public class PatternsAdminTests
             $"{ApiVersions.V1}/admin/patterns",
             new { name = "Tuesdays" },
             TestContext.Current.CancellationToken);
-        var patternId = (await ReadJsonAsync(created)).GetProperty("id").GetString();
+        var pattern = await PatternOfAsync(created);
 
-        var ruled = await client.PostAsJsonAsync(
-            $"{ApiVersions.V1}/admin/patterns/{patternId}/rules",
-            new { isoDayOfWeek = (int)IsoDayOfWeek.Tuesday, startMinute = NineAm, endMinute = FivePm },
-            TestContext.Current.CancellationToken);
+        var ruled = await ReplaceRulesAsync(
+            client,
+            pattern,
+            [new { isoDayOfWeek = Tuesday, startMinute = NineAm, endMinute = FivePm }]);
 
         // Attached through the database rather than through an editor this screen does not have:
         // which pattern a link stands on is the link's own field, and editing it here would be
@@ -191,7 +250,7 @@ public class PatternsAdminTests
         app.Seed(context => context.Links
             .Where(link => link.Id == LinkId)
             .ExecuteUpdate(link => link.SetProperty(
-                candidate => candidate.PatternId, Guid.Parse(patternId!))));
+                candidate => candidate.PatternId, pattern.Id)));
 
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
         ruled.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -201,26 +260,33 @@ public class PatternsAdminTests
 
     private static string PatternUrl => $"{ApiVersions.V1}/admin/patterns/{PatternId}";
 
-    private static Task<HttpResponseMessage> AddRuleAsync(
-        HttpClient client,
-        IsoDayOfWeek day,
-        int startMinute,
-        int endMinute) =>
-        client.PostAsJsonAsync(
-            $"{PatternUrl}/rules",
-            new { isoDayOfWeek = (int)day, startMinute, endMinute },
+    /// <summary>
+    /// A pattern of one Monday window, seeded through the endpoint under test rather than through
+    /// the database, so what these tests replace is a set the same endpoint stored.
+    /// </summary>
+    private static async Task<PatternResponse> CreatePatternWithMondayNineToFiveAsync(HttpClient client)
+    {
+        var created = await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns",
+            new { name = "Weekdays" },
             TestContext.Current.CancellationToken);
 
-    private static async Task<JsonElement> PatternAsync(HttpClient client)
-    {
-        var patterns = await client.GetFromJsonAsync<JsonElement>(
-            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+        var ruled = await ReplaceRulesAsync(
+            client,
+            await PatternOfAsync(created),
+            [new { isoDayOfWeek = Monday, startMinute = NineAm, endMinute = FivePm }]);
 
-        return patterns.EnumerateArray().Single();
+        return await PatternOfAsync(ruled);
     }
 
-    private static string? RuleIdOf(JsonElement pattern) =>
-        pattern.GetProperty("rules").EnumerateArray().Single().GetProperty("id").GetString();
+    private static Task<HttpResponseMessage> ReplaceRulesAsync(
+        HttpClient client,
+        PatternResponse pattern,
+        object[] rules) =>
+        client.PutAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns/{pattern.Id}/rules",
+            new { rules },
+            TestContext.Current.CancellationToken);
 
     /// <summary>The public read, unauthenticated, exactly as an invitee's browser makes it.</summary>
     private static async Task<string[]> SlotsAsync(KairosApp app, string day)
@@ -250,7 +316,7 @@ public class PatternsAdminTests
         {
             Id = Guid.CreateVersion7(),
             PatternId = PatternId,
-            IsoDayOfWeek = (int)IsoDayOfWeek.Monday,
+            IsoDayOfWeek = Monday,
             StartMinute = NineAm,
             EndMinute = FivePm,
         });
@@ -279,6 +345,10 @@ public class PatternsAdminTests
 
     private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
         (await ReadJsonAsync(response)).GetProperty("code").GetString();
+
+    private static async Task<PatternResponse> PatternOfAsync(HttpResponseMessage response) =>
+        (await response.Content.ReadFromJsonAsync<PatternResponse>(
+            TestContext.Current.CancellationToken))!;
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);

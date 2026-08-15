@@ -42,6 +42,13 @@ public sealed record SaveRuleRequest
     private const int FirstMinuteOfDay = 0;
 }
 
+/// <summary>A day absent from the list is a closed day. There is no separate closed flag.</summary>
+public sealed record ReplaceRulesRequest
+{
+    [Required]
+    public required IReadOnlyList<SaveRuleRequest> Rules { get; init; }
+}
+
 /// <summary>
 /// What one date does instead of the weekly rules: different times, or — with both fields absent
 /// — nothing at all, which is how a holiday is expressed. The two nulls are the whole reason this
@@ -138,10 +145,15 @@ public static class PatternsAdminEndpoints
     public const string OverrideDateTakenCode = "override_date_taken";
 
     private const string PatternName = "Pattern";
-    private const string RuleName = "Rule";
     private const string OverrideName = "Date override";
 
     private const string NameTaken = "Another pattern already has that name.";
+
+    private const string WindowInverted = "A window has to end after it starts.";
+
+    private const string RuleOverlaps =
+        "Another window on that day already covers part of those hours. Overlapping windows offer "
+        + "the same time twice.";
 
     private const string DateTaken =
         "That date was set by another change a moment ago. Reload the pattern and set it again.";
@@ -153,9 +165,8 @@ public static class PatternsAdminEndpoints
         group.MapPatch("/patterns/{patternId:guid}", RenameAsync).WithName("RenamePattern");
         group.MapDelete("/patterns/{patternId:guid}", DeleteAsync).WithName("DeletePattern");
 
-        group.MapPost("/patterns/{patternId:guid}/rules", AddRuleAsync).WithName("AddPatternRule");
-        group.MapDelete("/patterns/{patternId:guid}/rules/{ruleId:guid}", RemoveRuleAsync)
-            .WithName("RemovePatternRule");
+        group.MapPut("/patterns/{patternId:guid}/rules", ReplaceRulesAsync)
+            .WithName("ReplacePatternRules");
 
         // Keyed on the date, so it is an upsert rather than a create-or-update the caller has to
         // choose between: setting Christmas twice is one row either way.
@@ -200,8 +211,8 @@ public static class PatternsAdminEndpoints
             () => context.SaveChangesAsync(cancellationToken), PatternNameTakenCode, NameTaken);
 
         // A pattern with no rules yet, which is the only thing a create can produce: the weekly
-        // windows are added one at a time, and a form that demanded one before the pattern
-        // existed would be a form that cannot be abandoned halfway.
+        // shape is written afterwards, and a form that demanded one before the pattern existed
+        // would be a form that cannot be abandoned halfway.
         return TypedResults.Created(
             $"{ApiVersions.V1}/admin/patterns/{pattern.Id}",
             await ReadAsync(context, pattern.Id, cancellationToken));
@@ -262,67 +273,56 @@ public static class PatternsAdminEndpoints
         return TypedResults.NoContent();
     }
 
-    private static async Task<PatternResponse> AddRuleAsync(
+    private static async Task<PatternResponse> ReplaceRulesAsync(
         Guid patternId,
-        SaveRuleRequest request,
+        ReplaceRulesRequest request,
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
-        if (request.EndMinute <= request.StartMinute)
+        var pattern = await context.Patterns
+            .Include(candidate => candidate.Rules)
+            .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
+            ?? throw DomainException.NotFound(PatternName);
+
+        foreach (var rule in request.Rules)
         {
-            throw DomainException.Invalid(
-                WindowInvertedCode, "A window has to end after it starts.");
+            if (rule.EndMinute <= rule.StartMinute)
+            {
+                throw DomainException.Invalid(WindowInvertedCode, WindowInverted);
+            }
         }
 
-        if (!await ExistsAsync(context, patternId, cancellationToken))
+        // Checked before anything is written, so the set is refused entire or stored entire.
+        foreach (var day in request.Rules.GroupBy(rule => rule.IsoDayOfWeek))
         {
-            throw DomainException.NotFound(PatternName);
+            // Half-open windows: sorted by start, an overlap is a window starting before the
+            // previous one ends. Written this way so two that merely touch at noon are a split
+            // day rather than a refusal.
+            var windows = day.OrderBy(rule => rule.StartMinute).ToList();
+            for (var index = 1; index < windows.Count; index++)
+            {
+                if (windows[index].StartMinute < windows[index - 1].EndMinute)
+                {
+                    throw DomainException.Conflict(RuleOverlapsCode, RuleOverlaps);
+                }
+            }
         }
 
-        var sameDay = await context.PatternRules.AsNoTracking()
-            .Where(rule => rule.PatternId == patternId && rule.IsoDayOfWeek == request.IsoDayOfWeek)
-            .Select(rule => new { rule.StartMinute, rule.EndMinute })
-            .ToListAsync(cancellationToken);
-
-        // Half-open windows: [a,b) and [c,d) overlap when a < d and c < b. Written this way so
-        // two windows that merely touch at noon are a split day rather than a refusal.
-        if (sameDay.Any(rule =>
-            rule.StartMinute < request.EndMinute && request.StartMinute < rule.EndMinute))
+        context.PatternRules.RemoveRange(pattern.Rules);
+        foreach (var rule in request.Rules)
         {
-            throw DomainException.Conflict(
-                RuleOverlapsCode,
-                "Another window on that day already covers part of those hours. Overlapping "
-                + "windows offer the same time twice.");
+            pattern.Rules.Add(new PatternRule
+            {
+                PatternId = pattern.Id,
+                IsoDayOfWeek = rule.IsoDayOfWeek,
+                StartMinute = rule.StartMinute,
+                EndMinute = rule.EndMinute,
+            });
         }
 
-        context.PatternRules.Add(new PatternRule
-        {
-            PatternId = patternId,
-            IsoDayOfWeek = request.IsoDayOfWeek,
-            StartMinute = request.StartMinute,
-            EndMinute = request.EndMinute,
-        });
         await context.SaveChangesAsync(cancellationToken);
 
-        return await ReadAsync(context, patternId, cancellationToken);
-    }
-
-    private static async Task<PatternResponse> RemoveRuleAsync(
-        Guid patternId,
-        Guid ruleId,
-        KairosDbContext context,
-        CancellationToken cancellationToken)
-    {
-        var deleted = await context.PatternRules
-            .Where(rule => rule.PatternId == patternId && rule.Id == ruleId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        if (deleted == 0)
-        {
-            throw DomainException.NotFound(RuleName);
-        }
-
-        return await ReadAsync(context, patternId, cancellationToken);
+        return await ReadAsync(context, pattern.Id, cancellationToken);
     }
 
     private static async Task<PatternResponse> SaveOverrideAsync(
@@ -345,8 +345,7 @@ public static class PatternsAdminEndpoints
 
         if (start is { } from && end is { } to && to <= from)
         {
-            throw DomainException.Invalid(
-                WindowInvertedCode, "A window has to end after it starts.");
+            throw DomainException.Invalid(WindowInvertedCode, WindowInverted);
         }
 
         if (!await ExistsAsync(context, patternId, cancellationToken))
