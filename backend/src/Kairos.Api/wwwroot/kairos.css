@@ -126,6 +126,14 @@
     --border-width: 1px;
     --measure: 68ch;        /* body copy never runs wider */
     --page-max: 1180px;
+    --tab-h: 56px;          /* one primary tab in the phone tab bar */
+    /* What the tab bar actually measures: a row of primaries, the secondary
+       destination's row at the tap floor, the hairline under each, and the
+       inset the phone reserves below it. Anything the fixed bar covers is
+       reserved with this — a hand-picked round number under-reserves, and the
+       last row of a table ends up behind the bar. */
+    --tabbar-h: calc(var(--tab-h) + var(--tap) + 2 * var(--border-width)
+                     + env(safe-area-inset-bottom));
 
     /* ---- motion ---------------------------------------------------------
        Three durations and two curves. Anything outside this set is a
@@ -451,17 +459,31 @@
     .calendar-cols { grid-template-columns: minmax(0, 300px) 1fr; gap: var(--space-7); }
   }
 
-  .admin-main { min-width: 0; padding: var(--space-6); padding-block-end: var(--space-10); }
-  @media (max-width: 640px) { .admin-main { padding: var(--space-5) var(--space-4) var(--space-10); } }
+  /* The only scroll container on the admin surface. The shell is exactly one
+     viewport tall, so the rail beside it cannot travel off the top however long
+     the table inside here gets. */
+  .admin-main { min-width: 0; overflow-y: auto; padding: var(--space-6); }
+  /* Below the breakpoint the tab bar is fixed over the foot of this pane, so
+     the pane reserves its measured height and keeps a page margin under the
+     last row rather than ending flush against the bar. */
+  @media (max-width: 900px) {
+    .admin-main { padding-block-end: calc(var(--tabbar-h) + var(--space-6)); }
+  }
+  @media (max-width: 640px) {
+    .admin-main { padding-block-start: var(--space-5); padding-inline: var(--space-4); }
+  }
 
   /* A hairline that separates two blocks inside one card. */
   .sep-top { margin-top: var(--space-4); padding-top: var(--space-3); border-top: var(--border-width) solid var(--border-subtle); }
 
   /* Admin: rail on desktop, bottom tab bar on a phone. */
+  /* Exactly one viewport tall, not at least one: the document does not scroll,
+     `.admin-main` does. Settings sits at the foot of the rail and only works
+     there if the rail is always on screen. */
   .admin-shell {
     display: grid;
     grid-template-columns: 240px 1fr;
-    min-height: 100dvh;
+    height: 100dvh;
   }
   @media (max-width: 900px) { .admin-shell { grid-template-columns: 1fr; } }
 }
@@ -1110,6 +1132,10 @@
     padding: var(--space-4);
     background: var(--surface-sunken);
     border-inline-end: var(--border-width) solid var(--border-subtle);
+    /* A laptop shorter than the rail's own contents still has to reach
+       Settings. The focus rings inside are drawn with a negative offset, so
+       nothing they paint is clipped by this. */
+    overflow-y: auto;
   }
   @media (max-width: 900px) { .rail { display: none; } }
   .rail .wordmark { padding-inline: var(--space-3); min-height: var(--tap); }
@@ -1160,7 +1186,7 @@
     display: grid;
     justify-items: center;
     gap: 3px;
-    min-height: 56px;
+    min-height: var(--tab-h);
     padding-block: var(--space-2);
     color: var(--text-tertiary);
     font-size: var(--text-2xs);
@@ -1280,7 +1306,16 @@
   @media (hover: hover) {
     .record:hover { background: var(--surface-hover); }
   }
+  /* `display: block` is what stops this painting over itself. Inside `.record`
+     it is a flex or grid item and was blockified anyway, so this changes
+     nothing there — but in a table cell it is neither, and an inline box with a
+     block `.record-day` inside it splits into fragments, each painting the
+     background again: one fragment the width of the month, offset up into the
+     day's box. That is the block over the dates the operator reported. Every
+     line of the chip is a block in a 54px column, so day, month and year share
+     one centre and the column cannot jitter as the month changes. */
   .record-date {
+    display: block;
     width: 54px;
     flex: none;
     text-align: center;
@@ -1288,8 +1323,10 @@
     border-radius: var(--radius-md);
     background: var(--surface-sunken);
   }
-  .record-day { display: block; font-size: var(--text-lg); font-weight: var(--weight-semi); line-height: 1.1; }
-  .record-month { font-size: var(--text-2xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
+  /* 1.1 gave a 20px face a 22px line box and a 23px ink box, so the digits
+     overflowed it by a pixel. --leading-tight is 1.15, which contains them. */
+  .record-day { display: block; font-size: var(--text-lg); font-weight: var(--weight-semi); line-height: var(--leading-tight); }
+  .record-month { display: block; font-size: var(--text-2xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
   .record-who { font-weight: var(--weight-semi); font-size: var(--text-sm); }
   .record-meta { font-size: var(--text-xs); color: var(--text-tertiary); }
   @media (max-width: 640px) {

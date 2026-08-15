@@ -173,6 +173,22 @@ test('every cell keeps its column name, which is what survives below 760px', asy
   )
 })
 
+test('the day, the month and the year are all inside the one date chip', async () => {
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+  const chip = row.querySelector('.record-date')
+
+  // Not a pixel assertion — jsdom computes nothing — but the structure the
+  // pixels came out of. A year rendered as a SIBLING of the chip is a
+  // full-width block that takes the cell's own start alignment while the two
+  // lines above it are centred in the chip's 54px, which is exactly the
+  // misalignment the operator reported. Inside it, one column, one centre.
+  expect(chip?.querySelector('.record-day')?.textContent).toBe('07')
+  expect(chip?.querySelector('.record-month')?.textContent).toBe('Sept')
+  expect(chip?.querySelector('.record-meta')?.textContent).toBe('2026')
+})
+
 test('an empty list names which filter closed it', async () => {
   vi.mocked(listMeetings).mockResolvedValue(answer([]))
   render(<Meetings />)
