@@ -1,6 +1,7 @@
-import type { ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter'
 
+import { getSettings } from './adminSettings'
 import Availability from './Availability'
 import Links from './Links'
 import Meetings from './Meetings'
@@ -112,6 +113,22 @@ const SETTINGS: Destination = {
 
 const HOME = DESTINATIONS[0].path
 
+/** Two letters at most, and never more than the name actually has. */
+const INITIALS = 2
+
+/**
+ * `Vlad Bardin` → `VB`. The avatar is `aria-hidden`, so this is decoration
+ * beside the name rather than a second way of reading it.
+ */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((word) => word !== '')
+    .slice(0, INITIALS)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('')
+}
+
 /**
  * A destination as a link, marked when it is the one being shown.
  *
@@ -148,6 +165,26 @@ export default function AdminShell() {
   // matches DESTINATIONS without any prefix arithmetic.
   const [current] = useLocation()
 
+  // Whatever the identity provider called this operator, or null. Null is the
+  // ordinary case for a provider that sends no `name` claim, and it draws no
+  // identity block at all — a subject identifier presented as a person's name
+  // is worse than no name. A failed read is the same as no name: the rail is
+  // navigation, and nothing about it should turn red because a fetch did.
+  const [operator, setOperator] = useState<string | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    getSettings(controller.signal)
+      .then((settings) => setOperator(settings.signedInAs))
+      .catch(() => {
+        // The pages inside report their own failures, and each of them makes
+        // the same call this one did.
+      })
+
+    return () => controller.abort()
+  }, [])
+
   return (
     <>
       <div className="admin-shell">
@@ -176,9 +213,24 @@ export default function AdminShell() {
               says "not one of the three". The inner `.nav` is a div, not a
               second navigation landmark: one link is not a set of them, and it
               is only there because `.nav a` is what keeps a link off the
-              accent colour it would otherwise inherit from the base `a` rule. */}
+              accent colour it would otherwise inherit from the base `a` rule.
+
+              `.rail-foot` is a flex row, so the identity and the link are
+              stacked inside one `.grow` child rather than laid side by side —
+              240px does not hold an avatar, a name and a labelled link on one
+              line without one of them being cut. */}
           <div className="rail-foot">
-            <div className="nav grow">{destinationLink(SETTINGS, current)}</div>
+            <div className="grow">
+              {operator !== null && (
+                <div className="row gap-2 mb-3">
+                  <span className="avatar avatar-sm" aria-hidden="true">
+                    {initials(operator)}
+                  </span>
+                  <span className="grow t-sm muted">{operator}</span>
+                </div>
+              )}
+              <div className="nav">{destinationLink(SETTINGS, current)}</div>
+            </div>
           </div>
         </aside>
 

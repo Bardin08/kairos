@@ -412,7 +412,7 @@ namespace Kairos.Api.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
 
-                            t.HasCheckConstraint("CK_Settings_StartIncrementMinutes_NonNegative", "StartIncrementMinutes >= 0");
+                            t.HasCheckConstraint("CK_Settings_StartIncrementMinutes_AtLeastOne", "StartIncrementMinutes >= 1");
                         });
 
                     b.HasData(

@@ -107,6 +107,42 @@ public class LinksAdminTests
         app.Read(context => context.Links.AsNoTracking().Any()).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// An inherited limit is an explicit <c>null</c> on the wire, not a key that is not there.
+    /// </summary>
+    /// <remarks>
+    /// Asserted on the raw body, and that is the whole point of the test. Deserializing it back
+    /// into <see cref="AdminLinkResponse"/> would put the property back whether or not the JSON
+    /// carried it, and prove nothing. What this defends is one line nobody would connect to it:
+    /// System.Text.Json's <c>DefaultIgnoreCondition</c> is <c>Never</c> today, and setting it to
+    /// <c>WhenWritingNull</c> — a plausible tidying-up — drops the key, JavaScript reads
+    /// <c>undefined</c>, <c>value === null</c> goes false in <c>InheritableNumber</c>, and every
+    /// inherited limit in the workbench renders as an editable box holding the global. The link
+    /// then stops tracking the global the first time anybody saves it, silently, and no other
+    /// test in this suite goes red.
+    /// </remarks>
+    [Fact]
+    public async Task ListLinks_ForAnInheritedLimit_SendsAnExplicitNullRatherThanOmittingTheKey()
+    {
+        using var app = new KairosApp();
+        app.Seed(context =>
+        {
+            context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" });
+            context.Links.Add(new Link
+            {
+                Slug = "mentorship",
+                Name = "Mentorship",
+                PatternId = PatternId,
+                Durations = [new LinkDuration { Minutes = 30, SortOrder = 0 }],
+            });
+        });
+        using var client = app.CreateOperatorClient();
+
+        var body = await client.GetStringAsync(AdminPath, TestContext.Current.CancellationToken);
+
+        body.ShouldContain("\"marginMinutes\":null");
+    }
+
     /// <summary>Only the machine-readable half of ProblemDetails; nothing else is asserted on.</summary>
     private sealed record ProblemWithCode(string Code);
 }

@@ -1186,6 +1186,17 @@
     outline-offset: -3px;
     border-radius: var(--radius-md);
   }
+  /* The tab bar's only direct child is the secondary destination — the three
+     primaries live inside `.tabbar-inner`. Without this it takes the 56px
+     full-bleed tab above, which is a fourth tab in everything but the grid. A
+     single centred row instead, at the tap floor and no taller, with a hairline
+     under it saying it is not one of the three. */
+  .tabbar > a {
+    grid-auto-flow: column;
+    justify-content: center;
+    min-height: var(--tap);
+    border-block-end: var(--border-width) solid var(--border-subtle);
+  }
   @media (max-width: 900px) { .tabbar { display: block; } }
 
   /* ---- table ---------------------------------------------------------------------

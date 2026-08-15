@@ -67,12 +67,20 @@ export default function InheritableNumber({
       {/* The third state, and the only control that can reach it. Unchecking
           seeds the number with the global rather than with an empty box: it is
           the value the link is on right now, so it is the honest starting
-          point for editing it. */}
+          point for editing it.
+
+          Clamped on the way out, because the global and this link's floor are
+          set by two different endpoints and can disagree. A global start
+          increment below one would otherwise leave this box the moment the
+          checkbox is cleared, and the PUT that carried it would come back as an
+          opaque 400 about a value the operator never typed. */}
       <label className="fine row gap-2">
         <input
           type="checkbox"
           checked={inherited}
-          onChange={(event) => onChange(event.target.checked ? null : globalValue)}
+          onChange={(event) =>
+            onChange(event.target.checked ? null : Math.max(min, globalValue))
+          }
         />
         Use the global default — {globalValue} {unit}
       </label>

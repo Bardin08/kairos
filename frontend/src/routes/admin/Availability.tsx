@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 
 import AlertIcon from '../../components/AlertIcon'
 import { asApiError } from '../../lib/api'
+import { getSettings } from './adminSettings'
 import {
   addPatternRule,
   createPattern,
@@ -415,6 +416,10 @@ export default function Availability() {
   const [name, setName] = useState('')
   const [pending, setPending] = useState<Action | null>(null)
   const [failure, setFailure] = useState<{ action: Action; message: string } | null>(null)
+  // The organizer's zone, named on every card beside the hours it makes sense
+  // of. Empty until it arrives, and the line then reads as hours alone rather
+  // than as hours followed by a gap where a zone should be.
+  const [zone, setZone] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -428,6 +433,15 @@ export default function Availability() {
         if (controller.signal.aborted) return
         setLoading(false)
         setFailure({ action: 'create', message: asApiError(error).message })
+      })
+
+    // Its own request and its own silence. A zone that does not arrive costs
+    // this page a suffix; a zone that turned the page red would be a failure
+    // report about the label on a screen whose subject is elsewhere.
+    getSettings(controller.signal)
+      .then((settings) => setZone(settings.timeZone))
+      .catch(() => {
+        // Hours without the zone beside them, which is where this page started.
       })
 
     return () => controller.abort()
@@ -537,14 +551,6 @@ export default function Availability() {
         </div>
       </div>
 
-      {/* Said once, at the top: the times below are wall-clock in the
-          organizer's own zone. Which zone that is lives in Settings and is not
-          repeated here, because a second place to read it is a second place for
-          it to be wrong. */}
-      <p className="fine mb-5">
-        Every time on this page is your own wall clock. The zone it is read in is in Settings.
-      </p>
-
       {failure?.action === 'create' && (
         <p className="field-error mb-5" role="alert">
           <AlertIcon />
@@ -589,8 +595,14 @@ export default function Availability() {
               {pattern.rules.length === 0 ? (
                 <p className="muted t-sm">No hours yet — nothing bookable.</p>
               ) : (
+                // The hours, and the zone they are read in. The zone belongs on
+                // the card rather than in one sentence at the top: a card is
+                // the unit somebody screenshots, quotes and argues with, and
+                // 09:00–17:00 with no zone on it is a time that means four
+                // different things.
                 <p className="muted numeric t-sm">
                   {openDays(pattern.rules).join(', ')} · {hours(pattern.rules)}
+                  {zone === '' ? '' : ` · ${zone}`}
                 </p>
               )}
 
