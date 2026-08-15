@@ -10,6 +10,9 @@ function availability(count: number): string {
   return count === 1 ? '1 time available' : `${count} times available`
 }
 
+/** What a day is, when the caller knows. Absent on the booking page, which only has counts. */
+export type DayState = 'open' | 'closed' | 'blocked'
+
 /**
  * A month of days, keyed on the ORGANIZER's calendar — which is what the slots
  * endpoint's `from` and `to` mean, and therefore what a square can be said to
@@ -22,12 +25,19 @@ function availability(count: number): string {
 export default function MonthGrid({
   month,
   counts,
+  states,
   selected,
   onSelect,
 }: {
   month: string
   /** Slots per date key. A day missing from the map has none. */
   counts: Map<string, number>
+  /**
+   * Why a day is what it is, per date key. A count cannot say it: a blocked day
+   * and a day the pattern never opens both count zero, and the pattern editor
+   * has to tell them apart.
+   */
+  states?: Map<string, DayState>
   selected: string | null
   onSelect: (day: string) => void
 }) {
@@ -63,6 +73,9 @@ export default function MonthGrid({
               type="button"
               className="day"
               data-state={open ? 'available' : 'unavailable'}
+              // Undefined renders no attribute at all, which is what keeps the
+              // booking page's markup identical to what it was before states.
+              data-day-state={states?.get(day)}
               // Only a day that can be chosen carries a pressed state; setting
               // it on the rest would paint every closed day as a selection the
               // moment the stylesheet's `[aria-pressed]` rule matched.
