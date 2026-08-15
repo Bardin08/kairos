@@ -50,22 +50,26 @@ function rangeOf(period: string, zone: string): { from?: string; to?: string } {
 
 /**
  * The date as the comp's record chip draws it — `docs/ui/admin.html` line 214 —
- * with the year under it.
+ * with the year as a third line inside it.
  *
  * The comp carries no year because it is showing four meetings in one month. A
  * list that spans "past and upcoming" spans years, and a bare "20 Aug" in it is
- * a date that does not say which one. The year goes on its own quiet line rather
- * than into `.record-month`, whose 54px chip would wrap it.
+ * a date that does not say which one. It goes on its own quiet line rather than
+ * beside the month, whose 54px chip would wrap the pair — and inside the chip
+ * rather than under it, because a sibling of the chip is a full-width block that
+ * takes the cell's own alignment, which is how the day, the month and the year
+ * ended up on three different alignments.
+ *
+ * A `div` rather than the comp's `span`: `p` is not phrasing content, and the
+ * chip is a block in every layout that uses it.
  */
 function dateChip(instant: string, zone: string) {
   const day = zonedDate(instant, zone)
 
   return (
-    <div>
-      <span className="record-date">
-        <span className="record-day">{day.slice(DAY_OF_MONTH_AT)}</span>
-        <span className="record-month">{shortMonth(day)}</span>
-      </span>
+    <div className="record-date">
+      <span className="record-day">{day.slice(DAY_OF_MONTH_AT)}</span>
+      <span className="record-month">{shortMonth(day)}</span>
       <p className="record-meta">{day.slice(0, YEAR_LENGTH)}</p>
     </div>
   )
