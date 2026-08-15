@@ -820,6 +820,13 @@
   .day[aria-pressed="true"]::after { background: var(--text-on-accent); }
   .day[data-state="empty"] { visibility: hidden; }
 
+  /* Dimming is already spent: a closed day is dimmed too, and the pattern
+     editor exists to separate the two. Struck rather than dotted, because the
+     day's dot is 4px and too small to read as hollow at that size. The strike
+     is geometry in currentColor, so it survives both themes and a monochrome
+     screenshot with no colour of its own. */
+  .day[data-day-state="blocked"] { text-decoration: line-through; }
+
   /* ---- slots ---------------------------------------------------------------
      The authored motion of this product lives here, and only here: changing
      the day re-lists the times as a short stagger of ease-out entrances from
