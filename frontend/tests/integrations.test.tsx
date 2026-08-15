@@ -24,6 +24,7 @@ const google: Integration = {
   accountLabel: null,
   connectedAt: null,
   reconnectRequired: false,
+  fault: null,
 }
 
 /**
@@ -41,6 +42,7 @@ const invented: Integration = {
   accountLabel: 'ops@example.com',
   connectedAt: '2026-08-14T22:29:14Z',
   reconnectRequired: false,
+  fault: null,
 }
 
 // `searchPath` carries no leading `?` — memoryLocation adds it.
@@ -174,6 +176,68 @@ test('offers the way back to Settings and carries no invitee footer', async () =
   const back = await screen.findByRole('link', { name: 'Back to Settings' })
   expect(back.getAttribute('href')).toBe('/admin/settings')
   expect(screen.queryByText('Scheduled with Kairos')).toBeNull()
+})
+
+// Breaks if a credential this deployment cannot decrypt goes back to being a
+// sentence with nothing to press. Reconnecting is the fix, so the row that
+// reports the fault has to carry the button that performs it — and it has to
+// carry it even where the deployment holds no client credentials, because that
+// is exactly the instance the operator is on.
+test('a credential that will not decrypt offers the reconnect it asks for', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([
+    {
+      ...google,
+      configured: false,
+      connected: true,
+      accountLabel: 'me@example.com',
+      connectedAt: '2026-08-14T22:29:14Z',
+      fault: 'credential_unreadable',
+    },
+  ])
+  renderPage()
+
+  const state = await screen.findByText('Reconnect needed')
+  expect(state.getAttribute('data-state')).toBe('paused')
+  expect(screen.getByText(/different Security:SecretKey/)).toBeTruthy()
+  // The prerequisite is named as well as the action, so the button is not a
+  // surprise when it comes back with provider_not_configured.
+  expect(screen.getByText(/no client credentials/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Connect again' })).toBeTruthy()
+})
+
+// Breaks if a failure the page cannot act on goes back to being a bare
+// sentence. Reading again is the only move left, so it is offered as a control
+// and said in words rather than left for the operator to guess at.
+test('a failure with no remedy but a retry says so and offers the retry', async () => {
+  vi.mocked(listIntegrations).mockRejectedValueOnce(new ApiError(500, null, 'The server answered 500.'))
+  renderPage()
+
+  expect(await screen.findByText(/Nothing on this page can put that right/)).toBeTruthy()
+  // Not a Connect: nothing about a dead server is fixed by opening a consent
+  // screen, and a button whose press cannot help is worse than none.
+  expect(screen.queryByRole('button', { name: /Connect/ })).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Read it again' }))
+
+  expect(await screen.findByText('Google')).toBeTruthy()
+  expect(listIntegrations).toHaveBeenCalledTimes(2)
+})
+
+// Breaks if the way out disappears from the screens that need it most. The page
+// renders outside the admin shell, so on a failure this link is the only thing
+// on it that leads anywhere.
+test('the way back to Settings survives every failure state', async () => {
+  vi.mocked(listIntegrations).mockRejectedValue(new ApiError(500, null, 'The server answered 500.'))
+  renderPage()
+
+  expect(await screen.findByRole('link', { name: 'Back to Settings' })).toBeTruthy()
+
+  cleanup()
+
+  vi.mocked(listIntegrations).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+  renderPage()
+
+  expect(await screen.findByRole('link', { name: 'Back to Settings' })).toBeTruthy()
 })
 
 // Breaks if a 401 starts rendering as "could not reach the server", and breaks
