@@ -18,11 +18,18 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// the send side would become a duplicate storm on the notice side. Delivery is
 /// <see cref="OutboxDispatcher"/>'s, from the queue, at its own pace.
 ///
-/// There is no "have I already announced this one?" query either. The unique index on
-/// (BookingId, Type) answers it: the insert is attempted, a duplicate is rejected, and the
-/// rejection is swallowed. A pre-check would be check-then-act across two statements — the same
-/// race BEGIN IMMEDIATE exists to remove on the booking path — and it would still need the index
-/// underneath it, so it would be a second guarantee that could only ever disagree with the first.
+/// The unique index on (BookingId, Type) is what makes announcing twice impossible, not the
+/// query below. The insert is attempted, a duplicate is rejected, the rejection is swallowed —
+/// that backstop is the guarantee and nothing here replaces it. What the query's last clause
+/// does is stop the service from re-attempting every meeting it has ever announced on every
+/// tick: measured at 300 already-announced bookings, a sweep issued 301 inserts of which 300
+/// failed, and that is per minute for the life of the deployment.
+///
+/// The clause is not the check-then-act the design ruled out. That is read, decide, then write
+/// with a window in between for another writer; this is one statement, filter and selection
+/// evaluated together by SQLite, and no window at all. If a duplicate somehow reaches the insert
+/// anyway — a second process, a sweep overlapping itself — the index still refuses it and the
+/// swallow below still handles it.
 /// </remarks>
 public sealed class MeetingEndedPoller(
     IServiceScopeFactory scopes,
@@ -91,7 +98,15 @@ public sealed class MeetingEndedPoller(
         // bookings would put every past meeting in the change tracker on every sweep.
         var ended = await context.Bookings
             .AsNoTracking()
-            .Where(booking => booking.Status == BookingStatus.Confirmed && booking.EndUtc <= now)
+            .Where(booking =>
+                booking.Status == BookingStatus.Confirmed
+                && booking.EndUtc <= now
+                // The bound, and the reason a sweep costs what the last minute produced rather
+                // than what the deployment has ever produced. It is a candidate filter, not the
+                // correctness mechanism — see the class remarks.
+                && !context.OutboxMessages.Any(message =>
+                    message.BookingId == booking.Id
+                    && message.Type == OutboxMessageType.MeetingEnded))
             .OrderBy(booking => booking.EndUtc)
             .Select(booking => new
             {
