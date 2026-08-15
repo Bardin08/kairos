@@ -12,10 +12,18 @@ using Kairos.Api.Scheduling;
 using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 using NodaTime;
+
+// Aliased because ASP.NET Core's authentication namespace brings its own SystemClock, and the one
+// this application means is the one every instant in it is read from.
+using SystemClock = NodaTime.SystemClock;
 
 // CreateSlimBuilder rather than CreateBuilder: it leaves out the configuration providers and
 // logging this app never reads, which is startup time and a few Mi of a Raspberry Pi's memory
@@ -45,11 +53,52 @@ builder.Services.AddSingleton(new SecretProtector(
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
 
-// Part A shipped no authentication and Pocket ID is Part C, so the operator routes under
-// /integrations are guarded by a shared token or by nothing at all. Read here, with every other
-// configuration key, and handed to the group rather than resolved somewhere deeper.
-const string adminTokenPath = "Integrations:AdminToken";
-var integrationAdminToken = builder.Configuration[adminTokenPath];
+// Pocket ID, and with it the whole of the operator's authentication. Read here rather than bound
+// to an options class because all three values are needed while the handlers are being
+// configured, and read with a throw for the same reason the secret key above has one: an absent
+// authority does not announce itself, it surfaces later as a redirect to nowhere.
+var authority = RequiredForSignIn("Authority");
+var clientId = RequiredForSignIn("ClientId");
+var clientSecret = RequiredForSignIn("ClientSecret");
+
+string RequiredForSignIn(string key) =>
+    builder.Configuration[$"Authentication:{key}"] ?? throw new InvalidOperationException(
+        $"Authentication:{key} is not configured. The admin surface is authenticated against "
+        + "Pocket ID, so Kairos needs its issuer URL and an OIDC client registered there.");
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        // Everything behind the gate is an API route the admin surface fetches, and a fetch
+        // cannot follow a redirect to another origin — it fails as an opaque CORS error that says
+        // nothing about the session having expired. So the cookie handler answers with the status
+        // codes a client can act on, and the one redirect worth making is the login route below,
+        // which a browser navigates to rather than fetches.
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    })
+    .AddOpenIdConnect(options =>
+    {
+        options.Authority = authority;
+        options.ClientId = clientId;
+        options.ClientSecret = clientSecret;
+
+        // The handler still defaults to the implicit id_token flow, which is what having a client
+        // secret at all is an argument against. Code flow, with the PKCE the handler adds to it.
+        options.ResponseType = OpenIdConnectResponseType.Code;
+    });
+
+builder.Services.AddAuthorization(options =>
+    options.AddPolicy(AdminGroup.Policy, policy => policy.RequireAuthenticatedUser()));
 
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
 
@@ -130,25 +179,34 @@ using (var scope = app.Services.CreateScope())
 app.UseExceptionHandler();
 app.UseStaticFiles();
 
+// Written out rather than left to the automatic registration, because which requests carry an
+// identity and where the gate sits is not something a reader of this file should have to know a
+// framework convention to answer.
+app.UseAuthentication();
+app.UseAuthorization();
+
+// The two routes that make a session and end one, and the only two that are anonymous by
+// necessity rather than by choice: a challenge is a browser navigation to another origin, so
+// nothing behind the gate could ever start one. The admin surface sends the window here after a
+// 401 and there is no login form anywhere in this application.
+app.MapGet("/admin/login", () => Results.Challenge(
+    new AuthenticationProperties { RedirectUri = "/admin" },
+    [OpenIdConnectDefaults.AuthenticationScheme]));
+
+// The Kairos session, and not the Pocket ID one. Ending both is a second redirect and a second
+// URL to register with the provider, to log the operator out of everything else they were using
+// it for — which is not what pressing sign out on a scheduling app asks for.
+app.MapGet("/admin/logout", () => Results.SignOut(
+    new AuthenticationProperties { RedirectUri = "/" },
+    [CookieAuthenticationDefaults.AuthenticationScheme]));
+
 // Versioned from day zero. The first breaking change is a second group mapped beside this one,
 // not a migration every client has to make on the same afternoon.
 var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
-v1.MapIntegrations(integrationAdminToken);
-
-// Said out loud, once, at startup. An endpoint that hands out a consent URL and accepts the
-// callback that binds a calendar to this instance is not something to leave open quietly.
-if (string.IsNullOrEmpty(integrationAdminToken))
-{
-    app.Logger.LogWarning(
-        "{Path} is not set: the integration endpoints are unauthenticated. Set it to a random "
-        + "string and send it as the {Header} header, or keep this instance off the public "
-        + "internet until Part C ships real authentication.",
-        adminTokenPath,
-        IntegrationEndpoints.AdminTokenHeader);
-}
+v1.MapIntegrations();
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the
