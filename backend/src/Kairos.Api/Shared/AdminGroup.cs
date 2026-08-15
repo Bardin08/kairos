@@ -14,13 +14,16 @@ public static class AdminGroup
     /// scattered across twenty MapGet calls.
     /// </summary>
     /// <remarks>
-    /// Three routes are outside it, all three by necessity rather than by oversight, and they are
+    /// Four routes are outside it, all four by necessity rather than by oversight, and they are
     /// named here so this file stays the whole answer. <c>GET /admin/login</c> and
     /// <c>GET /admin/logout</c> are the challenge and the sign-out: nothing behind the gate could
-    /// start either, since a challenge is a browser navigation to another origin. And
+    /// start either, since a challenge is a browser navigation to another origin.
     /// <c>GET /api/v1/integrations/{provider}/callback</c> is the OAuth return leg — its path is
     /// registered byte-for-byte with the provider, and the caller is a browser holding that
-    /// provider's redirect rather than a session of ours, so it is guarded by <c>state</c>.
+    /// provider's redirect rather than a session of ours, so it is guarded by <c>state</c>. And
+    /// <c>GET /api/v1/sign-in</c> answers where to sign in, for a browser that has just been
+    /// refused: behind the gate it would 401 at exactly the reader it exists for, and it carries
+    /// one string that is safe to hand anybody. See <see cref="Features.Admin.SignInEndpoints"/>.
     /// Everything else that an operator can reach is under this prefix.
     /// </remarks>
     public static RouteGroupBuilder MapAdmin(this WebApplication app) =>

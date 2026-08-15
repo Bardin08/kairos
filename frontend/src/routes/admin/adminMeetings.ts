@@ -8,15 +8,16 @@
 // — while the page that uses it was correctly absent. This module is imported
 // only by Meetings.tsx, which is reachable only through the lazily imported
 // admin shell, so Rollup places it in the admin chunk. It still makes no fetch
-// of its own: `request` is the one place a failure becomes an ApiError, and a
-// second copy of that is the copy that gets it wrong.
+// of its own: it goes through `adminRequest`, which wraps lib/api's `request` —
+// still the one place a failure becomes an ApiError — and latches session.ts on
+// a 401 so the shell can replace itself with the locked screen.
 //
 // Named adminMeetings rather than meetings, like adminLinks.ts and
 // adminSettings.ts beside it: Meetings.tsx sits in this directory, and on a
 // case-insensitive filesystem `./meetings` and `./Meetings` are the same name
 // to the module resolver.
 
-import { request } from '../../lib/api'
+import { adminRequest } from './session'
 
 /** One link, as the meetings filter offers it. Only links that have meetings. */
 export type MeetingLink = {
@@ -84,5 +85,5 @@ export function listMeetings(
   if (filter.to !== undefined) query.set('to', filter.to)
 
   const search = query.toString()
-  return request<Meetings>(`/admin/meetings${search === '' ? '' : `?${search}`}`, { signal })
+  return adminRequest<Meetings>(`/admin/meetings${search === '' ? '' : `?${search}`}`, { signal })
 }

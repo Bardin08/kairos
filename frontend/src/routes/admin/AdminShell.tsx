@@ -1,11 +1,13 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter'
 
 import { getSettings } from './adminSettings'
 import Availability from './Availability'
 import Links from './Links'
+import Locked from './Locked'
 import Meetings from './Meetings'
 import Settings from './Settings'
+import { isLocked, subscribeToLock } from './session'
 
 /**
  * One place the operator can be, and the icon that stands for it.
@@ -165,6 +167,12 @@ export default function AdminShell() {
   // matches DESTINATIONS without any prefix arithmetic.
   const [current] = useLocation()
 
+  // Whether any admin call has been refused. `useSyncExternalStore` rather than
+  // state plus an effect because a 401 can land in the window between render and
+  // subscribe — the shell's own read below is fired from an effect, and so is
+  // every page's — and this is the hook that cannot miss it.
+  const locked = useSyncExternalStore(subscribeToLock, isLocked)
+
   // Whatever the identity provider called this operator, or null. Null is the
   // ordinary case for a provider that sends no `name` claim, and it draws no
   // identity block at all — a subject identifier presented as a person's name
@@ -184,6 +192,14 @@ export default function AdminShell() {
 
     return () => controller.abort()
   }, [])
+
+  // Everything below this line is chrome, and none of it may be drawn without a
+  // session. Not hidden — absent: a rail the operator can tab into, a New link
+  // button that cannot succeed and an empty state asserting there is nothing to
+  // show are each a lie told by a screen that was refused permission to ask.
+  // Placed after the hooks above, which run unconditionally, because the read
+  // that discovers the refusal is one of them.
+  if (locked) return <Locked />
 
   return (
     <>

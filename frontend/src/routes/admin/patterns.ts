@@ -6,11 +6,12 @@
 // link on their phone — 240 gzipped bytes of endpoints they can never call.
 // This module is imported only by Availability.tsx, which is only reachable
 // through the lazily imported admin shell, so Rollup places it in the admin
-// chunk. It still makes no fetch of its own: `request` is the one place a
-// failure becomes an ApiError, and a second copy of that is the copy that gets
-// it wrong.
+// chunk. It still makes no fetch of its own: it goes through `adminRequest`,
+// which wraps lib/api's `request` — still the one place a failure becomes an
+// ApiError — and latches session.ts on a 401 so the shell can replace itself
+// with the locked screen.
 
-import { request, requestNothing } from '../../lib/api'
+import { adminRequest, adminRequestNothing } from './session'
 
 /** One weekly window. Minutes from local midnight, in the ORGANIZER's zone. */
 export type PatternRule = {
@@ -57,7 +58,7 @@ function patternUrl(patternId: string): string {
  * The caller replaces its copy rather than merging a partial response into it.
  */
 function write(method: string, path: string, body?: unknown): Promise<Pattern> {
-  return request<Pattern>(path, {
+  return adminRequest<Pattern>(path, {
     method,
     headers: body === undefined ? undefined : JSON_HEADERS,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -65,7 +66,7 @@ function write(method: string, path: string, body?: unknown): Promise<Pattern> {
 }
 
 export function listPatterns(signal?: AbortSignal): Promise<Pattern[]> {
-  return request<Pattern[]>(PATTERNS, { signal })
+  return adminRequest<Pattern[]>(PATTERNS, { signal })
 }
 
 export function createPattern(name: string): Promise<Pattern> {
@@ -82,7 +83,7 @@ export function renamePattern(patternId: string, name: string): Promise<Pattern>
  * replaced with a sentence of this app's own.
  */
 export function deletePattern(patternId: string): Promise<void> {
-  return requestNothing(patternUrl(patternId), { method: 'DELETE' })
+  return adminRequestNothing(patternUrl(patternId), { method: 'DELETE' })
 }
 
 export function addPatternRule(

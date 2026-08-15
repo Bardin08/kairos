@@ -5,16 +5,17 @@
 // it lands in the entry chunk and is downloaded by every invitee who opens a
 // link on their phone — endpoints they can never call. This module is imported
 // only by pages behind the lazily imported admin shell, so Rollup places it in
-// the admin chunk. It still makes no fetch of its own: `request` is the one
-// place a failure becomes an ApiError, and a second copy of that is the copy
-// that gets it wrong.
+// the admin chunk. It still makes no fetch of its own: it goes through
+// `adminRequest`, which wraps lib/api's `request` — still the one place a
+// failure becomes an ApiError — and latches session.ts on a 401 so the shell
+// can replace itself with the locked screen.
 //
 // Named adminSettings rather than settings, like its sibling adminLinks.ts and
 // for the same dull reason: Settings.tsx sits in this directory, and on a
 // case-insensitive filesystem `./settings` and `./Settings` are the same name
 // to the module resolver.
 
-import { request } from '../../lib/api'
+import { adminRequest } from './session'
 
 /**
  * How many links have written their own value for each limit, and will
@@ -69,12 +70,12 @@ const SETTINGS = '/admin/settings'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 export function getSettings(signal?: AbortSignal): Promise<Settings> {
-  return request<Settings>(SETTINGS, { signal })
+  return adminRequest<Settings>(SETTINGS, { signal })
 }
 
 /** A full replace, answering with the settings as they now stand. */
 export function saveSettings(draft: SettingsDraft): Promise<Settings> {
-  return request<Settings>(SETTINGS, {
+  return adminRequest<Settings>(SETTINGS, {
     method: 'PUT',
     headers: JSON_HEADERS,
     body: JSON.stringify(draft),
@@ -90,5 +91,5 @@ export function saveSettings(draft: SettingsDraft): Promise<Settings> {
  * offered here and refused by the save.
  */
 export function listTimeZones(signal?: AbortSignal): Promise<TimeZoneOption[]> {
-  return request<TimeZoneOption[]>(`${SETTINGS}/zones`, { signal })
+  return adminRequest<TimeZoneOption[]>(`${SETTINGS}/zones`, { signal })
 }

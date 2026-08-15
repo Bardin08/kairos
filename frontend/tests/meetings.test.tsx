@@ -213,21 +213,19 @@ test('the page reads the organizer zone back and settles rather than refetching 
 })
 
 /**
- * The second page asserting the same recovery, and the reason there is a shared
- * `Failure` at all.
+ * The second page asserting the same thing, and the reason there is a shared
+ * `Failure` at all: four pages each deciding what a failure reads like is four
+ * places for the fifth to forget.
  *
- * Every admin page can be looking at an expired cookie, and before this one of
- * them said "Open /admin/login and come back", one said nothing about it, and
- * two rendered "The server answered 401." Four opinions about one status is
- * three too many, so the branch lives in one component and this pins that this
- * page is wired to it.
+ * A 401 is deliberately not this test. It latches session.ts inside
+ * `adminRequest` and AdminShell replaces itself with the locked screen, so this
+ * page is unmounted rather than left drawing a table under an apology — pinned
+ * in tests/locked.test.tsx, where that mechanism lives.
  */
-test('an expired session is a way back in rather than a status code', async () => {
-  vi.mocked(listMeetings).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+test('a failure the shell cannot fix is reported in place, and no table under it', async () => {
+  vi.mocked(listMeetings).mockRejectedValue(new ApiError(503, null, 'The database is busy.'))
   render(<Meetings />)
 
-  const signIn = await screen.findByRole('link', { name: 'Sign in again' })
-
-  expect(signIn.getAttribute('href')).toBe('/admin/login')
+  expect(await screen.findByText('The database is busy.')).toBeDefined()
   expect(screen.queryByRole('table')).toBeNull()
 })
