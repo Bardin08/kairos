@@ -80,15 +80,47 @@ public class BookingMailerTests
     /// booking's own, which is what makes a rescheduled meeting land as a change rather than as a
     /// second invitation.
     /// </summary>
+    /// <remarks>
+    /// REQUEST, not some third method: a move is the same invitation at a new time, and that is
+    /// the entire mechanism by which a client updates the event it is holding. Get the method or
+    /// the sequence wrong and nothing is reported — the update is dropped, and the invitee arrives
+    /// at the hour of the invitation they still have.
+    /// </remarks>
     [Fact]
-    public void Compose_RescheduledBooking_CarriesTheBookingsUidAndSequence()
+    public void Compose_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
     {
         var booking = Booking(sequence: 1);
 
-        var ics = Ics(Compose(booking));
+        var message = Compose(booking, notice: BookingNotice.Reschedule);
+        var ics = Ics(message);
 
         ics.ShouldContain($"UID:{booking.Id}");
         ics.ShouldContain("SEQUENCE:1");
+        ics.ShouldContain("METHOD:REQUEST");
+        CalendarPart(message).ContentType.Parameters["method"].ShouldBe("REQUEST");
+        message.Subject.ShouldStartWith("Moved:");
+    }
+
+    /// <summary>
+    /// The cancellation, in the three lines that have to agree for a client to remove the event.
+    /// METHOD:CANCEL alone is not enough — Outlook acts on STATUS:CANCELLED and leaves an event
+    /// marked CONFIRMED sitting in the calendar however the message was labelled — and a CANCEL
+    /// body inside a part labelled REQUEST is discarded without a word to either side.
+    /// </summary>
+    [Fact]
+    public void Compose_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
+    {
+        var booking = Booking(sequence: 2);
+
+        var message = Compose(booking, notice: BookingNotice.Cancellation);
+        var ics = Ics(message);
+
+        ics.ShouldContain("METHOD:CANCEL");
+        ics.ShouldContain("STATUS:CANCELLED");
+        ics.ShouldContain($"UID:{booking.Id}");
+        ics.ShouldContain("SEQUENCE:2");
+        CalendarPart(message).ContentType.Parameters["method"].ShouldBe("CANCEL");
+        message.Subject.ShouldStartWith("Cancelled:");
     }
 
     /// <summary>
@@ -274,10 +306,15 @@ public class BookingMailerTests
     /// Composed, written and parsed back. Reading the object the mailer returned would skip the
     /// transfer encodings, which is precisely where the .ics survives or does not.
     /// </summary>
-    private static MimeMessage Compose(Booking? booking = null, EmailOptions? options = null)
+    private static MimeMessage Compose(
+        Booking? booking = null,
+        EmailOptions? options = null,
+        BookingNotice notice = BookingNotice.Confirmation)
     {
         using var stream = new MemoryStream();
-        Mailer(options ?? Options(BaseUrl)).Compose(booking ?? Booking(), ManageToken).WriteTo(stream);
+        Mailer(options ?? Options(BaseUrl))
+            .Compose(booking ?? Booking(), ManageToken, notice)
+            .WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }

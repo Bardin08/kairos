@@ -222,6 +222,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         OutboxWriter outbox,
         CalendarSyncService calendars,
+        BookingMailer mailer,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -233,6 +234,14 @@ public static class BookingsEndpoints
 
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+
+        // Advanced here for the same reason a reschedule advances it, and the invariant is worth
+        // stating: Sequence is the SEQUENCE of the last iCalendar message composed for this
+        // booking. RFC 5546 requires a CANCEL to outrank the REQUEST it withdraws, and a client
+        // that receives one it does not outrank ignores it — silently, like every other sequence
+        // failure, leaving the meeting in the invitee's calendar for a booking that is off. The
+        // early return above is what keeps a double-clicked button from advancing it twice.
+        booking.Sequence++;
 
         // One SaveChanges, so the cancellation and the announcement of it commit together or
         // neither does — the same rule BookingWriter follows for creation, for the same reason.
@@ -268,6 +277,13 @@ public static class BookingsEndpoints
         // and a Google that refuses leaves a Failed row rather than a 500.
         await calendars.CancelAsync(booking.Id, cancellationToken);
 
+        // After the withdrawal, so the message describes a calendar that has already let the slot
+        // go. `token` is the plaintext manage token off the route — the invitee opened this URL,
+        // so it is in hand for the length of the request and is never written down. The database
+        // holds only its SHA-256, which is exactly why the mailer runs here rather than behind the
+        // outbox: a queued row would have to carry the plaintext.
+        await mailer.SendCancellationAsync(booking, token, cancellationToken);
+
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
 
@@ -277,6 +293,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         SlotQuery slots,
         CalendarSyncService calendars,
+        BookingMailer mailer,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -333,6 +350,13 @@ public static class BookingsEndpoints
         // would watch it vanish. Exactly the trap the booking.cancelled announcement is kept out
         // of, and pinned by the same pair of tests.
         await calendars.RescheduleAsync(booking, cancellationToken);
+
+        // Then the invitee, so the mail describes a calendar the organizer's side already agrees
+        // with. Same token, same reasoning as the cancellation: it arrived in the URL, it stays in
+        // memory for this request, and nothing persists it. Sequence was advanced above and the
+        // UID is the booking id, which together are what make this land as a change rather than as
+        // a second meeting.
+        await mailer.SendRescheduleAsync(booking, token, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
