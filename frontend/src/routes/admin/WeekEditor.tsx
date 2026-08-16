@@ -1,8 +1,9 @@
 import { useState } from 'react'
 
-import { clock, minuteOfDay } from './adminTime'
+import { BLANK, clock, windowsOf, type Draft } from './adminTime'
 import Failure from './Failure'
 import { replacePatternRules, type Pattern, type PatternRule } from './patterns'
+import WindowRows from './WindowRows'
 
 /** Monday first, indexed by ISO day − 1. */
 const WEEKDAYS = [
@@ -18,28 +19,11 @@ const WEEKDAYS = [
 /** ISO-8601: 1 is Monday, 7 is Sunday. Not `Date.getDay()`, whose Sunday is 0. */
 const MONDAY = 1
 
-/**
- * One window while it is being edited, in the `HH:MM` an `<input type="time">`
- * speaks. Minutes are the tidier shape and cannot hold the state that matters
- * most in a form: a field opened and not yet filled in.
- */
-type Draft = { start: string; end: string }
-
 /** The seven days, Monday first, each holding its windows in the order shown. */
 type Week = Draft[][]
 
 /** One window as the rules endpoint takes it. No id: the set is replaced entire. */
 type Hours = { isoDayOfWeek: number; startMinute: number; endMinute: number }
-
-/**
- * What opening a day gives it, and what Add window adds.
- *
- * Empty rather than a working nine-to-five, and that is the safety property of
- * this pane rather than an omission: hours nobody typed are hours nobody chose
- * to offer, and a default window on a day that already has one would also be an
- * overlap the server exists to refuse.
- */
-const BLANK: Draft = { start: '', end: '' }
 
 /** The pattern's rules as seven days of windows, earliest first within each day. */
 function weekOf(rules: readonly PatternRule[]): Week {
@@ -67,13 +51,10 @@ function rulesOf(week: Week): Hours[] | null {
   const rules: Hours[] = []
 
   for (const [index, day] of week.entries()) {
-    for (const draft of day) {
-      const startMinute = minuteOfDay(draft.start)
-      const endMinute = minuteOfDay(draft.end)
-      if (startMinute === null || endMinute === null) return null
+    const windows = windowsOf(day)
+    if (windows === null) return null
 
-      rules.push({ isoDayOfWeek: index + MONDAY, startMinute, endMinute })
-    }
+    rules.push(...windows.map((window) => ({ isoDayOfWeek: index + MONDAY, ...window })))
   }
 
   return rules
@@ -137,14 +118,6 @@ export default function WeekEditor({
     edit(week.map((day, candidate) => (candidate === index ? windows : day)))
   }
 
-  /** One end of one window, which is the only edit a keystroke can make. */
-  function setTime(index: number, position: number, side: keyof Draft, value: string) {
-    setDay(
-      index,
-      week[index].map((draft, at) => (at === position ? { ...draft, [side]: value } : draft)),
-    )
-  }
-
   /**
    * That day's windows onto every day that is already open, closed days left
    * closed — this sets hours and never decides which days a pattern works. The
@@ -177,11 +150,9 @@ export default function WeekEditor({
     <section className="card card-pad">
       <h2 className="title-section mb-4">Weekly hours</h2>
 
-      {/* Every control in a row names its own day, and keeps its visible words
-          inside that name. On screen the row already says which day, so the
-          button is one word; out of that context — a screen reader listing the
-          controls on this page — five identical "Remove"s are a list nobody can
-          act on. */}
+      {/* Seven rows of one-word buttons, so every control carries its own day in
+          its name — the rule WindowRows follows for the same reason, and the
+          reason a reader listing this page's controls can act on the list. */}
       <ul className="group">
         {WEEKDAYS.map((name, index) => {
           const windows = week[index]
@@ -206,66 +177,20 @@ export default function WeekEditor({
                   </button>
                 </div>
               ) : (
-                <div className="group">
-                  {windows.map((draft, position) => (
-                    // Keyed by position because a window has no identity of its
-                    // own until it is saved, and the ids the server gives them
-                    // do not survive a set that is replaced entire.
-                    <div className="row gap-2 wrap" key={position}>
-                      <input
-                        className="input numeric week-time"
-                        type="time"
-                        aria-label={`${name}, window ${position + 1}, opens at`}
-                        value={draft.start}
-                        onChange={(event) =>
-                          setTime(index, position, 'start', event.target.value)
-                        }
-                      />
-                      <span aria-hidden="true">–</span>
-                      <input
-                        className="input numeric week-time"
-                        type="time"
-                        aria-label={`${name}, window ${position + 1}, closes at`}
-                        value={draft.end}
-                        onChange={(event) =>
-                          setTime(index, position, 'end', event.target.value)
-                        }
-                      />
-                      <button
-                        className="btn btn-ghost btn-danger"
-                        type="button"
-                        aria-label={`Remove ${name} window ${position + 1}`}
-                        onClick={() =>
-                          setDay(
-                            index,
-                            windows.filter((_, at) => at !== position),
-                          )
-                        }
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-
-                  <div className="row gap-2 wrap">
-                    <button
-                      className="btn"
-                      type="button"
-                      aria-label={`Add window to ${name}`}
-                      onClick={() => setDay(index, [...windows, BLANK])}
-                    >
-                      Add window
-                    </button>
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      aria-label={`${name}: Use these hours on every open day`}
-                      onClick={() => applyToEveryOpenDay(index)}
-                    >
-                      Use these hours on every open day
-                    </button>
-                  </div>
-                </div>
+                <WindowRows
+                  label={name}
+                  windows={windows}
+                  onChange={(next) => setDay(index, next)}
+                >
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    aria-label={`${name}: Use these hours on every open day`}
+                    onClick={() => applyToEveryOpenDay(index)}
+                  >
+                    Use these hours on every open day
+                  </button>
+                </WindowRows>
               )}
             </li>
           )

@@ -11,7 +11,7 @@
 
 import type { DayState } from '../../components/MonthGrid'
 import { monthCells } from '../../lib/time'
-import { clock } from './adminTime'
+import { BLANK, clock, type Draft } from './adminTime'
 import type { PatternOverride, PatternRule } from './patterns'
 
 // A date key is unambiguous at midnight UTC as long as it is only ever read
@@ -80,7 +80,7 @@ export function patternDays({
       // A date states its own hours or states that it has none, and either way
       // it replaces the week rather than narrowing it: an override with hours
       // opens a day the rules never open.
-      states.set(day, exception.startMinute === null ? 'blocked' : 'open')
+      states.set(day, exception.windows.length === 0 ? 'blocked' : 'open')
       continue
     }
 
@@ -90,46 +90,40 @@ export function patternDays({
   return states
 }
 
-/** Two empty fields: nothing typed yet, which is not the same as 00:00. */
-export const NO_HOURS = { start: '', end: '' }
-
 /**
- * The window a date's own pair of time fields should open on, in the `HH:MM` an
- * `<input type="time">` speaks.
+ * The windows a date's own editor should open on, earliest first.
  *
- * What the date would otherwise offer, so that moving one end leaves the other
- * already sensible: its own hours where it has them, and otherwise the weekly
- * window its weekday opens with. Both ends together, because the endpoint takes
- * both or neither — a single one is refused as `override_incomplete` — so a
- * partial override is not a thing this pane can express, and the inconvenience
- * the operator hit is a defaulting problem rather than a validation one.
+ * What the date would otherwise offer, so that moving one end leaves the rest
+ * already sensible: its own windows where it has them, and otherwise every
+ * window its weekday opens with. All of them, not the first — a date holds a
+ * morning and an afternoon exactly as a weekday does, so seeding one of two
+ * would propose closing the afternoon of a date nobody asked to change.
  *
- * Blank on a weekday the pattern never opens, which is the one case with
- * nothing to borrow. A nine-to-five invented here would be hours nobody chose
- * to offer on a day nobody chose to work, which is the same reason WeekEditor
- * opens a new window blank.
- *
- * The earliest window seeds a split day: it is the one the day opens with, and
- * it is the order WeekEditor already lists a day's windows in. A date can hold
- * only one window, so the later ones cannot be reproduced on it at all — that
- * limitation is not this function's to fix.
+ * One blank window on a weekday the pattern never opens, which is the one case
+ * with nothing to borrow. Blank rather than an invented nine-to-five, for the
+ * reason BLANK exists; one rather than none, because a panel that opened with
+ * no windows in it would be proposing to block the date it was opened to give
+ * hours to.
  */
-export function hoursOn(
+export function windowsOn(
   day: string,
   rules: readonly PatternRule[],
   override?: PatternOverride,
-): { start: string; end: string } {
-  if (override !== undefined && override.startMinute !== null && override.endMinute !== null) {
-    return { start: clock(override.startMinute), end: clock(override.endMinute) }
+): Draft[] {
+  if (override !== undefined && override.windows.length > 0) {
+    return override.windows.map((window) => ({
+      start: clock(window.startMinute),
+      end: clock(window.endMinute),
+    }))
   }
 
   // Filtered first, so the sort is on a copy and the caller's rules keep their
   // order.
   const opening = rules
     .filter((rule) => rule.isoDayOfWeek === isoDayOfWeek(day))
-    .sort((left, right) => left.startMinute - right.startMinute)[0]
+    .sort((left, right) => left.startMinute - right.startMinute)
 
-  return opening === undefined
-    ? NO_HOURS
-    : { start: clock(opening.startMinute), end: clock(opening.endMinute) }
+  return opening.length === 0
+    ? [BLANK]
+    : opening.map((rule) => ({ start: clock(rule.startMinute), end: clock(rule.endMinute) }))
 }

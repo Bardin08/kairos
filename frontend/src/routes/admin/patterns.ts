@@ -22,18 +22,26 @@ export type PatternRule = {
   endMinute: number
 }
 
+/** One window on a date. Minutes from local midnight, in the ORGANIZER's zone. */
+export type OverrideWindow = {
+  startMinute: number
+  endMinute: number
+}
+
 /**
  * What one date does instead of the weekly rules.
  *
- * Both minutes null is not missing data — it is the day being blocked
- * entirely, which is how a holiday is expressed. A UI that reads null as "not
- * loaded yet" turns a deliberate closure into a rendering accident.
+ * No windows is not missing data — it is the day being blocked entirely, which
+ * is how a holiday is expressed. A UI that reads the empty list as "not loaded
+ * yet" turns a deliberate closure into a rendering accident. A date the pattern
+ * says nothing about is absent from `Pattern.overrides` altogether, and that is
+ * the other thing an empty list is not.
  */
 export type PatternOverride = {
   /** A date key, `2026-12-25`. No time, so no zone of its own. */
   date: string
-  startMinute: number | null
-  endMinute: number | null
+  /** Earliest first, as the server sends them. Empty blocks the date. */
+  windows: OverrideWindow[]
 }
 
 /** A named, reusable availability shape, and the links standing on it. */
@@ -95,16 +103,23 @@ export function replacePatternRules(
 }
 
 /**
- * Upsert, keyed on the date. Both minutes null blocks the date; a pair of them
- * replaces the day's hours. Those are different requests to the same route and
- * the difference is the whole point of the endpoint.
+ * The date's whole set in one request, the way the week's is: the server stores
+ * it entire or refuses it entire, so a date holding a morning and an afternoon
+ * is one write and not two.
+ *
+ * Keyed on the date, so it is a replacement and never a create-or-update the
+ * caller has to choose between. An empty list blocks the date; DELETE on the
+ * same route puts it back on the weekly rules, and the difference between those
+ * two is the whole point of the endpoint.
  */
 export function savePatternOverride(
   patternId: string,
   date: string,
-  times: { startMinute: number | null; endMinute: number | null },
+  windows: readonly OverrideWindow[],
 ): Promise<Pattern> {
-  return write('PUT', `${patternUrl(patternId)}/overrides/${encodeURIComponent(date)}`, times)
+  return write('PUT', `${patternUrl(patternId)}/overrides/${encodeURIComponent(date)}`, {
+    windows,
+  })
 }
 
 /** The date goes back to the weekly rules. Not the same as blocking it. */
