@@ -1404,6 +1404,8 @@
     white-space: nowrap;
   }
   .chip-x {
+    /* Also the remove button in WindowRows.tsx — a 44px round icon target,
+       not a chip, wearing this class because that shape happens to match. */
     display: grid;
     place-items: center;
     width: var(--tap);

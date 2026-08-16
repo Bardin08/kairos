@@ -60,6 +60,14 @@ export default function WindowRows({
             value={draft.end}
             onChange={(event) => setTime(position, 'end', event.target.value)}
           />
+          {/* .chip-x, not the red word: the preview pane's column is roughly
+              276px, and Remove at full size does not fit beside a time pair
+              without halving the inputs. The week pane loses the danger
+              colour and the label it had for that constraint too, even
+              though its own column is fluid and had room to keep both —
+              because this component is one shared act, not two, and a
+              second markup for the same button here is exactly the drift
+              its docstring exists to refuse. */}
           <button
             className="chip-x"
             type="button"
