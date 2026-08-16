@@ -12,7 +12,7 @@ import {
   type SettingsDraft,
   type TimeZoneOption,
 } from './adminSettings'
-import { LIMIT_COPY, LIMIT_KEYS, type LimitKey } from './limitCopy'
+import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitKey } from './limitCopy'
 
 /**
  * Ends the Kairos session and not the identity provider's.
@@ -180,7 +180,7 @@ export default function Settings() {
   const options = zones.length > 0 ? zones : [{ id: zone, offset: '' }]
 
   return (
-    <>
+    <div className="form-col">
       <div className="page-header">
         <h1 className="title-page">Settings</h1>
         <button
@@ -211,7 +211,7 @@ export default function Settings() {
             <div className="field">
               <label htmlFor={zoneId}>The zone your availability is written in</label>
               <select
-                className="select"
+                className="select ctl-md"
                 id={zoneId}
                 value={zone}
                 onChange={(event) => {
@@ -238,41 +238,52 @@ export default function Settings() {
           <div className="page-header section-break">
             <h2 className="title-section">Global defaults</h2>
           </div>
-          <div className="card card-pad stack stack-lg">
-            {LIMIT_KEYS.map((key) => {
-              const limit = LIMIT_COPY[key]
-              const value = draft[key]
-              const invalid = whole(value, limit.floor) === null
-              const note = overrideNote(settings.overrides[key])
+          <div className="card card-pad">
+            <div className="rowgroup">
+              {LIMIT_KEYS.map((key) => {
+                const limit = LIMIT_COPY[key]
+                const value = draft[key]
+                const invalid = whole(value, limit.floor) === null
+                const note = overrideNote(settings.overrides[key])
 
-              return (
-                <div className="field" data-invalid={invalid ? 'true' : undefined} key={key}>
-                  <label htmlFor={`${zoneId}-${key}`}>{limit.label}</label>
-                  <input
-                    className="input numeric"
-                    id={`${zoneId}-${key}`}
-                    type="number"
-                    inputMode="numeric"
-                    min={limit.floor}
-                    value={value}
-                    onChange={(event) => change(key, event.target.value)}
-                  />
-                  {invalid ? (
-                    <p className="field-error" role="alert">
-                      <AlertIcon />
-                      {limit.floor === 0
-                        ? `A whole number of ${limit.unit}, and never below zero.`
-                        : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
-                    </p>
-                  ) : (
-                    <p className="fine">
-                      {limit.help}
-                      {note === null ? '' : ` ${note}`}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+                return (
+                  <div className="field-row" data-invalid={invalid ? 'true' : undefined} key={key}>
+                    <div className="field-row-label">
+                      <label htmlFor={`${zoneId}-${key}`}>{limit.label}</label>
+                      {invalid ? (
+                        <p className="field-error" role="alert">
+                          <AlertIcon />
+                          {limit.floor === ZERO_FLOOR
+                            ? `A whole number of ${limit.unit}, and never below zero.`
+                            : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
+                        </p>
+                      ) : (
+                        <p className="fine">
+                          {limit.help}
+                          {note === null ? '' : ` ${note}`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="field-row-control">
+                      <span className="affix">
+                        <input
+                          className="input numeric ctl-num"
+                          id={`${zoneId}-${key}`}
+                          type="number"
+                          inputMode="numeric"
+                          min={limit.floor}
+                          value={value}
+                          onChange={(event) => change(key, event.target.value)}
+                        />
+                        <span className="affix-unit" aria-hidden="true">
+                          {limit.short}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           <div className="page-header section-break">
@@ -286,7 +297,7 @@ export default function Settings() {
                   the default and the one most people should stay on — so the
                   control that would lose it is not the control this page uses. */}
               <select
-                className="select"
+                className="select ctl-md"
                 id={themeId}
                 value={theme}
                 onChange={(event) => chooseTheme(event.target.value as ThemeChoice)}
@@ -335,6 +346,6 @@ export default function Settings() {
           </div>
         </>
       )}
-    </>
+    </div>
   )
 }

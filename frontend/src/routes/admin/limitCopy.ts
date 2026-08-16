@@ -36,7 +36,7 @@ export type LimitCopy = {
 }
 
 /** No gap, book immediately and nothing bookable today are all real settings. */
-const ZERO_FLOOR = 0
+export const ZERO_FLOOR = 0
 
 /** Zero here is not a smaller step; it is the step that never advances. */
 const INCREMENT_FLOOR = 1
