@@ -83,6 +83,19 @@ test('the native number spinner is suppressed only inside .affix, not for every 
   expect(occurrences).toBe(scopedOccurrences)
 })
 
+// .slots had a cap (300px, scrolling) but no floor, so the desktop slot
+// column — and the card around it — was exactly as tall as the chosen day's
+// times: 583px on a scrolling 16-time day, ~431px on a 5-time day. The floor
+// closes that gap by making the cap and the floor the same --slots-h token,
+// so the two can never drift apart into a second version of this bug. The
+// space below a short day's times is deliberately empty rather than removed.
+test('the slot column has a floor equal to its cap, so the card is the same height on every day', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('min-height: var(--slots-h);')
+  expect(css).toContain('max-height: var(--slots-h);')
+})
+
 // .segmented's selected style was written for aria-pressed (the duration
 // picker's toggle buttons) before the date-state control needed the same
 // look for aria-checked (a radio group). One rule extended to both selectors
