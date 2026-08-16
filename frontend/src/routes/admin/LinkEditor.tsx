@@ -14,30 +14,21 @@ import {
   type LinkLimits,
 } from './adminLinks'
 import Failure from './Failure'
+import { CLEAN, changedCount, draftOf, unsavedLabel, type EditorDraft } from './editorDraft'
+import { LIMIT_COPY, LIMIT_KEYS } from './limitCopy'
 
-/** The four limits of a link that does not exist yet: all inherited. */
-const NEW_LIMITS: LinkLimits = {
-  marginMinutes: null,
-  minNoticeMinutes: null,
-  dailyCap: null,
-  startIncrementMinutes: null,
-}
-
-/** What a new link starts as. One duration, because zero is not a link. */
-const NEW_DURATIONS = [30]
-
-/** The floor for three of the four. See InheritableNumber's `min`. */
-const NO_FLOOR = 0
-
-/**
- * The start increment's floor. Zero there is not a smaller step, it is the step
- * that makes the generator's `PlusMinutes(step)` never advance.
- */
-const INCREMENT_FLOOR = 1
+/** Where a booking page lives. Fixed by App.tsx's route, not configurable. */
+const BOOK_PATH = '/book/'
 
 /**
  * One link, in full: what it is called, where it lives, how long it runs, which
- * hours it may be booked in, and which of the four global limits it narrows.
+ * hours it may be booked in, and which of the four global scheduling limits it
+ * narrows.
+ *
+ * Three cards down a 620px column rather than one card across the page. The
+ * previous version stretched every control to the width of a 1180px card, so a
+ * two-digit minute count sat in a box a thousand pixels wide while the help
+ * text beside it stopped at 68ch.
  *
  * Two writes on save, not one, and that is the shape of the API rather than an
  * accident: the limits have their own full-replace PUT precisely so that `null`
@@ -57,31 +48,27 @@ export default function LinkEditor({
   onSaved: () => void
   onCancel: () => void
 }) {
-  const [name, setName] = useState(link?.name ?? '')
-  const [slug, setSlug] = useState(link?.slug ?? '')
-  const [description, setDescription] = useState(link?.description ?? '')
-  const [patternId, setPatternId] = useState(link?.patternId ?? patterns[0]?.id ?? '')
-  const [durations, setDurations] = useState<number[]>(link?.durations ?? NEW_DURATIONS)
-  // Copied out field by field rather than by spreading the link, so a null here
-  // is this component's own null and never a value some later edit resolved.
-  const [limits, setLimits] = useState<LinkLimits>(
-    link === null
-      ? NEW_LIMITS
-      : {
-          marginMinutes: link.marginMinutes,
-          minNoticeMinutes: link.minNoticeMinutes,
-          dailyCap: link.dailyCap,
-          startIncrementMinutes: link.startIncrementMinutes,
-        },
-  )
+  // Taken once. The editor unmounts on a successful save — Links.tsx returns to
+  // the table — so there is no saved state for this to go stale against.
+  const [baseline] = useState<EditorDraft>(() => draftOf(link, patterns[0]?.id ?? ''))
+  const [draft, setDraft] = useState<EditorDraft>(baseline)
 
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` branches on the
   // status, and a string has already thrown that away.
   const [failure, setFailure] = useState<unknown>(null)
+  const [copied, setCopied] = useState(false)
+
+  const changed = changedCount(baseline, draft)
+  const address = window.location.origin + BOOK_PATH + draft.slug
+
+  function set<K extends keyof EditorDraft>(key: K, value: EditorDraft[K]) {
+    setDraft({ ...draft, [key]: value })
+  }
 
   function limit(key: keyof LinkLimits) {
-    return (value: number | null) => setLimits({ ...limits, [key]: value })
+    return (value: number | null) =>
+      setDraft({ ...draft, limits: { ...draft.limits, [key]: value } })
   }
 
   async function save() {
@@ -89,9 +76,15 @@ export default function LinkEditor({
     setFailure(null)
 
     try {
-      const draft = { slug, name, description, patternId, durations }
-      const saved = link === null ? await createLink(draft) : await updateLink(link.id, draft)
-      await updateLinkLimits(saved.id, limits)
+      const body = {
+        slug: draft.slug,
+        name: draft.name,
+        description: draft.description,
+        patternId: draft.patternId,
+        durations: draft.durations,
+      }
+      const saved = link === null ? await createLink(body) : await updateLink(link.id, body)
+      await updateLinkLimits(saved.id, draft.limits)
       onSaved()
     } catch (error: unknown) {
       // The server's own sentence, when it sent one. Every refusal this form can
@@ -118,7 +111,7 @@ export default function LinkEditor({
   }
 
   return (
-    <>
+    <div className="form-col">
       <div className="page-header">
         <h1 className="title-page">{link === null ? 'New link' : link.name}</h1>
         <button className="btn btn-ghost" type="button" onClick={onCancel}>
@@ -127,139 +120,216 @@ export default function LinkEditor({
       </div>
 
       <form
-        className="card card-pad stack"
         onSubmit={(event) => {
           event.preventDefault()
           void save()
         }}
       >
-        <div className="field">
-          <label htmlFor="link-name">Name</label>
-          <input
-            id="link-name"
-            className="input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
+        <div className="card card-pad stack">
+          <h2 className="title-section">What it is</h2>
+
+          {/* Stacked, not a field-row: a bare one-word label next to a 288px
+              control leaves roughly 200px of dead space in the label track —
+              the same complaint that started this piece of work, rotated
+              ninety degrees. A row only reads as intentional when the label
+              column has something in it, the way Pattern's help text and the
+              limits' do. Name has none, so it takes the full column instead,
+              matching Address and Description below. */}
+          <div className="field">
+            <label htmlFor="link-name">Name</label>
+            <input
+              id="link-name"
+              className="input"
+              value={draft.name}
+              onChange={(event) => set('name', event.target.value)}
+            />
+          </div>
+
+          {/* Stacked rather than a two-column field-row: the composite here is
+              a static prefix, an input and a Copy button, comfortably over
+              500px on its own — nothing that wide belongs beside a label in a
+              620px column. Label and help go above, full column below, the
+              way Description already works. */}
+          <div className="field">
+            <label htmlFor="link-slug">Address</label>
+            <p className="fine">Lowercase words joined by hyphens.</p>
+            <div className="row gap-2 wrap">
+              {/* The whole URL, not its last word. An operator setting this is
+                  deciding what to paste into a chat, and they cannot judge
+                  `consulting` without the part in front of it. The scheme is
+                  dropped from what is shown — the browser's own address bar
+                  does the same, and the operator does not need to read
+                  `http://` — but the Copy button below copies `address`,
+                  which still carries it: the display is shortened, the copied
+                  string must stay a full, working absolute URL. */}
+              <span className="prefix">
+                <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
+                <input
+                  id="link-slug"
+                  className="input ctl-md"
+                  value={draft.slug}
+                  onChange={(event) => {
+                    setCopied(false)
+                    set('slug', event.target.value)
+                  }}
+                />
+              </span>
+              {/* Only for a link that exists. A slug that has never been saved
+                  is not an address yet, and offering to copy it hands out a 404. */}
+              {link !== null && (
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  aria-label="Copy link address"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(address)
+                    setCopied(true)
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="link-description">Description</label>
+            <textarea
+              id="link-description"
+              className="textarea"
+              value={draft.description}
+              onChange={(event) => set('description', event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="card card-pad mt-4 stack">
+          <h2 className="title-section">When it can be booked</h2>
+
+          <div className="field-row">
+            <div className="field-row-label">
+              <label htmlFor="link-pattern">Pattern</label>
+              <p className="fine">The hours this link may be booked in, in your own zone.</p>
+            </div>
+            <div className="field-row-control">
+              <select
+                id="link-pattern"
+                className="select ctl-md"
+                value={draft.patternId}
+                onChange={(event) => set('patternId', event.target.value)}
+              >
+                {patterns.map((pattern) => (
+                  <option key={pattern.id} value={pattern.id}>
+                    {pattern.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <DurationEditor
+            durations={draft.durations}
+            onChange={(durations) => set('durations', durations)}
           />
         </div>
 
-        <div className="field">
-          <label htmlFor="link-slug">Address</label>
-          <input
-            id="link-slug"
-            className="input"
-            value={slug}
-            onChange={(event) => setSlug(event.target.value)}
-          />
-          <p className="fine">
-            The last part of the URL you send people: lowercase words joined by hyphens.
+        <div className="card card-pad mt-4 stack">
+          <h2 className="title-section">Limits</h2>
+          {/* No mb-3 here either: it would stack with `.stack`'s own margin-top
+              on the rowgroup that follows, for the same double-gap reason the
+              heading's mb-3 was dropped. */}
+          <p className="prose t-sm">
+            Each of these follows the global default until you override it here. Overriding and
+            typing 0 is a real setting and not the same thing: no gap between meetings, bookable
+            with no notice, nothing bookable that day.
           </p>
+
+          <div className="rowgroup">
+            {LIMIT_KEYS.map((key) => {
+              const copy = LIMIT_COPY[key]
+              return (
+                <InheritableNumber
+                  key={key}
+                  label={copy.label}
+                  short={copy.short}
+                  help={copy.help}
+                  value={draft.limits[key]}
+                  globalValue={globals[key]}
+                  min={copy.floor}
+                  onChange={limit(key)}
+                />
+              )
+            })}
+          </div>
         </div>
 
-        <div className="field">
-          <label htmlFor="link-description">Description</label>
-          <textarea
-            id="link-description"
-            className="textarea"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </div>
+        <Failure error={failure} className="mt-4" />
 
-        <div className="field">
-          <label htmlFor="link-pattern">Pattern</label>
-          <select
-            id="link-pattern"
-            className="select"
-            value={patternId}
-            onChange={(event) => setPatternId(event.target.value)}
+        <div className="savebar">
+          <span className="savebar-state" role="status">
+            {unsavedLabel(changed)}
+          </span>
+          <button
+            className="btn"
+            type="button"
+            disabled={changed === CLEAN || saving}
+            onClick={() => setDraft(baseline)}
           >
-            {patterns.map((pattern) => (
-              <option key={pattern.id} value={pattern.id}>
-                {pattern.name}
-              </option>
-            ))}
-          </select>
-          <p className="fine">The hours this link may be booked in.</p>
-        </div>
-
-        <DurationEditor durations={durations} onChange={setDurations} />
-
-        <h2 className="title-section section-break">Limits</h2>
-        <p className="prose t-sm">
-          Each of these follows the global default until you turn it off here. Turning it off and
-          typing 0 is a real setting and not the same thing: no gap between meetings, bookable with
-          no notice, nothing bookable that day.
-        </p>
-
-        <InheritableNumber
-          label="Margin between meetings"
-          unit="minutes"
-          value={limits.marginMinutes}
-          globalValue={globals.marginMinutes}
-          min={NO_FLOOR}
-          onChange={limit('marginMinutes')}
-        />
-        <InheritableNumber
-          label="Minimum notice"
-          unit="minutes"
-          value={limits.minNoticeMinutes}
-          globalValue={globals.minNoticeMinutes}
-          min={NO_FLOOR}
-          onChange={limit('minNoticeMinutes')}
-        />
-        <InheritableNumber
-          label="Booking cap"
-          unit="a day"
-          value={limits.dailyCap}
-          globalValue={globals.dailyCap}
-          min={NO_FLOOR}
-          onChange={limit('dailyCap')}
-        />
-        <InheritableNumber
-          label="Start increment"
-          unit="minutes"
-          value={limits.startIncrementMinutes}
-          globalValue={globals.startIncrementMinutes}
-          min={INCREMENT_FLOOR}
-          onChange={limit('startIncrementMinutes')}
-        />
-
-        <Failure error={failure} />
-
-        <div className="row gap-2 wrap">
-          <button className="btn btn-primary" type="submit" data-loading={saving || undefined}>
+            Discard
+          </button>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={changed === CLEAN || saving}
+            data-loading={saving || undefined}
+          >
             Save link
           </button>
-          {link !== null &&
-            (link.active ? (
-              <button
-                className="btn btn-danger"
-                type="button"
-                disabled={saving}
-                onClick={() => void setActive(false)}
-              >
-                Archive link
-              </button>
-            ) : (
-              <button
-                className="btn"
-                type="button"
-                disabled={saving}
-                onClick={() => void setActive(true)}
-              >
-                Restore link
-              </button>
-            ))}
         </div>
-
-        {link !== null && !link.active && (
-          <p className="fine">
-            Archived: this address answers as though it never existed, and the meetings already
-            booked through it are untouched.
-          </p>
-        )}
       </form>
-    </>
+
+      {link !== null && (
+        <div className="card card-pad mt-5">
+          <h2 className="title-section mb-3">{link.active ? 'Archive' : 'Restore'}</h2>
+          {/* Stated before the button rather than after the fact. Archiving is
+              reversible and Restore is right here, which is why there is no
+              confirmation dialog in front of it. */}
+          <p className="prose t-sm mb-4">
+            An archived link answers as though it never existed, and the meetings already booked
+            through it are untouched.
+          </p>
+          {/* Rendered only while dirty: a permanent sentence about a condition
+              that is usually false is noise. Without it, archiving or
+              restoring calls `onSaved`, the parent unmounts this editor, and
+              whatever the operator typed above is gone with no word said
+              about it. */}
+          {changed !== CLEAN && (
+            <p className="prose t-sm mb-4">
+              This form has unsaved changes. {link.active ? 'Archiving' : 'Restoring'} discards
+              them — save or discard the changes above first.
+            </p>
+          )}
+          {link.active ? (
+            <button
+              className="btn btn-danger"
+              type="button"
+              disabled={saving || changed !== CLEAN}
+              onClick={() => void setActive(false)}
+            >
+              Archive link
+            </button>
+          ) : (
+            <button
+              className="btn"
+              type="button"
+              disabled={saving || changed !== CLEAN}
+              onClick={() => void setActive(true)}
+            >
+              Restore link
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

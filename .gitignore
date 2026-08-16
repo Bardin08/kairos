@@ -512,3 +512,11 @@ appsettings.Local.json
 
 # macOS
 .DS_Store
+
+# impeccable: config.json and design.json are source; the rest is local state
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/questions/
+
+# Brainstorming mockups from the visual companion. Session artefacts, not source.
+.superpowers/

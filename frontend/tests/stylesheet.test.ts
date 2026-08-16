@@ -19,3 +19,23 @@ test('kairos.css declares its cascade layers in order', () => {
     '@layer reset, tokens, base, layout, components, states, utilities;',
   )
 })
+
+const ROW_INVALID_INPUT = '.field-row[data-invalid="true"] .input'
+
+// Task 7 put the four global limits in `.field-row`s and moved `data-invalid`
+// onto the row rather than the `.field` it used to sit on. The border-color and
+// focus rules below were written for `.field` alone, and when the row moved
+// they stopped matching there without a single test failing: an invalid limit
+// still rendered `.field-error`, but the input beside it kept its ordinary
+// border and focus ring, because nothing selected `.field-row[data-invalid]`.
+// This is what would notice if that selector were ever dropped again.
+test('the invalid-state border and focus ring cover the row shape, not only the field shape', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    `.field[data-invalid="true"] .input,\n  .field[data-invalid="true"] .textarea,\n  ${ROW_INVALID_INPUT} {\n    border-color: var(--status-danger-fg);`,
+  )
+  expect(css).toContain(
+    `.field[data-invalid="true"] .input:focus,\n  .field[data-invalid="true"] .textarea:focus,\n  ${ROW_INVALID_INPUT}:focus {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
+  )
+})
