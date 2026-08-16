@@ -61,12 +61,12 @@ export default function WindowRows({
             onChange={(event) => setTime(position, 'end', event.target.value)}
           />
           <button
-            className="btn btn-ghost btn-danger"
+            className="chip-x"
             type="button"
             aria-label={`Remove ${label} window ${position + 1}`}
             onClick={() => onChange(windows.filter((_, at) => at !== position))}
           >
-            Remove
+            ×
           </button>
         </div>
       ))}
