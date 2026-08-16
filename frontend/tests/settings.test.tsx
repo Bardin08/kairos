@@ -26,6 +26,11 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 const WARSAW = 'Europe/Warsaw'
 const UTC = 'UTC'
 
+// The attribute the invalid-state CSS in kairos.css selects on. Named once so
+// the test below and its selector stay in sync rather than repeating the
+// literal.
+const INVALID_ATTRIBUTE_SELECTOR = '[data-invalid="true"]'
+
 const settings: OperatorSettings = {
   timeZone: UTC,
   signedInAs: 'Vlad Bardin',
@@ -110,6 +115,27 @@ test('a start increment of zero is refused here rather than by the server', asyn
 
   expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true')
   expect(vi.mocked(saveSettings)).not.toHaveBeenCalled()
+})
+
+/**
+ * Task 7 moved `data-invalid` off `.field` and onto the `.field-row` that
+ * wraps each global — a restructure a `kairos.css` selector could silently
+ * stop matching after (see `stylesheet.test.ts`), and separately one this
+ * markup could silently stop producing after: the attribute landing on the
+ * wrong wrapper, or the input ending up outside it. This pins the DOM shape
+ * the CSS selector depends on, not the resolved colour — jsdom does not
+ * resolve `var()` in computed style, so asserting on that would pin nothing.
+ */
+test('an invalid limit puts data-invalid on the row that contains its input', async () => {
+  render(<Settings />)
+
+  const input = await screen.findByLabelText('Start increment')
+  fireEvent.change(input, { target: { value: '0' } })
+
+  const invalidAncestor = input.closest(INVALID_ATTRIBUTE_SELECTOR)
+
+  expect(invalidAncestor).not.toBeNull()
+  expect(invalidAncestor?.classList.contains('field-row')).toBe(true)
 })
 
 /**

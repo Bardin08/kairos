@@ -36,9 +36,9 @@ public sealed record AdminLinkResponse(
 public sealed record AdminPatternResponse(Guid Id, string Name);
 
 /// <summary>
-/// The globals, resolved and never null. The editor renders them greyed out inside a disabled
-/// input while a limit is inherited, so the operator reads "15" and understands where it came
-/// from rather than seeing an empty box.
+/// The globals, resolved and never null. The editor states them as read-only prose beside a
+/// "Global" chip while a limit is inherited, so the operator reads "15" and understands where it
+/// came from rather than seeing an empty box.
 /// </summary>
 public sealed record GlobalLimitsResponse(
     int MarginMinutes,

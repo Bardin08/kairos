@@ -15,6 +15,7 @@ const MIN_MINUTES = 1
 const MAX_MINUTES = 1440
 
 const CUSTOM = 'custom'
+const PLACEHOLDER = ''
 
 /**
  * The lengths a link is offered at, as chips plus a way to add one.
@@ -78,7 +79,7 @@ export default function DurationEditor({
   }
 
   function pick(chosen: string) {
-    if (chosen === '') return
+    if (chosen === PLACEHOLDER) return
 
     if (chosen === CUSTOM) {
       setProblem('')
@@ -92,14 +93,19 @@ export default function DurationEditor({
 
   return (
     <div className="field">
-      <label htmlFor="durations">Durations</label>
+      <label id="durations-label">Durations</label>
 
-      <div className="row gap-2 wrap" id="durations">
+      <div
+        className="row gap-2 wrap"
+        id="durations"
+        role="group"
+        aria-labelledby="durations-label"
+      >
         {durations.map((minutes) => (
-          <span className="badge numeric" key={minutes}>
+          <span className="chip numeric" key={minutes}>
             {minutes} min
             <button
-              className="btn btn-ghost btn-inline"
+              className="chip-x"
               type="button"
               aria-label={`Remove ${minutes} minutes`}
               onClick={() => remove(minutes)}
@@ -108,19 +114,23 @@ export default function DurationEditor({
             </button>
           </span>
         ))}
-      </div>
 
-      <div className="row gap-2 wrap">
         {/* Held at "" so the menu returns to its prompt after every pick — it
             is an action, not a selection, and a select that stayed on "30 min"
-            would read as the link's state rather than as the last thing added. */}
+            would read as the link's state rather than as the last thing added.
+            Dressed as a chip, at chip height: the old .select-inline was 36px
+            beside 44px chips and the row never lined up. The placeholder now
+            reads "+ Add" rather than a prompt, which looks like a button — but
+            it is still `option value={PLACEHOLDER}`, so picking it is still
+            the no-op `pick` guards on with its first line; do not "fix" that
+            guard into a real option. */}
         <select
-          className="select select-inline"
-          value=""
+          className="chip-add"
+          value={PLACEHOLDER}
           aria-label="Add a duration"
           onChange={(event) => pick(event.target.value)}
         >
-          <option value="">Add a duration…</option>
+          <option value={PLACEHOLDER}>+ Add</option>
           {PRESETS.map((minutes) => (
             <option key={minutes} value={minutes}>
               {minutes} min
@@ -131,16 +141,21 @@ export default function DurationEditor({
 
         {asking && (
           <>
-            <input
-              className="input numeric"
-              type="number"
-              min={MIN_MINUTES}
-              max={MAX_MINUTES}
-              step={1}
-              value={custom}
-              aria-label="Custom duration in minutes"
-              onChange={(event) => setCustom(event.target.value)}
-            />
+            <span className="affix">
+              <input
+                className="input numeric ctl-num"
+                type="number"
+                min={MIN_MINUTES}
+                max={MAX_MINUTES}
+                step={1}
+                value={custom}
+                aria-label="Custom duration in minutes"
+                onChange={(event) => setCustom(event.target.value)}
+              />
+              <span className="affix-unit" aria-hidden="true">
+                min
+              </span>
+            </span>
             <button className="btn" type="button" onClick={addCustom}>
               Add
             </button>

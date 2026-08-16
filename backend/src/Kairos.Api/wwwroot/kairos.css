@@ -125,6 +125,10 @@
     --tap: 44px;            /* minimum touch target, everywhere, no exceptions */
     --border-width: 1px;
     --measure: 68ch;        /* body copy never runs wider */
+    /* An admin form column. Controls inside it are sized to their longest
+       plausible value rather than stretched to the card, so a two-digit
+       minute count never gets a box a thousand pixels wide. */
+    --form-col: 620px;
     --page-max: 1180px;
     --tab-h: 56px;          /* one primary tab in the phone tab bar */
     /* What the tab bar actually measures: a row of primaries, the secondary
@@ -423,6 +427,8 @@
     padding-inline: var(--space-5);
   }
   @media (max-width: 640px) { .page { padding-inline: var(--space-4); } }
+
+  .form-col { max-width: var(--form-col); margin-inline: auto; }
 
   .stack > * + * { margin-top: var(--stack-gap, var(--space-4)); }
 
@@ -1019,11 +1025,13 @@
   /* Errors name the problem and the fix, and they sit under the control that
      caused them, never in a banner at the top of the form. */
   .field[data-invalid="true"] .input,
-  .field[data-invalid="true"] .textarea {
+  .field[data-invalid="true"] .textarea,
+  .field-row[data-invalid="true"] .input {
     border-color: var(--status-danger-fg);
   }
   .field[data-invalid="true"] .input:focus,
-  .field[data-invalid="true"] .textarea:focus {
+  .field[data-invalid="true"] .textarea:focus,
+  .field-row[data-invalid="true"] .input:focus {
     box-shadow: 0 0 0 3px var(--status-danger-bg);
   }
   /* `--measure` is not decoration on this one. Beside a form field the error is
@@ -1042,6 +1050,211 @@
     color: var(--status-danger-fg);
   }
   .field-error svg { width: 14px; height: 14px; flex: none; }
+
+  /* ---- row / row group -------------------------------------------------------
+     A form row reads label-and-help left, control right. Below 640px it
+     stacks: a phone has no spare width to right-align into, and a control
+     pushed to the trailing edge of a 360px screen is a control nobody's
+     thumb reaches. */
+
+  /* The label track has a floor rather than minmax(0, 1fr): at 0 it is free to
+     collapse to nothing, and a control that wants more than its share of the
+     row — a composite address field, once, before it was pulled out of this
+     grid entirely — took all of it, one word per line of label left behind.
+     620px .form-col, --space-6 card padding: a ~556px content box. Subtract
+     the --space-4 gap and the widest control still meant to sit beside a
+     label here — ctl-md, 288px, the one both Name and Pattern use — and 252px
+     is the most this track could take before that control stops fitting on
+     the same row. 14rem (224px) sits under that with room to spare, and comes
+     from the label that actually needs it: "Margin between meetings", the
+     longest in the limits group, at --text-sm 500-weight. */
+  .field-row {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) auto;
+    gap: var(--space-4);
+    align-items: center;
+    padding-block: var(--space-3);
+  }
+  .field-row-label > label,
+  .field-row-name {
+    display: block;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+  .field-row-label > .fine { margin-top: var(--space-1); }
+  .field-row-control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  @media (max-width: 640px) {
+    .field-row { grid-template-columns: 1fr; gap: var(--space-2); }
+    .field-row-control { justify-content: flex-start; }
+    /* Below 640px a name, a slug or a pattern takes the column because it
+       holds a long value and the column is all there is, while a unit-
+       affixed numeric field stays at its own width because three digits do
+       not need 360px — and stretching it would put the unit affix a
+       screen-width away from the digits it labels. */
+    .field-row-control > .input,
+    .field-row-control > .select,
+    .field-row-control > .prefix { width: 100%; }
+  }
+
+  /* Rows that are one set. Hairlines between them, never shadow — DESIGN.md
+     reserves shadow for what floats. */
+  .rowgroup {
+    border: var(--border-width) solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+  .rowgroup > * { padding-inline: var(--space-4); }
+  .rowgroup > * + * { border-top: var(--border-width) solid var(--border-subtle); }
+
+  /* ---- control sizes ----------------------------------------------------------
+     A control is as wide as its longest plausible value and no wider. The
+     100% default on .input stays, so nothing outside these screens moves. */
+
+  .ctl-num { width: 5.5rem; }
+  .ctl-sm  { width: 11rem; }
+  .ctl-md  { width: 18rem; }
+  .ctl-lg  { width: 28rem; }
+  .ctl-num, .ctl-sm, .ctl-md, .ctl-lg { max-width: 100%; }
+
+  /* ---- unit affix --------------------------------------------------------------
+     The unit lives inside the control it belongs to. Marked aria-hidden in
+     the markup: the label already says "minutes", and hearing it twice is
+     worse than not seeing it once. */
+
+  .affix { position: relative; display: inline-flex; }
+  .affix > .input { padding-inline-end: var(--space-7); }
+  /* .affix-unit overlays the trailing edge of a control; .unit-inline sits
+     beside a value rendered as plain text. Same quiet label treatment,
+     different placement, so the shared pair is declared once. */
+  .affix-unit,
+  .unit-inline { font-size: var(--text-xs); color: var(--text-tertiary); }
+  .affix-unit {
+    position: absolute;
+    inset-inline-end: var(--space-3);
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  /* ---- URL prefix ---------------------------------------------------------------
+     A static segment welded to the leading edge, so the operator sees the
+     address and not the last word of it. */
+
+  .prefix { display: flex; max-width: 100%; }
+  .prefix-static {
+    display: flex;
+    align-items: center;
+    flex: none;
+    min-height: var(--tap);
+    padding-inline: var(--space-3);
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    border: var(--border-width) solid var(--border-default);
+    border-inline-end: 0;
+    border-start-start-radius: var(--radius-md);
+    border-end-start-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+  .prefix > .input {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+    min-width: 0;
+  }
+
+  /* ---- chips ----------------------------------------------------------------
+     A value, and the way to add one, at the same height. Both --tap: the
+     44px floor is every viewport and not only the touch ones, and the old
+     construction missed it by eight pixels on the Add control alone. */
+
+  /* .chip inherits .badge's pill shape (--radius-full): it replaces a
+     .badge-plus-button construction, so this is continuity, not a new
+     shape family. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--tap);
+    padding-inline: var(--space-4) 0;
+    border-radius: var(--radius-full);
+    border: var(--border-width) solid var(--border-subtle);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+  .chip-x {
+    display: grid;
+    place-items: center;
+    width: var(--tap);
+    min-height: var(--tap);
+    border-radius: var(--radius-full);
+    color: var(--text-tertiary);
+  }
+  .chip-x:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .chip-add {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    width: auto;
+    min-height: var(--tap);
+    padding-inline: var(--space-4);
+    border-radius: var(--radius-full);
+    border: var(--border-width) dashed var(--border-default);
+    background: transparent;
+    /* Dresses a <select>, which is the one control here that arrives with an
+       arrow painted on. */
+    background-image: none;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+  .chip-add:hover { border-color: var(--border-strong); color: var(--text-primary); }
+  .chip-add:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+  }
+
+  /* ---- save bar ---------------------------------------------------------------
+     The save control does not scroll away from a form this tall. .admin-main
+     is the surface's only scroll container, so sticky resolves against it. */
+
+  .savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-top: var(--space-5);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface-overlay);
+    backdrop-filter: blur(8px);
+    border: var(--border-width) solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-3);
+  }
+  .savebar-state {
+    margin-inline-end: auto;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+  /* Below 900px a fixed tab bar owns the foot of the pane, so the save bar
+     stops above it rather than underneath it. The tab bar is `position:
+     fixed; inset-block-end: 0`, painted over the pane rather than laid out
+     inside it, so `.admin-main`'s own bottom padding never shrinks the
+     sticky's scrollport — this offset is not a duplicate of that padding.
+     Without it, `bottom: 0` would park the save bar underneath the tab bar. */
+  @media (max-width: 900px) {
+    .savebar { bottom: calc(var(--tabbar-h) + var(--space-3)); }
+  }
 
   /* ---- summary ------------------------------------------------------------
      What the invitee is about to commit to, stated in full, in their own

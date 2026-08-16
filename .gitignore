@@ -517,3 +517,6 @@ appsettings.Local.json
 .impeccable/config.local.json
 .impeccable/hook.cache.json
 .impeccable/questions/
+
+# Brainstorming mockups from the visual companion. Session artefacts, not source.
+.superpowers/

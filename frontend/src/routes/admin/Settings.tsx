@@ -12,53 +12,7 @@ import {
   type SettingsDraft,
   type TimeZoneOption,
 } from './adminSettings'
-
-/**
- * The four globals, in the order the comp reads them, with the floor each one
- * answers to.
- *
- * Plain numbers, and deliberately NOT `InheritableNumber`: this is what every
- * link's null inherits from, so a control offering to inherit here would imply
- * a level above the global that does not exist.
- *
- * `floor` is not decoration on two of them. A negative margin inverts the
- * padded busy interval and starts creating overlaps that look like
- * availability; a zero start increment makes the slot generator's minute step
- * never advance. The backend refuses both — this is the same rule said early
- * enough that the operator does not have to submit to learn it.
- */
-const LIMITS = [
-  {
-    key: 'marginMinutes',
-    label: 'Margin between meetings',
-    unit: 'minutes',
-    floor: 0,
-    help: 'Kept clear on both sides of every booking.',
-  },
-  {
-    key: 'minNoticeMinutes',
-    label: 'Minimum notice',
-    unit: 'minutes',
-    floor: 0,
-    help: 'How far ahead the earliest bookable slot sits. Zero is bookable immediately.',
-  },
-  {
-    key: 'dailyCap',
-    label: 'Bookings a day',
-    unit: 'a day',
-    floor: 0,
-    help: 'The most meetings one day may take. Zero closes every day.',
-  },
-  {
-    key: 'startIncrementMinutes',
-    label: 'Start increment',
-    unit: 'minutes',
-    floor: 1,
-    help: 'The grid starts land on — 30 gives you :00 and :30.',
-  },
-] as const
-
-type LimitKey = (typeof LIMITS)[number]['key']
+import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitKey } from './limitCopy'
 
 /**
  * Ends the Kairos session and not the identity provider's.
@@ -180,13 +134,13 @@ export default function Settings() {
   const parsed =
     draft === null
       ? null
-      : LIMITS.reduce<Partial<Record<LimitKey, number | null>>>(
-          (all, limit) => ({ ...all, [limit.key]: whole(draft[limit.key], limit.floor) }),
+      : LIMIT_KEYS.reduce<Partial<Record<LimitKey, number | null>>>(
+          (all, key) => ({ ...all, [key]: whole(draft[key], LIMIT_COPY[key].floor) }),
           {},
         )
 
   const complete =
-    parsed !== null && LIMITS.every((limit) => parsed[limit.key] !== null && parsed[limit.key] !== undefined)
+    parsed !== null && LIMIT_KEYS.every((key) => parsed[key] !== null && parsed[key] !== undefined)
 
   function save() {
     if (draft === null || parsed === null || !complete) return
@@ -226,7 +180,7 @@ export default function Settings() {
   const options = zones.length > 0 ? zones : [{ id: zone, offset: '' }]
 
   return (
-    <>
+    <div className="form-col">
       <div className="page-header">
         <h1 className="title-page">Settings</h1>
         <button
@@ -257,7 +211,7 @@ export default function Settings() {
             <div className="field">
               <label htmlFor={zoneId}>The zone your availability is written in</label>
               <select
-                className="select"
+                className="select ctl-lg"
                 id={zoneId}
                 value={zone}
                 onChange={(event) => {
@@ -284,40 +238,51 @@ export default function Settings() {
           <div className="page-header section-break">
             <h2 className="title-section">Global defaults</h2>
           </div>
-          <div className="card card-pad stack stack-lg">
-            {LIMITS.map((limit) => {
-              const value = draft[limit.key]
-              const invalid = whole(value, limit.floor) === null
-              const note = overrideNote(settings.overrides[limit.key])
+          <div className="card card-pad">
+            <div className="rowgroup">
+              {LIMIT_KEYS.map((key) => {
+                const limit = LIMIT_COPY[key]
+                const value = draft[key]
+                const invalid = whole(value, limit.floor) === null
+                const note = overrideNote(settings.overrides[key])
 
-              return (
-                <div className="field" data-invalid={invalid ? 'true' : undefined} key={limit.key}>
-                  <label htmlFor={`${zoneId}-${limit.key}`}>{limit.label}</label>
-                  <input
-                    className="input numeric"
-                    id={`${zoneId}-${limit.key}`}
-                    type="number"
-                    inputMode="numeric"
-                    min={limit.floor}
-                    value={value}
-                    onChange={(event) => change(limit.key, event.target.value)}
-                  />
-                  {invalid ? (
-                    <p className="field-error" role="alert">
-                      <AlertIcon />
-                      {limit.floor === 0
-                        ? `A whole number of ${limit.unit}, and never below zero.`
-                        : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
-                    </p>
-                  ) : (
-                    <p className="fine">
-                      {limit.help}
-                      {note === null ? '' : ` ${note}`}
-                    </p>
-                  )}
-                </div>
-              )
-            })}
+                return (
+                  <div className="field-row" data-invalid={invalid ? 'true' : undefined} key={key}>
+                    <div className="field-row-label">
+                      <label htmlFor={`${zoneId}-${key}`}>{limit.label}</label>
+                      <p className="fine">
+                        {limit.help}
+                        {note === null ? '' : ` ${note}`}
+                      </p>
+                      {invalid && (
+                        <p className="field-error" role="alert">
+                          <AlertIcon />
+                          {limit.floor === ZERO_FLOOR
+                            ? `A whole number of ${limit.unit}, and never below zero.`
+                            : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="field-row-control">
+                      <span className="affix">
+                        <input
+                          className="input numeric ctl-num"
+                          id={`${zoneId}-${key}`}
+                          type="number"
+                          inputMode="numeric"
+                          min={limit.floor}
+                          value={value}
+                          onChange={(event) => change(key, event.target.value)}
+                        />
+                        <span className="affix-unit" aria-hidden="true">
+                          {limit.short}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           <div className="page-header section-break">
@@ -331,7 +296,7 @@ export default function Settings() {
                   the default and the one most people should stay on — so the
                   control that would lose it is not the control this page uses. */}
               <select
-                className="select"
+                className="select ctl-md"
                 id={themeId}
                 value={theme}
                 onChange={(event) => chooseTheme(event.target.value as ThemeChoice)}
@@ -380,6 +345,6 @@ export default function Settings() {
           </div>
         </>
       )}
-    </>
+    </div>
   )
 }
