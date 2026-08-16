@@ -37,6 +37,16 @@ const DESKTOP = { width: 1280, height: 900 }
 const TABBAR = { width: 899, height: 900 }
 const RECORDS = { width: 759, height: 900 }
 
+// Neither of these is a design-system breakpoint — nothing in DESIGN.md names
+// them and no CSS rule fires at them. WIDE exists because the defect that
+// started this branch (a two-digit minute value in a ~1900px box) was first
+// seen in a screenshot taken near this width, so a regression there is caught
+// where it was originally found. LAPTOP exists because it is the machine the
+// operator actually runs the admin surface from day to day — a narrow-column
+// check that only ever ran at DESKTOP's 1280 would never see their real window.
+const WIDE = { width: 2560, height: 1400 }
+const LAPTOP = { width: 1440, height: 900 }
+
 const results = {}
 const record = (name, value) => {
   results[name] = value
@@ -158,6 +168,38 @@ async function adminReady(page, path) {
   // The shell's own settings read resolves after first paint; the identity block
   // is what it draws, so waiting for the network to go quiet is not enough.
   await page.waitForTimeout(500)
+}
+
+/**
+ * The link editor is not routed on its own — Links.tsx swaps it in over the
+ * list once an existing link's Edit button is clicked (see Links.tsx and
+ * RecordTable.tsx: `td[data-column="Edit"] > button`, inside `.table tbody`).
+ * Caller must already be on /admin/links. Returns whether the editor was
+ * actually reached, and why not when it wasn't — a check that measured the
+ * list instead and called it the editor would be a false pass.
+ */
+async function openFirstLink(page) {
+  if ((await page.$('.empty')) !== null) {
+    return { opened: false, reason: 'no seeded links — /admin/links rendered .empty, not a .table' }
+  }
+  const rowCount = await page.$$eval('.table tbody tr', (rows) => rows.length).catch(() => 0)
+  if (rowCount === 0) {
+    return { opened: false, reason: 'no rows in .table tbody on /admin/links' }
+  }
+  const editButton = await page.$('.table tbody tr:first-child td[data-column="Edit"] button')
+  if (editButton === null) {
+    return {
+      opened: false,
+      reason: 'first row has no button at td[data-column="Edit"] > button — table shape does not match Links.tsx',
+    }
+  }
+  await editButton.click()
+  try {
+    await page.waitForSelector('.form-col', { timeout: 5000 })
+  } catch {
+    return { opened: false, reason: "clicked the first row's Edit button but .form-col never appeared" }
+  }
+  return { opened: true, reason: null }
 }
 
 const main = async () => {
@@ -706,6 +748,110 @@ const main = async () => {
     dark: palettes.dark[name],
   }))
   record('inversion', inversion)
+
+  // ---- 12. Narrow column: control widths, the tap floor, and page overflow,
+  // on the two screens this branch moved to a 620px column, at the widths a
+  // real screenshot and a real operator actually see.
+  //
+  // The four size classes' intended pixel widths, read out of kairos.css
+  // (.ctl-num/.ctl-sm/.ctl-md/.ctl-lg: 5.5rem/11rem/18rem/28rem, and no `html`
+  // font-size rule anywhere in the sheet, so 1rem is the browser default of
+  // 16px) — and --tap, the design system's floor on every control on every
+  // viewport, not only touch ones. A .textarea carries none of the four
+  // classes and is exempt by construction: it never matches `sizeClass` below.
+  const CTL_WIDTH = { 'ctl-num': 88, 'ctl-sm': 176, 'ctl-md': 288, 'ctl-lg': 448 }
+  const TAP = 44
+
+  const measureNarrowControls = async (page) =>
+    page.evaluate(() => {
+      const out = []
+      for (const element of document.querySelectorAll('.input, .select, .textarea')) {
+        if (!element.checkVisibility({ checkVisibilityCSS: true })) continue
+        const rect = element.getBoundingClientRect()
+        out.push({
+          tag: element.tagName.toLowerCase(),
+          id: element.id || null,
+          classes: (element.getAttribute('class') ?? '').split(/\s+/).filter(Boolean),
+          width: rect.width,
+          height: rect.height,
+        })
+      }
+      return out
+    })
+
+  const narrowTargets = [
+    [
+      'links-editor',
+      async (page) => {
+        await adminReady(page, '/links')
+        return openFirstLink(page)
+      },
+    ],
+    [
+      'settings',
+      async (page) => {
+        await adminReady(page, '/settings')
+        return { opened: true, reason: null }
+      },
+    ],
+  ]
+
+  const narrowViewports = [
+    ['2560x1400', WIDE],
+    ['1440x900', LAPTOP],
+    ['440x956', PHONE],
+  ]
+
+  for (const [routeLabel, prepare] of narrowTargets) {
+    for (const [viewportLabel, viewport] of narrowViewports) {
+      await withPage(browser, { viewport }, async (page) => {
+        const name = `narrow-${routeLabel}-${viewportLabel}`
+        const ready = await prepare(page)
+        if (!ready.opened) {
+          record(name, { reachable: false, reason: ready.reason })
+          return
+        }
+
+        const controls = await measureNarrowControls(page)
+        const exceedingSizeClass = controls
+          .map((control) => {
+            const sizeClass = control.classes.find((className) => className in CTL_WIDTH)
+            if (sizeClass === undefined) return null
+            const maxWidth = CTL_WIDTH[sizeClass]
+            if (control.width <= maxWidth) return null
+            return { ...control, sizeClass, maxWidth, overBy: Number((control.width - maxWidth).toFixed(1)) }
+          })
+          .filter((control) => control !== null)
+        const underTapHeight = controls
+          .filter((control) => control.height < TAP)
+          .map((control) => ({ ...control, shortBy: Number((TAP - control.height).toFixed(1)) }))
+        const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+
+        const fileBase = `${OUT}/${name}`
+        await page.screenshot({ path: `${fileBase}.png`, fullPage: true })
+        // The design system forbids state carried by colour alone: on the link
+        // editor an overridden limit is a number field and an inherited one is
+        // read-only prose with a Global badge, and that has to survive going
+        // monochrome. Desaturating and shooting again is the evidence for a
+        // human to judge that; this script does not decide it.
+        await page.evaluate(() => {
+          document.documentElement.style.filter = 'grayscale(1)'
+        })
+        await page.screenshot({ path: `${fileBase}-mono.png`, fullPage: true })
+
+        record(name, {
+          reachable: true,
+          viewport,
+          controlCount: controls.length,
+          controls,
+          exceedingSizeClass,
+          underTapHeight,
+          scrollWidth,
+          scrollsSideways: scrollWidth > viewport.width,
+        })
+      })
+    }
+  }
 
   await browser.close()
   writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2))
