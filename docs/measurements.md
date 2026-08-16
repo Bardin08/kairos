@@ -782,3 +782,269 @@ Everything below was carried into this task as unproved. Each line says what was
 - **A third `BookingStatus`.** `Meetings.tsx` renders `status === 'confirmed' ? 'Confirmed' : 'Cancelled'`. The enum has two values today and is numbered with gaps specifically so a third can be inserted; the day one is, this prints "Cancelled" for it, silently. A `switch` with an exhaustive default is the fix and it costs nothing now.
 - **The OpenID Connect leg.** No test and no measurement in this repository has ever talked to a Pocket ID. The cookie half of the gate is exercised end to end and the challenge half is not.
 - **`appsettings.Development.json` commits `"ClientSecret": "development-placeholder"`.** Not a real secret, and it keeps `dotnet run` working now that startup fails fast — but it is the shape into which a real secret gets pasted by accident, and nothing in the file says not to.
+
+---
+
+# The availability editor
+
+What the two-pane editor at `/admin/availability/{patternId}` cost, and what it made cheap. Same rule as Parts A, B and C: every line below is something that was observed. The difference is the second instance — the "before" column here was not read off the old source, it was driven in a browser against the page this work replaced.
+
+Measured 2026-08-16 at `3ee73e6` on macOS 27 / arm64, .NET 10.0.101, framework-dependent Release publish. Two instances, each with its own SQLite file and each signed into through the real OpenID Connect leg against the mock provider in `compose.dev.yaml` — no minted cookie this time, because `docs/running-locally.md` now makes the real one obtainable. Port **5301** serves the editor as it stands. Port **5302** serves the same published backend behind a `wwwroot` built from `25adcca^`, which is the 635-line page with the inline editor inside every card. Browser conditions used headless Chromium via Playwright 1.62.1 with `timezoneId: Europe/Warsaw`.
+
+## How it was built
+
+`main` holds 67 commits: one initial commit and 66 squash merges, each carrying its pull request number. **Nothing was pushed to `main` directly.** This work is **#61, #62, #63, #64, #65, #67 and #68 — seven merges for seven tasks**, one apiece, no fixes needed. #66 was closed unmerged as a duplicate of #69, and #69 and the still-open #70 are documentation rather than this work.
+
+## Headline
+
+```
+block a date            1 click,       1 PUT      was 1 date typed + 1 click, 1 PUT, no calendar
+shift a five-day week   2 presses,     1 PUT      was 17 interactions, 10 PUTs
+close a day             1 click,       0 requests was 1 click and an immediate PUT
+open a day              1 click,       0 requests was 1 select + 1 click and an immediate PUT
+what a link offers      1 select                 was nothing at all on this screen
+
+booking route     71,879 bytes gzipped   (budget 76,800 — 4,921 free)
+admin chunk       11,155 bytes gzipped   (lazy, not charged)
+backend tests        190 passed, 0 failed  (Part C left it at 183)
+frontend tests        97 passed, 0 failed  (Part C left it at 68)
+verify.sh             16 passed, 0 skipped, 0 failed
+the ten checks        10 run, 10 pass, 0 fail, 0 unrun
+```
+
+Ten passes is an unusual line to write, so the two things that did not go well are said here rather than buried: **the week pane's only primary action is below the fold at 1280×800**, and **the day square is 39×40 against a 44px Tap Floor**. Neither is what any of the ten checks asks, and both are in the register at the end.
+
+## The fixture
+
+Seeded through the operator's own HTTP surface with the session cookie on it, so nothing was written behind the API's back. Organizer zone `Europe/Warsaw`, margin 0, minimum notice 0, daily cap 50, start increment 30 — the "no unusual limits" check 2 asks for, chosen so that nothing but the pattern can close a day. One pattern, `Weekdays 09–17`, open Monday to Friday 09:00–17:00. One active link, `consulting` / "Consulting call", single duration 25. A second pattern, `Weekend mornings`, with no rules and no links, so the list's "Not used by any link yet" line and the preview's no-picker branch both have a subject. The instance on 5302 was seeded identically by the same script.
+
+`scripts/measure-availability.mjs` is what drives checks 1 through 8, and it is a sibling of `scripts/measure-ui.mjs` in every respect that matters: run by hand, never in `scripts/verify.sh`, and the command is in its header.
+
+## The ten checks
+
+### 1. A blocked date reaches the anonymous read — pass
+
+One click on the square for 1 September 2026, in a signed-in browser, and then a slots read from Node with **no cookie on it at all** — a separate fetch, because a request made from a signed-in context proves nothing about what an invitee can see.
+
+```
+click                 PUT /api/v1/admin/patterns/{id}/overrides/2026-09-01
+square, before        "Tuesday 1 September, open"
+square, after         "Tuesday 1 September, blocked"
+
+GET /api/v1/links/consulting/slots?from=2026-09-01&to=2026-09-30&duration=25, no cookie
+  1 September  16 -> 0
+  2 September  16 -> 16
+  the month   352 -> 336
+```
+
+Sixteen starts left the month and sixteen is exactly one day of them, so nothing else moved. End to end from a square to an invitee's calendar, and the only write in between is the one the click made.
+
+### 2. `patternDays` and the real slots agree — pass
+
+The check holding the design together: the month grid computes open, closed and blocked in the browser, the slots endpoint computes bookable starts in the engine, and the two must not drift.
+
+Run over **September 2026 — a whole month in the future**, deliberately. `patternDays.ts` documents that it knows nothing about margin, minimum notice, daily cap or start increment; a month with today in it would therefore disagree about this morning for a reason that is not drift, and the disagreement would drown the one that would be.
+
+```
+30 squares for a 30-day month
+22  data-day-state="open"          22  days with at least one slot
+ 0  open with no slots              0  slots on a day not open
+ 8  data-day-state="closed"
+16  slots on every one of the 22
+```
+
+The month-wide comparison cannot reach the case most likely to break, so it was run on its own: **an override that opens a day the week never opens.**
+
+```
+Sunday 6 September, before       square "closed"    anonymous slots 0
+09:00–12:00 set on that date
+Sunday 6 September, after        square "open"      anonymous slots 6
+                                 07:00:00Z … 09:30:00Z
+```
+
+Six starts is what a 25-minute meeting at a 30-minute increment fits into three hours, the last one at 11:30 Warsaw ending at 11:55. The square and the engine reached the same answer from opposite directions, and neither was told about the other.
+
+**What this is not.** One month, one link, one set of limits — a snapshot, not a property test. And in the current month the two do read differently, exactly as designed:
+
+```
+August 2026, today the 17th
+19  data-day-state="open"
+ 9  of those also data-state="available"
+10  open with no times: 3, 4, 5, 6, 7, 10, 11, 12, 13, 14 August
+```
+
+Ten open squares carrying no times, and they are precisely the ten weekdays already past. The day state is the pattern's answer and the count is the link's, and the grid draws both because they are different questions.
+
+### 3. Blocking a date is one click — pass
+
+From `/admin/availability/{patternId}` freshly loaded, on the month it opens on, with no arrow pressed:
+
+```
+clicks from page load   1
+field entries           0
+requests                1  (PUT .../overrides/2026-08-28)
+click to repaint       46 ms
+square                 "Friday 28 August, open" -> "Friday 28 August, blocked"
+```
+
+The 46 ms has the round trip inside it: the square only repaints from the pattern the write answers with, so nothing was drawn before the server agreed. A date in another month costs one arrow press per month of travel, and nothing else.
+
+### 4. Shifting a five-day week is one press and one request — pass
+
+Monday's two fields moved 09:00 → 10:00 and 17:00 → 18:00, then *Use these hours on every open day*, then *Save weekly hours*.
+
+```
+after typing            0 requests
+after apply-to-all      0 requests   all ten .week-time fields now read 10:00 / 18:00
+after save              1 request    PUT /api/v1/admin/patterns/{id}/rules
+
+09:00 17:00 x5   ->   10:00 18:00 x5
+```
+
+Two field entries and two presses, and **one `PUT`, not one per day**. The draft is the reason the apply issues nothing, and the endpoint storing the whole set is the reason the save issues one.
+
+### 5. Opening and closing a day is one click each — pass
+
+```
+Remove Friday window 1   1 click, 0 requests   row reads "Friday  Closed  Open"
+Open Saturday            1 click, 0 requests   row gains window 1, both fields empty
+```
+
+Empty rather than a working nine-to-five, which is the pane's stated safety property: hours nobody typed are hours nobody chose to offer. Both edits sit in the draft until the same *Save weekly hours* the check above counted.
+
+### 6. The pattern's links, and what they offer, without scrolling at 1280×800 — pass
+
+`.admin-shell` is exactly one viewport tall and `.admin-main` is what scrolls inside it, so "without scrolling" is a question about that element's box and not the document's. Read at `scrollTop 0`, untouched:
+
+```
+#preview-as       options "Days only", "Consulting call"      bottom 273.5
+month grid                                                    bottom 630.5
+.admin-main       scrollTop 0   clientHeight 800
+
+first three squares after choosing the link:
+  "Monday 17 August, open, 16 times available"
+  "Tuesday 18 August, open, 16 times available"
+  "Wednesday 19 August, open, 16 times available"
+```
+
+Which links stand on the pattern, and what one of them actually offers, both inside the first 800 pixels. **What is not inside them: 292 pixels of the pane, including the *Save weekly hours* button at y 983.** That is not what this check asks and it does not fail it; it is in the register at the end, because it is the more interesting number.
+
+### 7. Two panes at 1280, stacked with the week first at 899 — pass
+
+Measured rects, through Playwright.
+
+```
+1280x800   Weekly hours   x 272   y 100   612 x 960
+           Preview        x 908   y 100   340 x 960     same y — one row
+
+ 899x900   Weekly hours   x  32   y  100  835 x 960
+           Preview        x  32   y 1084  835 x 555     same x — one column,
+                                                        and the week is the one on top
+```
+
+899 is one pixel below the 901 the stylesheet splits at, which is where a breakpoint is actually tested. The week is first in the source and therefore first when they stack, which is the whole of how that ordering is guaranteed.
+
+### 8. Signed out, the editor is the locked screen and nothing else — pass
+
+A browser with no cookie, straight at the editor's own address:
+
+```
+url          /admin/availability/{patternId}
+h1           "Sign in to continue"
+.admin-shell 0     .rail 0     .tabbar 0
+.editor-cols 0     .days 0
+buttons      ["Sign in"]
+```
+
+No rail, no tab bar, no page heading of its own, no empty month, no half-drawn frame. The whole document is the card and the one control on it.
+
+### 9. Bundle — pass
+
+`bash scripts/bundle-budget.sh` after `npm run build`:
+
+```
+bundle-budget: booking route 71879 bytes gzipped across 1 file(s), budget 76800
+bundle-budget: lazy chunks 11155 bytes gzipped across 1 file(s), not charged to the budget
+```
+
+**4,921 bytes of headroom, 93.6% of the 76,800 ceiling consumed.** The budget is 76,800 and nothing else. The 61,440 — 60 KiB — that still gets quoted from before Part A was superseded during Part A itself, when the React 19.2 shell alone measured 61,641 gzipped and did not fit it; a figure that the framework alone exceeds is not a ceiling, and it has not been the one in `scripts/bundle-budget.sh` since.
+
+What the seven commits themselves cost was measured rather than inferred: each one was extracted into a scratch tree with `git archive` and built with the same toolchain, so the walk below is eight builds and not an attribution.
+
+```
+                                   booking route          admin chunk
+1a00119  #60, the commit before        71,789                 9,606
+e31498d  #61  the client                71,786    -3           9,601      -5
+b1e2e84  #62  MonthGrid day states      71,808   +22           9,604      +3
+d4e9007  #64  the editor route          71,806    -2           9,861    +257
+25adcca  #65  the list                  71,806     0           8,790  -1,071
+3533525  #67  the week pane             71,808    +2           9,666    +876
+3ee73e6  #68  the preview               71,879   +71          11,155  +1,489
+─────────────────────────────────────────────────────────────────────────────
+this work                                          +90                +1,549
+```
+
+**Ninety bytes on the invitee's route for the whole editor**, because everything else is behind the lazy admin chunk. All ninety are `MonthGrid`, which is the one file this work touched that the booking page also imports — `git diff --stat` over `src/lib` and `src/components` finds nothing else in either of the two commits that moved the number. #63 is not in the table because it is the backend's `PUT` and builds the same frontend as #62; #65 subtracting a kilobyte from the workbench is the 635-line page being deleted.
+
+Part C recorded 71,471 at `244dffc`; the 318 bytes between that and `1a00119` belong to #55–#60 and not to this work.
+
+### 10. The four operator actions — pass, and the before column was driven rather than quoted
+
+The instance on 5302 runs the current backend behind the pre-rewrite frontend, so both columns are the same engine and the difference is the screen. Every "before" figure below came out of a browser driving that page.
+
+```
+                        before                                   after
+block a date            1 date typed + 1 click, 1 PUT            1 click, 1 PUT
+                        no calendar anywhere on the page         a square on the month
+shift a five-day week   10 clicks + 7 field entries = 17         2 field entries + 2 presses
+                        10 PUTs                                   1 PUT
+close a day             1 click, 1 PUT, live immediately         1 click, 0 requests
+open a day              1 select + 1 click, 1 PUT                1 click, 0 requests
+what a link offers      nothing: 0 calendars, 0 link pickers,    1 select, and the month
+                        0 counts on the whole screen              fills with that link's counts
+```
+
+Shifting the hours is the one that changes shape rather than degree. No rule on the old page was editable in place — the only controls were *Remove* and the add form underneath — so a five-day shift is five removals and five additions, and each of the ten is its own `PUT /rules` replacing the whole set. Ten writes to a live pattern, each one a moment where the week on offer is not the week the operator meant.
+
+The screen itself, measured at 1280×800:
+
+```
+                              before      after
+list card, collapsed          313.5 px    313.5 px
+card with the editor open   1,292.9 px    — there is no editor in a card any more
+  once it carries one exception  1,381.1 px
+.admin-main scrollHeight      1,432 px      800 px   (clientHeight 800 — the list fits)
+controls inside the open card    17           2      (Edit, Delete)
+```
+
+1,381 px is the ~1,400 the plan opened with, measured. The card grows 4.4× when it opens, and one open card overflows an 800 px viewport by 632 px.
+
+## The register of what is not covered
+
+**The week pane's one primary action is below the fold at 1280×800.** *Save weekly hours* sits at y 983 in an 800-pixel viewport, because the pane is 960 px tall and starts at 100. Every draft edit in checks 4 and 5 therefore ends with a scroll the counts above do not include. The check as written is about the links and what they offer, and that half passes; this is the half nobody asked about. Its bottom edge is 227 px past the fold at this viewport, and at the 900 px `measure-ui.mjs` uses for every other reading it would be 127 — 100 px closer and still under it.
+
+**The `.day` square is under the Tap Floor, and the editor's is smaller than the booking page's.**
+
+```
+editor preview pane, 340 px wide     39.14 x 40
+booking page calendar, 300 px wide   40.00 x 40
+DESIGN.md Tap Floor                  44
+```
+
+This is the booking page's pre-existing geometry and not this work's — the editor reuses the component — but the editor made it a second place the number is wrong, and it is 0.86 px worse there. Fixing it moves the invitee's calendar, which is why it is recorded rather than changed.
+
+**Check 2 is a snapshot, not a property.** One month, one link, one set of limits, plus the single override case that opens a closed day. Nothing here would catch a drift that only appears at a start increment the fixture does not use, or on a link with a daily cap. A generative comparison — random rules, random overrides, `patternDays` against the endpoint for the same month — is the version of this check that would keep holding, and it does not exist.
+
+**The old page's numbers are one operator's route through it, not its cheapest.** The seventeen interactions in check 10 assume the removals happen before the additions, and they must — the set with both windows on it was sent to check:
+
+```
+PUT /admin/patterns/{id}/rules  {Mon 09:00–17:00, Mon 10:00–18:00}
+  -> 409  rule_overlaps
+     "Another window on that day already covers part of those hours."
+```
+
+Within that constraint the order taken is the shortest one there is, and the two time fields were typed once rather than five times because the add form keeps their values between adds.
+
+**Nothing here was measured on a phone.** Check 7's 899 px is the stacked layout at a desktop height; the editor at 440×956, where the tab bar is drawn and `.admin-main` under-reserves for it by the six pixels Part C recorded, has not been looked at.
+
+**Idle memory was not re-measured.** Part C's 190.2 MiB against a target of under 100 Mi is the last reading, and this work adds no hosted service, no client and no dependency to the process. The frontend does not enter it.
