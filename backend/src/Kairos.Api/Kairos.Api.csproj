@@ -4,4 +4,17 @@
     <RootNamespace>Kairos.Api</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Versions come from Directory.Packages.props. A version here would be a second answer. -->
+    <PackageReference Include="NodaTime" />
+    <PackageReference Include="Google.Apis.Calendar.v3" />
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
 </Project>
