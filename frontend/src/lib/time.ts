@@ -35,6 +35,12 @@ const DAYS_PER_WEEK = 7
 // become 6 and Monday's 1 has to become 0.
 const SUNDAY_TO_MONDAY_FIRST = DAYS_PER_WEEK - 1
 const MONTHS_PER_YEAR = 12
+// A month grid is always this many cells, whether the month itself needs five
+// rows or six. Padding the short month out to the long month's size is what
+// `monthCells` uses these for — see its comment.
+const GRID_COLUMNS = DAYS_PER_WEEK
+const GRID_ROWS = 6
+const GRID_CELLS = GRID_COLUMNS * GRID_ROWS
 // A date key is unambiguous at midnight UTC as long as it is only ever read
 // back in UTC, which is what every helper below does.
 const START_OF_DAY = 'T00:00:00Z'
@@ -173,13 +179,21 @@ export function shiftMonth(day: string, delta: number): string {
 }
 
 /**
- * A month as the grid draws it: leading nulls for the squares before the first,
- * then a date key per day. The nulls are rendered rather than skipped, because
- * the day columns have to line up under their weekday headings.
+ * A month as the grid draws it: leading nulls for the squares before the
+ * first, then a date key per day, then trailing nulls out to a fixed six
+ * rows. The nulls are rendered rather than skipped, because the day columns
+ * have to line up under their weekday headings — and, since the trailing
+ * padding, because the calendar has to line up with itself from one month to
+ * the next. A five-row February beside a six-row August is a booking card
+ * that changes height when the invitee changes month and nothing else; padded
+ * to the same cell count, every month draws the same number of rows and the
+ * card stops moving.
  *
- * The first and last keys are also the `from` and `to` of the slots request.
- * A 31-day month is exactly the 31 days that endpoint answers for, so a month
- * is the largest window it will ever be asked for and never a wider one.
+ * The first and last real-day keys are also the `from` and `to` of the slots
+ * request. A 31-day month is exactly the 31 days that endpoint answers for,
+ * so a month is the largest window it will ever be asked for and never a
+ * wider one — the trailing nulls are not part of that window, only of the
+ * grid drawn around it.
  */
 export function monthCells(month: string): (string | null)[] {
   const first = new Date(startOfMonth(month) + START_OF_DAY)
@@ -196,6 +210,8 @@ export function monthCells(month: string): (string | null)[] {
       new Date(Date.UTC(year, index, day)).toISOString().slice(0, DATE_KEY_LENGTH),
     )
   }
+
+  while (cells.length < GRID_CELLS) cells.push(null)
 
   return cells
 }

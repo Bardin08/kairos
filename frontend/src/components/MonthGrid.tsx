@@ -61,13 +61,18 @@ export default function MonthGrid({
       <div className="days" role="group" aria-label={monthLabel(month)}>
         {monthCells(month).map((day, index) => {
           if (day === null) {
-            // The squares before the first of the month. Rendered rather than
-            // skipped, or the columns stop lining up under their headings.
+            // The squares before the first of the month, and the padding
+            // after the last that keeps every month six rows tall (see
+            // `monthCells`). Rendered rather than skipped, or the columns
+            // stop lining up under their headings — and a short month stops
+            // lining up with a long one. Keyed on the index alone: neither
+            // group has a date key of its own, and the index is already
+            // unique across the whole array.
             return (
               <span
                 className="day"
                 data-state="empty"
-                key={`lead-${index}`}
+                key={index}
                 aria-hidden="true"
               />
             )

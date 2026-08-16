@@ -258,6 +258,10 @@
     /* ---- geometry ------------------------------------------------------- */
     --tap: 44px;            /* minimum touch target, everywhere, no exceptions */
     --border-width: 1px;
+    /* The desktop slot column's fixed size — see .slots below. One token for
+       both the floor and the cap, so the two can never drift apart into a
+       shorter-then-taller version of the bug they exist to close. */
+    --slots-h: 300px;
     --measure: 68ch;        /* body copy never runs wider */
     /* An admin form column. Controls inside it are sized to their longest
        plausible value rather than stretched to the card, so a two-digit
@@ -1078,7 +1082,17 @@
   @media (min-width: 861px) {
     .slots {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      max-height: 300px;
+      /* Floor equal to the cap: a short day's column is padded out to the
+         same height a full, scrolling day reaches, rather than shrinking to
+         fit its contents. Without this the card grew and shrank by roughly
+         150px between a five-slot day and a sixteen-slot one — the count
+         already sits in the panel header above, so the space below a short
+         day is left deliberately empty rather than filled with a repeat of
+         it. Scoped inside this query on purpose: below it the page itself
+         scrolls, and a fixed-height column in there would be a second
+         scrollbar nested in the first. */
+      min-height: var(--slots-h);
+      max-height: var(--slots-h);
       overflow-y: auto;
       /* Room for the focus ring: without it the outline on the first and
          last slot is clipped by the scroll container. */
