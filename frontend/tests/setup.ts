@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom'
+import { vi } from 'vitest'
 
 // Node 26 declares a global `localStorage` that reads as undefined unless the
 // process was started with --localstorage-file. Vitest's jsdom environment only
@@ -11,11 +12,12 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 })
 
-// jsdom ships no clipboard. The editor's Copy button needs one to exist; what
-// it writes is asserted where it matters and stubbed everywhere else.
+// jsdom ships no clipboard. The editor's Copy button needs one to exist, and
+// `writeText` is a spy rather than a bare stub so a test can assert what was
+// written to it.
 if (navigator.clipboard === undefined) {
   Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText: () => Promise.resolve() },
+    value: { writeText: vi.fn(() => Promise.resolve()) },
     configurable: true,
   })
 }

@@ -14,14 +14,11 @@ import {
   type LinkLimits,
 } from './adminLinks'
 import Failure from './Failure'
-import { changedCount, draftOf, unsavedLabel, type EditorDraft } from './editorDraft'
+import { CLEAN, changedCount, draftOf, unsavedLabel, type EditorDraft } from './editorDraft'
 import { LIMIT_COPY, LIMIT_KEYS } from './limitCopy'
 
 /** Where a booking page lives. Fixed by App.tsx's route, not configurable. */
 const BOOK_PATH = '/book/'
-
-/** Nothing has moved, so there is nothing to save and nothing to discard. */
-const CLEAN = 0
 
 /**
  * One link, in full: what it is called, where it lives, how long it runs, which
@@ -287,11 +284,22 @@ export default function LinkEditor({
             An archived link answers as though it never existed, and the meetings already booked
             through it are untouched.
           </p>
+          {/* Rendered only while dirty: a permanent sentence about a condition
+              that is usually false is noise. Without it, archiving or
+              restoring calls `onSaved`, the parent unmounts this editor, and
+              whatever the operator typed above is gone with no word said
+              about it. */}
+          {changed !== CLEAN && (
+            <p className="prose t-sm mb-4">
+              This form has unsaved changes. {link.active ? 'Archiving' : 'Restoring'} discards
+              them — save or discard the changes above first.
+            </p>
+          )}
           {link.active ? (
             <button
               className="btn btn-danger"
               type="button"
-              disabled={saving}
+              disabled={saving || changed !== CLEAN}
               onClick={() => void setActive(false)}
             >
               Archive link
@@ -300,7 +308,7 @@ export default function LinkEditor({
             <button
               className="btn"
               type="button"
-              disabled={saving}
+              disabled={saving || changed !== CLEAN}
               onClick={() => void setActive(true)}
             >
               Restore link
