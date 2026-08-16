@@ -5,6 +5,21 @@
     <!-- viewport-fit=cover keeps env(safe-area-inset-*) non-zero. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Kairos</title>
+    <!--
+      Preloaded ahead of the stylesheet on purpose. A @font-face inside
+      kairos.css is only discovered after the CSS has parsed AND a glyph has
+      matched, which on a cold mobile connection is two round trips into the
+      page; these two are what the invitee reads and counts, so they start in
+      the first one.
+
+      Only these two. Source Serif is 18.3 KB for a single heading and is
+      deliberately left to load late — its metric-matched fallback means the
+      swap costs no layout shift. latin-ext and cyrillic are left to the
+      unicode-range in kairos.css, so a page with no Polish or Ukrainian name
+      on it never asks for them.
+    -->
+    <link rel="preload" href="/fonts/source-sans-3.latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-mono.num.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/kairos.css" />
     <!-- Pre-paint theme; mirrors src/lib/theme.ts, which explains why. -->
     <script>
