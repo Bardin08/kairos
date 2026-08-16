@@ -15,6 +15,7 @@ const MIN_MINUTES = 1
 const MAX_MINUTES = 1440
 
 const CUSTOM = 'custom'
+const PLACEHOLDER = ''
 
 /**
  * The lengths a link is offered at, as chips plus a way to add one.
@@ -78,7 +79,7 @@ export default function DurationEditor({
   }
 
   function pick(chosen: string) {
-    if (chosen === '') return
+    if (chosen === PLACEHOLDER) return
 
     if (chosen === CUSTOM) {
       setProblem('')
@@ -120,16 +121,16 @@ export default function DurationEditor({
             Dressed as a chip, at chip height: the old .select-inline was 36px
             beside 44px chips and the row never lined up. The placeholder now
             reads "+ Add" rather than a prompt, which looks like a button — but
-            it is still option value="", so picking it is still the no-op
-            `pick` guards on with its first line; do not "fix" that guard into
-            a real option. */}
+            it is still `option value={PLACEHOLDER}`, so picking it is still
+            the no-op `pick` guards on with its first line; do not "fix" that
+            guard into a real option. */}
         <select
           className="chip-add"
-          value=""
+          value={PLACEHOLDER}
           aria-label="Add a duration"
           onChange={(event) => pick(event.target.value)}
         >
-          <option value="">+ Add</option>
+          <option value={PLACEHOLDER}>+ Add</option>
           {PRESETS.map((minutes) => (
             <option key={minutes} value={minutes}>
               {minutes} min
