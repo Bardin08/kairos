@@ -207,6 +207,86 @@ test('picking Own hours writes nothing until Save this date', async () => {
 })
 
 /**
+ * Manual activation, checked at the one point it matters: moving focus across
+ * the group must never itself be a write. The APG default moves focus and
+ * selects together, which here would mean an arrow key fires a save at a
+ * pattern links stand on — this is the assertion that would catch a
+ * regression back to that default, so it is explicit rather than implied by
+ * the tests that check what a deliberate pick does.
+ */
+test('arrow key moves focus between options and writes nothing', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  weekly.focus()
+  expect(document.activeElement).toBe(weekly)
+
+  fireEvent.keyDown(weekly, { key: 'ArrowRight' })
+
+  expect(document.activeElement).toBe(ownHours)
+  expect(savePatternOverride).not.toHaveBeenCalled()
+  expect(removePatternOverride).not.toHaveBeenCalled()
+})
+
+test('focus wraps at both ends of the group', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const blocked = screen.getByRole('radio', { name: 'Blocked' })
+
+  weekly.focus()
+  fireEvent.keyDown(weekly, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(blocked)
+
+  blocked.focus()
+  fireEvent.keyDown(blocked, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(weekly)
+})
+
+test('Space selects the focused option and writes', async () => {
+  const blocked = { date: A_SUNDAY, windows: [] }
+  vi.mocked(savePatternOverride).mockResolvedValue(usedByMentorship([blocked]))
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const target = screen.getByRole('radio', { name: 'Blocked' })
+  target.focus()
+  fireEvent.keyDown(target, { key: ' ' })
+
+  await waitFor(() => expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY, []))
+})
+
+test('Enter selects the focused option and writes', async () => {
+  vi.mocked(removePatternOverride).mockResolvedValue(usedByMentorship())
+
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const target = screen.getByRole('radio', { name: 'Weekly' })
+  target.focus()
+  fireEvent.keyDown(target, { key: 'Enter' })
+
+  await waitFor(() => expect(removePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY))
+})
+
+/**
+ * Roving tabindex, and only one stop: whichever option is actually selected,
+ * so Tab enters and leaves the group in one hop instead of walking all three.
+ */
+test('only the selected option is a tab stop', () => {
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  expect(screen.getByRole('radio', { name: 'Weekly' }).getAttribute('tabindex')).toBe('-1')
+  expect(screen.getByRole('radio', { name: 'Own hours' }).getAttribute('tabindex')).toBe('0')
+  expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('tabindex')).toBe('-1')
+})
+
+/**
  * A date with its own hours is an open day and the grid draws it as one, so
  * the list is the only place the third state is legible before it is opened.
  * Opened through the list rather than the square, which is the other door

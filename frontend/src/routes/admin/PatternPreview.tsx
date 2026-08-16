@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import MonthGrid from '../../components/MonthGrid'
 import { getSlots } from '../../lib/api'
@@ -72,6 +72,9 @@ function describe(override: PatternOverride | undefined): string {
  * error rather than a state the control silently never reaches.
  */
 type DateState = 'weekly' | 'own-hours' | 'blocked'
+
+/** The three, in the order the control lays them out and the order arrow keys walk them. */
+const DATE_STATES: readonly DateState[] = ['weekly', 'own-hours', 'blocked']
 
 /**
  * Which of the three a date's override says it is in, and nothing else — the
@@ -344,6 +347,64 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     setEditingOwnHours(true)
   }
 
+  // One ref per option, keyed by the state it stands for rather than a
+  // position, so a key handler can move real DOM focus between them without
+  // another piece of state to keep in step with `dateState`.
+  const weeklyRef = useRef<HTMLButtonElement>(null)
+  const ownHoursRef = useRef<HTMLButtonElement>(null)
+  const blockedRef = useRef<HTMLButtonElement>(null)
+  const radioRefs = { weekly: weeklyRef, 'own-hours': ownHoursRef, blocked: blockedRef }
+  const pick = { weekly: pickWeekly, 'own-hours': pickOwnHours, blocked: pickBlocked }
+
+  /**
+   * Roving focus with MANUAL activation — not the APG default, which moves
+   * focus and selects together. The default is wrong here on purpose: Weekly
+   * and Blocked write to the server the instant they are selected, so
+   * automatic activation would turn arrowing across the group into a write
+   * per keystroke, and holding the key down into a burst of them against a
+   * pattern links stand on. So the arrows move focus and nothing else; only
+   * Space or Enter selects the option focus is already on, which is where a
+   * write can happen. `tabIndex` follows `dateState` rather than wherever
+   * focus last landed, so Tab always re-enters the group on the option that
+   * is actually selected — the same thing a native radio group does, and the
+   * reason there is no separate "last focused" state to keep in sync here.
+   */
+  function handleRadioKeyDown(event: KeyboardEvent<HTMLButtonElement>, state: DateState) {
+    const index = DATE_STATES.indexOf(state)
+    const last = DATE_STATES.length - 1
+
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault()
+        radioRefs[DATE_STATES[index === 0 ? last : index - 1]].current?.focus()
+        return
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault()
+        radioRefs[DATE_STATES[index === last ? 0 : index + 1]].current?.focus()
+        return
+      case 'Home':
+        event.preventDefault()
+        radioRefs[DATE_STATES[0]].current?.focus()
+        return
+      case 'End':
+        event.preventDefault()
+        radioRefs[DATE_STATES[last]].current?.focus()
+        return
+      case ' ':
+      case 'Enter':
+        // Prevented on keydown so a real browser's own Space/Enter
+        // activation of the `<button>` cannot also fire and double the
+        // write this already sends.
+        event.preventDefault()
+        pick[state]()
+        return
+      default:
+        return
+    }
+  }
+
   return (
     <section className="card card-pad">
       <div className="month-head">
@@ -463,27 +524,36 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
             aria-label={longDate(selected)}
           >
             <button
+              ref={weeklyRef}
               type="button"
               role="radio"
+              tabIndex={dateState === 'weekly' ? 0 : -1}
               aria-checked={dateState === 'weekly'}
               onClick={pickWeekly}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'weekly')}
             >
               Weekly
             </button>
             <button
+              ref={ownHoursRef}
               type="button"
               role="radio"
+              tabIndex={dateState === 'own-hours' ? 0 : -1}
               aria-checked={dateState === 'own-hours'}
               onClick={pickOwnHours}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'own-hours')}
             >
               Own hours
             </button>
             <button
+              ref={blockedRef}
               type="button"
               role="radio"
               className="segmented-danger"
+              tabIndex={dateState === 'blocked' ? 0 : -1}
               aria-checked={dateState === 'blocked'}
               onClick={pickBlocked}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'blocked')}
             >
               Blocked
             </button>
