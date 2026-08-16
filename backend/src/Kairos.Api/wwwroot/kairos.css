@@ -727,6 +727,14 @@
   .btn-danger { --btn-fg: var(--status-danger-fg); }
   .btn-danger:hover { --btn-bg: var(--status-danger-bg); --btn-border: var(--status-danger-fg); }
 
+  /* Quieter than the plain ghost above, which DESIGN.md's own Ghost spec
+     keeps at ink-label weight for a retreat action (Back, Reschedule). Add
+     window is neither a retreat nor the selection nor the primary action —
+     the three things the accent and full ink weight are for — so it drops
+     one tone further, to --text-secondary, composed with .btn-ghost rather
+     than folded into it so a plain ghost elsewhere keeps its ink label. */
+  .btn-muted { --btn-fg: var(--text-secondary); }
+
   .btn-block { width: 100%; }
   .btn-inline { padding-inline: var(--space-2); }
   .btn svg { width: 16px; height: 16px; flex: none; }

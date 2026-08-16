@@ -80,13 +80,19 @@ export default function WindowRows({
       ))}
 
       <div className="row gap-2 wrap">
+        {/* Ghost and quiet rather than the bordered .btn it used to be —
+            neither the selection nor the primary action, so the accent and
+            full ink weight are not its to spend. The leading + is not
+            decoration: WeekEditor passes its own ghost in beside this one
+            (Use these hours on every open day), and two bare ghosts read as
+            one piece of link text with nothing to tell them apart. */}
         <button
-          className="btn"
+          className="btn btn-ghost btn-muted"
           type="button"
           aria-label={`Add window to ${label}`}
           onClick={() => onChange([...windows, BLANK])}
         >
-          Add window
+          + Add window
         </button>
         {children}
       </div>
