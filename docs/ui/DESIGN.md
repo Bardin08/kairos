@@ -20,44 +20,46 @@ colors:
   confirm: "#168A5A"
   refuse: "#C4362C"
 typography:
+  sans:
+    fontFamily: "'Kairos Sans', 'Kairos Sans Fallback Apple', 'Kairos Sans Fallback', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif"
   display:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif"
+    fontFamily: "'Kairos Display', 'Kairos Display Fallback', {typography.sans.fontFamily}"
     fontSize: "2rem"
-    fontWeight: 600
+    fontWeight: 400
     lineHeight: 1.15
-    letterSpacing: "-0.022em"
+    letterSpacing: "-0.015em"
   headline:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontSize: "1.5rem"
     fontWeight: 600
     lineHeight: 1.15
     letterSpacing: "-0.022em"
   title:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontSize: "1.25rem"
     fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "-0.012em"
   body:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.55
     letterSpacing: "-0.012em"
   ui:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontSize: "0.875rem"
     fontWeight: 500
     lineHeight: 1.55
     letterSpacing: "-0.012em"
   label:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontSize: "0.75rem"
     fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "0.06em"
   numeric:
-    fontFamily: "{typography.display.fontFamily}"
+    fontFamily: "{typography.sans.fontFamily}"
     fontVariation: "tabular-nums"
 rounded:
   xs: "4px"
@@ -146,7 +148,7 @@ components:
 
 A departure board exists for one reason: a stranger, under time pressure, in bad light, has to become certain of one thing. It does not decorate. Everything on it is either a time, a destination, or the mark showing which row is yours. Kairos is built to that standard. An invitee arrives from a link someone pasted into a message, on a phone, with ninety seconds of attention and no intention of ever learning the interface. They need to see which times are real, understand which one they have selected, and leave.
 
-The system is therefore quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, and it is spent on exactly two things: the time the invitee has selected, and the action that commits it. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is a system stack, because an Operate surface is well served by one, it costs zero bytes on mobile data, and the device already has it in memory. The single place typography is load-bearing is numerals: every time, date, duration and count sets in tabular figures, so a column of times never shifts as it changes.
+The system is therefore quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, and it is spent on exactly two things: the time the invitee has selected, and the action that commits it. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is Source Sans 3, self-hosted and subset so that an English invitee pays 28.7 KB for it and a Polish one pays for the accents only when a Polish name is actually on the page. The single place typography is load-bearing is numerals, and it is treated that way: figures come from a 2.3 KB digits-only cut of IBM Plex Mono, scoped by `unicode-range` so it can lead the global stack while every letter behind it stays Source Sans. A time on a departure board is not the same kind of thing as a word, and here it does not look like one.
 
 The same vocabulary carries the operator's workbench without a second design. Density rises — tables, patterns, records — but nothing new is introduced: the same ramp, the same hairlines, the same accent discipline, the same figures. A screen that needs a device this system does not have is usually a screen that has misunderstood the task.
 
@@ -187,14 +189,26 @@ Cool neutrals at a single hue with one saturated accent; nothing else is coloure
 
 ## Typography
 
-**Display Font:** system UI stack (`-apple-system`, `Segoe UI`, `Roboto`, `Helvetica Neue`, Arial, Noto Sans)
-**Body Font:** the same stack
-**Numeric:** the same stack with `font-variant-numeric: tabular-nums`
+**Body & UI:** Source Sans 3, self-hosted, variable weight axis (`Kairos Sans`)
+**Display:** Source Serif 4 at 400, self-hosted, pinned to one weight (`Kairos Display`) — the booking page's `<h1>` and nothing else
+**Numeric:** IBM Plex Mono, subset to digits and time punctuation (`Kairos Figures`), leading `--font-numeric` and falling through to the sans
 
-**Character:** deliberately unbranded and instantly familiar. The type does not carry the identity; the restraint, the figures and the accent discipline do. This is a choice made under two named constraints — no Node toolchain, and a mid-range Android on mobile data — and it is recorded as an adaptation rather than a preference.
+**Character:** warm humanist rather than neutral grotesque. An invitee is a stranger who arrived from a link someone pasted at them, and a face with a little warmth in it is doing work that a colder, more corporate one does not. The serif appears exactly once, on the one line of the booking page that is a name rather than a control, and the mono appears only on figures — which on this product means the thing the whole page exists to show.
+
+This supersedes the system stack. That was chosen under two constraints, and one of them is gone: the no-Node-toolchain rule was withdrawn when the front end became React. The other — a mid-range Android on mobile data — still binds, and it is why the type ships the way it does rather than why it does not ship at all.
+
+### What it costs, and how that is held
+
+31.0 KB blocks first paint: Source Sans 3 latin (28,740) and the digits-only Plex Mono subset (2,260), both `rel="preload"`ed ahead of the stylesheet so they start in the first round trip instead of the third. Source Serif 4 (18,708) is deliberately **not** preloaded — it is one heading, and its metric-matched fallback means arriving late costs no layout shift.
+
+Nothing is shipped whole. Each family is split by `unicode-range`, so an English invitee downloads latin and nothing else; `latin-ext` arrives only when a Polish name is on the page, `cyrillic` only when a Ukrainian one is. This is not hypothetical tidiness — measured across the five candidate faces, the latin subset carries `ü` but not `ę ł ś ć ż`, so without the split those names fall back mid-word and change width.
+
+`scripts/bundle-budget.sh` enforces 32 KiB on the preloaded fonts, as a number separate from the code budget. Fonts are weighed raw rather than gzipped, because WOFF2 is already Brotli-compressed and gzipping it again reports a figure nobody downloads. Two budgets rather than one total, so a JS regression cannot hide inside font headroom.
+
+Every `size-adjust` and `*-override` in the FACES block of `kairos.css` is computed from the real font tables, not estimated. Regenerate with `scripts/font-metrics.py` whenever a face changes.
 
 ### Hierarchy
-- **Display** (600, 2rem, 1.15, -0.022em): the event title on the booking page. One per page.
+- **Display** (Source Serif 4, 400, 2rem, 1.15, -0.015em): the event title on the booking page. One per page, and the only display type in the product.
 - **Headline** (600, 1.5rem, 1.15): admin page titles.
 - **Title** (600, 1.25rem, 1.35): section headings inside a card or pane.
 - **Body** (400, 1rem, 1.55): invitee-facing prose and every form control. Never smaller — this is read once, on a phone, by a stranger. Measure caps at 68ch.
@@ -204,6 +218,8 @@ Cool neutrals at a single hue with one saturated accent; nothing else is coloure
 ### Named Rules
 
 **The Tabular Rule.** Anything that is a time, a date, a duration or a count sets in tabular figures. A slot column whose digits change width is a column that jitters when the day changes.
+
+**The One Declaration Rule.** `--font-numeric` is set on `body`, not on a list of components. The `unicode-range` on `Kairos Figures` already restricts that face to digits, so one declaration covers every figure in the product and cannot be forgotten on a component written next year. A rule that names components is a rule with a maintenance cost; this one has none.
 
 **The No Eyebrow Rule.** No kicker or eyebrow above a heading, anywhere, ever. A heading that needs a label above it to be understood needs a better heading.
 

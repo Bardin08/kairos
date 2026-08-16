@@ -10,6 +10,129 @@
 @layer reset, tokens, base, layout, components, states, utilities;
 
 /* ==========================================================================
+   FACES
+   Self-hosted, OFL-1.1, served from /fonts. No CDN: the booking page is
+   public and bypasses Cloudflare Access, so a third-party font request would
+   be the one outbound call an invitee cannot refuse. Every file is a pinned
+   artefact in frontend/public/, not a floating version.
+
+   Each family is split by unicode-range rather than shipped whole. An English
+   invitee downloads latin and nothing else; latin-ext arrives only when a
+   Polish name is on the page, cyrillic only when a Ukrainian one is. Measured
+   on the five candidates before this one was chosen: the latin subset carries
+   `ü` but not `ę ł ś ć ż`, so without the split those names silently fall
+   back mid-word and change width.
+   ========================================================================== */
+
+/* ---- Source Sans 3 — UI, body, headings. Variable weight axis. --------- */
+@font-face {
+  font-family: "Kairos Sans";
+  src: url("/fonts/source-sans-3.latin.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                 U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                 U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Kairos Sans";
+  src: url("/fonts/source-sans-3.latin-ext.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                 U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                 U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Kairos Sans";
+  src: url("/fonts/source-sans-3.cyrillic.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+/* ---- Figures — IBM Plex Mono, digits and time punctuation only ---------
+   2,260 bytes. The unicode-range is the whole trick: it is what makes this
+   face safe to put FIRST in the global stack, because every letter, space and
+   comma still resolves to Kairos Sans behind it. No wrapper spans, no
+   per-component overrides, and no monospace word-spacing leaking into prose.
+   Kairos is a column of times; this is the one place a second face earns its
+   bytes. */
+@font-face {
+  font-family: "Kairos Figures";
+  src: url("/fonts/ibm-plex-mono.num.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0030-0039, U+003A, U+2013, U+2212;
+}
+
+/* ---- Display — Source Serif 4, pinned to 400. The booking H1 only. -----
+   Deliberately NOT preloaded. It is 18,708 bytes for one heading, so it stays
+   off the critical path and swaps in late; the fallback below makes that swap
+   cost no layout shift. */
+@font-face {
+  font-family: "Kairos Display";
+  src: url("/fonts/source-serif-4.latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                 U+02DC, U+2000-206F, U+20AC, U+2122, U+2212, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Kairos Display";
+  src: url("/fonts/source-serif-4.latin-ext.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                 U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---- Metric-matched fallbacks -----------------------------------------
+   Every number below is computed from the actual font tables — average
+   advance width over the lowercase alphabet weighted by English letter
+   frequency, against the OS/2 typo metrics — not eyeballed. Regenerate them
+   with scripts/font-metrics.py if a face ever changes.
+
+   Two Apple/generic variants because Source Sans 3 is markedly narrower than
+   both, and by different amounts: SF needs 96.37%, Arial and Helvetica need
+   90.21%. One shared number would fix one platform and break the other. They
+   are separate FAMILIES rather than two faces of one family on purpose: same
+   family plus identical descriptors means the later declaration always wins,
+   regardless of which local() actually resolved. */
+@font-face {
+  font-family: "Kairos Sans Fallback Apple";
+  src: local("SF Pro Text"), local("SFProText-Regular"), local("BlinkMacSystemFont");
+  size-adjust: 96.37%;
+  ascent-override: 106.26%;
+  descent-override: 41.51%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Kairos Sans Fallback";
+  src: local("Segoe UI"), local("Roboto"), local("Helvetica Neue"), local("Arial");
+  size-adjust: 90.21%;
+  ascent-override: 113.51%;
+  descent-override: 44.34%;
+  line-gap-override: 0%;
+}
+/* Source Serif 4 is 20% wider than Source Sans at the same size, so the H1
+   would jump hard on swap without this. */
+@font-face {
+  font-family: "Kairos Display Fallback";
+  src: local("Source Sans 3"), local("SF Pro Text"), local("Segoe UI"), local("Roboto"), local("Arial");
+  size-adjust: 120.03%;
+  ascent-override: 86.31%;
+  descent-override: 27.91%;
+  line-gap-override: 0%;
+}
+
+/* ==========================================================================
    TOKENS
    Two tiers. Primitives (--gray-500, --indigo-500) name a value and never
    appear in a component rule. Semantics (--text-secondary, --accent) name a
@@ -68,14 +191,25 @@
     --red-950:   #3A1512;
 
     /* ---- type -----------------------------------------------------------
-       System stacks. An Operate surface is well served by them, they cost
-       zero bytes, and the invitee's device already has them cached in RAM.
-       Numerals are the one place typography is load-bearing here: every
-       time, date and duration sets in tabular figures so columns of times
-       never shimmy as they change. */
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+       Source Sans 3 for everything read, IBM Plex Mono for everything
+       counted, Source Serif 4 for the one heading on the booking page.
+
+       This replaced the system stack once the toolchain constraint that
+       forced it was withdrawn. The system stack cost zero bytes but said
+       nothing; a humanist face is the one that suits a stranger who has
+       ninety seconds and no reason to trust the page yet. 31.0 KB blocks
+       first paint (sans + figures, both preloaded), the serif follows after.
+
+       --font-numeric leads with the figure face and falls through to the
+       sans, and it is set on `body` rather than on a list of components:
+       the @font-face unicode-range above already restricts it to digits, so
+       one declaration covers every time, date, duration and count in the
+       product and cannot be forgotten on a new component. */
+    --font-sans: "Kairos Sans", "Kairos Sans Fallback Apple", "Kairos Sans Fallback",
+                 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                  "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-    --font-numeric: var(--font-sans);
+    --font-numeric: "Kairos Figures", var(--font-sans);
+    --font-display: "Kairos Display", "Kairos Display Fallback", var(--font-sans);
 
     /* Scale steps sit at ~1.25 so hierarchy is visible without counting. */
     --text-2xs:  0.75rem;   /* 12 — micro labels, legends */
@@ -358,7 +492,10 @@
   body {
     background: var(--surface-page);
     color: var(--text-primary);
-    font-family: var(--font-sans);
+    /* --font-numeric, not --font-sans: it leads with the digits-only figure
+       face and falls through to the sans for every other glyph. See the
+       unicode-range on "Kairos Figures". */
+    font-family: var(--font-numeric);
     font-size: var(--text-base);
     line-height: var(--leading-normal);
     letter-spacing: var(--tracking-tight);
@@ -675,7 +812,18 @@
      better title. */
 
   .title-page  { font-size: var(--text-xl); }
-  .title-event { font-size: var(--text-2xl); letter-spacing: var(--tracking-display); }
+
+  /* The one place a display face appears. Serif at 400 rather than sans at
+     600, because this heading is the page's subject and nothing else on the
+     booking page competes with it — an invitee reads a name here, not a
+     control. Tracking is looser than --tracking-display: the serif is already
+     wide and the negative value made it look condensed. */
+  .title-event {
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-regular);
+    letter-spacing: -0.015em;
+  }
 
   .title-section {
     font-size: var(--text-lg);

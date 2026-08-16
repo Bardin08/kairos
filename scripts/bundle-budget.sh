@@ -21,10 +21,12 @@
 # cannot drift; a list here would, silently, and the failure would look like a
 # budget regression rather than a stale list.
 #
-# Only JavaScript and CSS are weighed, which is every file the build emits
-# today. An image or font imported from source would be emitted into assets/ and
-# counted by neither number — the same hole the old glob had, and worth closing
-# the first time one appears.
+# Only JavaScript and CSS are weighed by the bundle number, which is every file
+# the BUILD emits. Fonts are the first non-code asset to appear, and they get
+# their own number below rather than being folded into this one — see the font
+# budget. An image imported from source would still be emitted into assets/ and
+# counted by neither, which remains a hole worth closing the first time one
+# appears.
 #
 # The vendored kairos.css is NOT counted and is not in assets/ — it is a source
 # asset the API serves directly, it is not emitted by any build, and nothing
@@ -48,6 +50,31 @@ cd "$(git rev-parse --show-toplevel)"
 # against, and it is enough for hand-written UI and not enough for a date
 # library or a chart library.
 readonly BUDGET_GZIP_BYTES=76800
+
+# 32 KiB of font, and it is a SEPARATE number from the one above on purpose.
+#
+# Fonts are weighed raw, not gzipped: WOFF2 carries its own Brotli compression,
+# so gzipping one again adds bytes rather than removing them and would report a
+# figure no invitee ever downloads. Adding a raw number to a gzipped number to
+# get one total would leave the code budget meaningless — a JS regression could
+# hide inside font headroom, and shrinking a font would buy room for code that
+# does not fit. Two numbers, each protecting a different thing, and a
+# regression in either fails the run.
+#
+# What is charged: only the fonts index.html PRELOADS, because those are what
+# the invitee blocks on. That list is read out of the built index.html rather
+# than kept here, for the same reason the chunk list is read out of the
+# manifest — a copy here would drift silently and the failure would look like a
+# regression rather than a stale list. Everything else in fonts/ is weighed and
+# printed as information: the latin-ext and cyrillic subsets arrive only when a
+# Polish or Ukrainian name is actually on the page, and Source Serif is one
+# heading loading after first paint.
+#
+# Measured at 31,000 bytes when the type system landed — Source Sans 3 latin at
+# 28,740 plus the digits-only IBM Plex Mono subset at 2,260. The 1,768 bytes of
+# headroom are for a subset regenerating slightly larger, not for a third face.
+readonly BUDGET_FONT_BYTES=32768
+
 readonly OUT_DIR="backend/src/Kairos.Api/wwwroot"
 readonly MANIFEST="$OUT_DIR/.vite/manifest.json"
 
@@ -114,7 +141,76 @@ printf 'bundle-budget: booking route %d bytes gzipped across %d file(s), budget 
 printf 'bundle-budget: lazy chunks %d bytes gzipped across %d file(s), not charged to the budget\n' \
   "$lazy_size" "${#lazy_files[@]}"
 
-if [ "$booking_size" -ge "$BUDGET_GZIP_BYTES" ]; then
-  printf 'bundle-budget: over budget by %d bytes\n' "$((booking_size - BUDGET_GZIP_BYTES))" >&2
+# ---- fonts ------------------------------------------------------------------
+# Preloaded fonts come out of the built index.html. A document with no font
+# preload at all is a legitimate state — it is what this repo looked like before
+# the type system — so an empty list is zero bytes rather than a failure, unlike
+# an empty entry-chunk list.
+readonly INDEX_HTML="$OUT_DIR/index.html"
+if [ ! -f "$INDEX_HTML" ]; then
+  printf 'bundle-budget: no %s — the build emits it, so its absence is a fault\n' "$INDEX_HTML" >&2
   exit 1
 fi
+
+# shellcheck disable=SC2016  # the $ in the node program is node's, not this shell's
+font_partition="$(node -e '
+  const [indexPath, outDir] = process.argv.slice(1)
+  const fs = require("node:fs")
+  const html = fs.readFileSync(indexPath, "utf8")
+  const preloaded = new Set()
+  // Matches the href of any <link rel="preload" ... as="font">, in either
+  // attribute order, which is the only shape this needs to survive.
+  for (const tag of html.match(/<link\b[^>]*>/g) ?? []) {
+    if (!/rel=["\x27]preload["\x27]/.test(tag)) continue
+    if (!/as=["\x27]font["\x27]/.test(tag)) continue
+    const href = tag.match(/href=["\x27]([^"\x27]+)["\x27]/)
+    if (href) preloaded.add(href[1].replace(/^\//, ""))
+  }
+  const dir = `${outDir}/fonts`
+  const all = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((f) => f.endsWith(".woff2")).map((f) => `fonts/${f}`)
+    : []
+  const missing = [...preloaded].filter((f) => !all.includes(f))
+  if (missing.length) {
+    console.error(`bundle-budget: index.html preloads ${missing.join(", ")}, which the build did not emit`)
+    process.exit(1)
+  }
+  const charged = all.filter((f) => preloaded.has(f))
+  const deferred = all.filter((f) => !preloaded.has(f))
+  console.log(charged.map((f) => `${outDir}/${f}`).join(" "))
+  console.log(deferred.map((f) => `${outDir}/${f}`).join(" "))
+' "$INDEX_HTML" "$OUT_DIR")"
+
+deferred_font_line=""
+{ read -r charged_font_line; read -r deferred_font_line || true; } <<< "$font_partition"
+read -ra charged_fonts <<< "$charged_font_line"
+read -ra deferred_fonts <<< "$deferred_font_line"
+
+sum_bytes() {
+  local total=0 file
+  for file in "$@"; do total=$((total + $(wc -c < "$file"))); done
+  printf '%d' "$total"
+}
+
+font_size=0
+if [ "${#charged_fonts[@]}" -gt 0 ]; then font_size="$(sum_bytes "${charged_fonts[@]}")"; fi
+deferred_font_size=0
+if [ "${#deferred_fonts[@]}" -gt 0 ]; then deferred_font_size="$(sum_bytes "${deferred_fonts[@]}")"; fi
+
+printf 'bundle-budget: preloaded fonts %d bytes raw across %d file(s), budget %d\n' \
+  "$font_size" "${#charged_fonts[@]}" "$BUDGET_FONT_BYTES"
+printf 'bundle-budget: deferred fonts %d bytes raw across %d file(s), not charged to the budget\n' \
+  "$deferred_font_size" "${#deferred_fonts[@]}"
+printf 'bundle-budget: booking route first load %d bytes total (%d gzipped code + %d raw font)\n' \
+  "$((booking_size + font_size))" "$booking_size" "$font_size"
+
+over=0
+if [ "$booking_size" -ge "$BUDGET_GZIP_BYTES" ]; then
+  printf 'bundle-budget: code over budget by %d bytes\n' "$((booking_size - BUDGET_GZIP_BYTES))" >&2
+  over=1
+fi
+if [ "$font_size" -ge "$BUDGET_FONT_BYTES" ]; then
+  printf 'bundle-budget: font over budget by %d bytes\n' "$((font_size - BUDGET_FONT_BYTES))" >&2
+  over=1
+fi
+[ "$over" -eq 0 ] || exit 1
