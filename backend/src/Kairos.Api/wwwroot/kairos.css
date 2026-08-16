@@ -1391,6 +1391,45 @@
     color: var(--accent-text);
   }
 
+  /* ---- week editor ---------------------------------------------------------------------
+     The seven rows a pattern's week is edited as. Three rules, because three
+     things here are not sayable with what the sheet already has:
+
+     the day name sits in a column of its own width, so seven of them line up
+     down the card instead of each starting wherever its own row of controls
+     happens to begin;
+
+     `.input` is `width: 100%`, which in a flex row makes 09:00 as wide as the
+     space it is handed — a time is five characters and the field should be too,
+     or two of them and a Remove will not share one line;
+
+     and a closed day is this same row with no windows in it, never a different
+     component, because removing a day's last window and closing the day are one
+     act on one piece of data. */
+  .week-day {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-3);
+    padding-block-end: var(--space-3);
+    border-block-end: var(--border-width) solid var(--border-subtle);
+  }
+  .week-day:last-child { padding-block-end: 0; border-block-end: 0; }
+  /* Level with the first control beside it, however tall the day grows. */
+  .week-name {
+    display: flex;
+    align-items: center;
+    min-height: var(--tap);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semi);
+  }
+  .week-time { width: 7.5rem; }
+  /* On a phone the name takes its own line: the two columns and a pair of time
+     fields do not fit across 375px without the fields going under the floor. */
+  @media (max-width: 640px) {
+    .week-day { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  }
+
   /* ---- stat ------------------------------------------------------------------------- */
 
   .stat { display: grid; gap: var(--space-1); padding: var(--space-4); }
