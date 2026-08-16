@@ -146,34 +146,21 @@ export default function LinkEditor({
           </div>
 
           {/* Stacked rather than a two-column field-row: the composite here is
-              a static prefix, an input and a Copy button, comfortably over
-              500px on its own — nothing that wide belongs beside a label in a
-              620px column. Label and help go above, full column below, the
-              way Description already works. */}
+              a static prefix and an input, meant to span the full column the
+              way Name and Description do — nothing that wide belongs beside a
+              label. Label and help go above, full column below.
+
+              Copy sits on the label line rather than beside the control:
+              once the row below is the prefix and the input at full width,
+              there is no room left in it for a third element without
+              wrapping. Right-aligned opposite the label, above the help
+              text — .row-between's own gap keeps it clear of "Address"
+              on one side, and it is a sibling of the help paragraph below
+              rather than sharing a line with it, so the two never compete
+              for the same row. */}
           <div className="field">
-            <label htmlFor="link-slug">Address</label>
-            <p className="fine">Lowercase words joined by hyphens.</p>
-            <div className="row gap-2 wrap">
-              {/* The whole URL, not its last word. An operator setting this is
-                  deciding what to paste into a chat, and they cannot judge
-                  `consulting` without the part in front of it. The scheme is
-                  dropped from what is shown — the browser's own address bar
-                  does the same, and the operator does not need to read
-                  `http://` — but the Copy button below copies `address`,
-                  which still carries it: the display is shortened, the copied
-                  string must stay a full, working absolute URL. */}
-              <span className="prefix">
-                <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
-                <input
-                  id="link-slug"
-                  className="input ctl-md"
-                  value={draft.slug}
-                  onChange={(event) => {
-                    setCopied(false)
-                    set('slug', event.target.value)
-                  }}
-                />
-              </span>
+            <div className="row row-between">
+              <label htmlFor="link-slug">Address</label>
               {/* Only for a link that exists. A slug that has never been saved
                   is not an address yet, and offering to copy it hands out a 404. */}
               {link !== null && (
@@ -190,6 +177,35 @@ export default function LinkEditor({
                 </button>
               )}
             </div>
+            <p className="fine">Lowercase words joined by hyphens.</p>
+            {/* The whole URL, not its last word. An operator setting this is
+                deciding what to paste into a chat, and they cannot judge
+                `consulting` without the part in front of it. The scheme is
+                dropped from what is shown — the browser's own address bar
+                does the same, and the operator does not need to read
+                `http://` — but the Copy button above copies `address`, which
+                still carries it: the display is shortened, the copied string
+                must stay a full, working absolute URL.
+
+                No fixed size class on the input: .prefix already reserves
+                the static segment's intrinsic width via `flex: none` and
+                lets the input's own `min-width: 0` (kairos.css, `.prefix >
+                .input`) absorb the rest, so the pair ends flush with Name and
+                Description above and below rather than stopping at ctl-md's
+                288px partway through the column — and shrinks rather than
+                overflowing on a viewport narrower than the two together. */}
+            <span className="prefix">
+              <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
+              <input
+                id="link-slug"
+                className="input"
+                value={draft.slug}
+                onChange={(event) => {
+                  setCopied(false)
+                  set('slug', event.target.value)
+                }}
+              />
+            </span>
           </div>
 
           <div className="field">
