@@ -94,6 +94,20 @@ function usedByMentorship(overrides: Pattern['overrides'] = []): Pattern {
   return { ...weekdays, overrides, usedBy: [mentorship.name] }
 }
 
+/**
+ * A promise whose settlement the test controls, for putting a write genuinely
+ * in flight rather than merely mocking its eventual answer. `mockResolvedValue`
+ * settles before the test can act in between — this is what lets a click land
+ * while the request before it is still unanswered.
+ */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -246,6 +260,22 @@ test('focus wraps at both ends of the group', () => {
   expect(document.activeElement).toBe(weekly)
 })
 
+test('Home and End move focus straight to the first and last option', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  const blocked = screen.getByRole('radio', { name: 'Blocked' })
+
+  ownHours.focus()
+  fireEvent.keyDown(ownHours, { key: 'End' })
+  expect(document.activeElement).toBe(blocked)
+
+  fireEvent.keyDown(blocked, { key: 'Home' })
+  expect(document.activeElement).toBe(weekly)
+})
+
 test('Space selects the focused option and writes', async () => {
   const blocked = { date: A_SUNDAY, windows: [] }
   vi.mocked(savePatternOverride).mockResolvedValue(usedByMentorship([blocked]))
@@ -284,6 +314,57 @@ test('only the selected option is a tab stop', () => {
   expect(screen.getByRole('radio', { name: 'Weekly' }).getAttribute('tabindex')).toBe('-1')
   expect(screen.getByRole('radio', { name: 'Own hours' }).getAttribute('tabindex')).toBe('0')
   expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('tabindex')).toBe('-1')
+})
+
+/**
+ * The race: Blocked is picked and its write left hanging, then Own hours is
+ * picked before that write lands. `editingOwnHours` has no write of its own
+ * to guard it, so without the fix this is exactly the sequence that let it
+ * win — the control would show rows for a date the server had not yet agreed
+ * was anything but Blocked. `mockResolvedValue` cannot reach this sequence at
+ * all, because it settles before a second click has anywhere to land; the
+ * deferred promise is what keeps the first write genuinely open.
+ */
+test('a write in flight blocks the other picks, and the control agrees with the data once it lands', async () => {
+  const blocked = { date: A_SUNDAY, windows: [] }
+  const { promise, resolve } = deferred<Pattern>()
+  vi.mocked(savePatternOverride).mockReturnValue(promise)
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
+
+  // The write has fired and is still unanswered — the control has not yet
+  // heard back, so it still reads Weekly, the state it was in before the
+  // click. Own hours is picked through both entry points a click or a
+  // keystroke could reach it by.
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  expect(ownHours.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(ownHours)
+  fireEvent.keyDown(ownHours, { key: ' ' })
+
+  // Neither moved the control onto Own hours, and neither sent a second
+  // write — `pickBlocked`'s is still the only one out.
+  expect(screen.getByRole('radio', { name: 'Own hours' }).getAttribute('aria-checked')).toBe(
+    'false',
+  )
+  expect(
+    screen.queryByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)),
+  ).toBeNull()
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  resolve(usedByMentorship([blocked]))
+
+  // Once the write lands the control still agrees with the data — Blocked,
+  // never having shown Own hours for a date that was never anything else.
+  await waitFor(() =>
+    expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('aria-checked')).toBe(
+      'true',
+    ),
+  )
+  expect(
+    screen.queryByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)),
+  ).toBeNull()
 })
 
 /**

@@ -143,10 +143,14 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   // Picking Own hours writes nothing, so there is no override yet for
   // `dateStateOf` to read it back from — this is the one bit the control adds
   // on top of the data rather than reading out of it, and it exists for
-  // exactly that gap. It agrees with the data everywhere else: `choose`
-  // resets it on every new selection, and picking Weekly or Blocked clears it
-  // in the same click that sends the write, so it is never left pointing at
-  // Own hours once the override says otherwise.
+  // exactly that gap. Three guards keep it from disagreeing with the data
+  // rather than one: `choose` resets it on every new selection; picking
+  // Weekly or Blocked clears it in the same click that sends the write, and
+  // both are blocked — the radios disabled, `pickOwnHours` itself refusing —
+  // while a write is already in flight, so Own hours can never be picked
+  // between a write firing and it landing; and the resync below clears it
+  // whenever `pattern.overrides` moves out from under it for a reason that
+  // was not this pane's own write at all.
   const [editingOwnHours, setEditingOwnHours] = useState(false)
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` reads the status
@@ -177,6 +181,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   if (source !== pattern.overrides) {
     setSource(pattern.overrides)
     setOverrides(pattern.overrides)
+    // An override change this pane did not write itself — the week pane
+    // saving rules reloads the whole pattern, and a future caller might too.
+    // Own hours is the one state this pane can be showing without the data
+    // agreeing yet, so it is the one flag an outside change has to clear
+    // rather than leave pointing at a state the data no longer holds.
+    setEditingOwnHours(false)
   }
 
   const chosen = links.find((link) => link.slug === slug)
@@ -342,8 +352,14 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   /**
    * Reveals the rows; sends nothing. Own hours is the one state a pick alone
    * cannot write, because there is nothing to write until a window is typed.
+   * Guarded the same way `write` guards the other two picks, even though this
+   * one sends nothing itself: without it, Own hours could still be picked
+   * while a Weekly or Blocked write from a moment ago is in flight, and the
+   * control would show rows for a state the server had not agreed to yet.
    */
   function pickOwnHours() {
+    if (saving) return
+
     setEditingOwnHours(true)
   }
 
@@ -517,7 +533,16 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               see. "Weekly" rather than the fuller "Follows the weekly hours":
               the column is roughly 276px wide, and three full-length labels
               overflow it. Blocked alone carries the danger treatment, because
-              it alone is the state that takes availability away. */}
+              it alone is the state that takes availability away.
+
+              All three disabled while a write is in flight — independently
+              of what that write is for. A control that can be moved to a new
+              state before the last one has landed is lying about what state
+              it is even in, and it is also the one door `editingOwnHours`
+              would otherwise have into disagreeing with the data: without
+              this, Own hours could be picked between Blocked's write firing
+              and it landing, and the rows would show for a date the server
+              still holds as blocked. */}
           <div
             className="segmented segmented-full mt-3"
             role="radiogroup"
@@ -529,6 +554,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               role="radio"
               tabIndex={dateState === 'weekly' ? 0 : -1}
               aria-checked={dateState === 'weekly'}
+              disabled={saving}
               onClick={pickWeekly}
               onKeyDown={(event) => handleRadioKeyDown(event, 'weekly')}
             >
@@ -540,6 +566,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               role="radio"
               tabIndex={dateState === 'own-hours' ? 0 : -1}
               aria-checked={dateState === 'own-hours'}
+              disabled={saving}
               onClick={pickOwnHours}
               onKeyDown={(event) => handleRadioKeyDown(event, 'own-hours')}
             >
@@ -552,6 +579,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               className="segmented-danger"
               tabIndex={dateState === 'blocked' ? 0 : -1}
               aria-checked={dateState === 'blocked'}
+              disabled={saving}
               onClick={pickBlocked}
               onKeyDown={(event) => handleRadioKeyDown(event, 'blocked')}
             >
