@@ -863,6 +863,15 @@
     border: var(--border-width) solid var(--border-default);
     border-radius: var(--radius-md);
   }
+  /* Full-width variant: the control fills its column instead of sizing to
+     content, split into equal columns. Fixed at three rather than derived
+     from the child count — the one caller (the date panel's Weekly / Own
+     hours / Blocked control) always has exactly three, and a custom property
+     the markup would have to set is machinery this case doesn't earn. */
+  .segmented-full {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
   .segmented button {
     min-height: 36px;
     padding-inline: var(--space-3);
@@ -874,14 +883,30 @@
     transition: background var(--dur-instant) var(--ease-standard),
                 color var(--dur-instant) var(--ease-standard);
   }
-  .segmented button[aria-pressed="true"] {
+  /* aria-pressed selects a toggle button (duration picker); aria-checked
+     selects a radio option (date-state control). Same look, one rule kept
+     in step rather than two that could drift. */
+  .segmented button[aria-pressed="true"],
+  .segmented button[aria-checked="true"] {
     background: var(--surface-raised);
     color: var(--text-primary);
     font-weight: var(--weight-semi);
     box-shadow: var(--shadow-1);
   }
+  /* Blocked is the only one of the three date states that takes availability
+     away. Weekly and Own hours keep the neutral selected treatment above;
+     Blocked selected speaks in the danger palette instead, so the state that
+     shuts a day off says so by itself and needs no warning sentence under it.
+     DESIGN.md spends the accent on the current selection and the primary
+     action alone, so this reaches for --status-danger-* rather than
+     --accent-subtle, and keeps the neutral rule's shadow. */
+  .segmented button.segmented-danger[aria-pressed="true"],
+  .segmented button.segmented-danger[aria-checked="true"] {
+    background: var(--status-danger-bg);
+    color: var(--status-danger-fg);
+  }
   @media (hover: hover) {
-    .segmented button:hover:not([aria-pressed="true"]) { color: var(--text-primary); }
+    .segmented button:hover:not([aria-pressed="true"]):not([aria-checked="true"]) { color: var(--text-primary); }
   }
   .fact strong { color: var(--text-primary); font-weight: var(--weight-medium); }
 

@@ -82,3 +82,30 @@ test('the native number spinner is suppressed only inside .affix, not for every 
   const scopedOccurrences = css.split('.affix > input[type="number"]').length - 1
   expect(occurrences).toBe(scopedOccurrences)
 })
+
+// .segmented's selected style was written for aria-pressed (the duration
+// picker's toggle buttons) before the date-state control needed the same
+// look for aria-checked (a radio group). One rule extended to both selectors
+// rather than a second block copied beside it — this is what would notice if
+// a future edit re-forked them, since only one of the two would keep drifting
+// styles in sync with the other.
+test('the segmented selected style covers both toggle and radio semantics in one rule', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    '.segmented button[aria-pressed="true"],\n  .segmented button[aria-checked="true"] {\n    background: var(--surface-raised);',
+  )
+})
+
+// Blocked is the only one of the three date states that removes availability,
+// so its selection is the one departure from .segmented's shipped neutral
+// treatment (--surface-raised + shadow) into the danger palette. This is what
+// would notice if the danger modifier were ever dropped or pointed back at
+// --accent-subtle instead of the status-danger tokens.
+test('a selected segmented option can carry a danger fill instead of the neutral one', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    '.segmented button.segmented-danger[aria-pressed="true"],\n  .segmented button.segmented-danger[aria-checked="true"] {\n    background: var(--status-danger-bg);\n    color: var(--status-danger-fg);\n  }',
+  )
+})
