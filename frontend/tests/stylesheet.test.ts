@@ -111,3 +111,14 @@ test('a selected segmented option can carry a danger fill instead of the neutral
     '.segmented button.segmented-danger[aria-pressed="true"],\n  .segmented button.segmented-danger[aria-checked="true"] {\n    background: var(--status-danger-bg);\n    color: var(--status-danger-fg);\n  }',
   )
 })
+
+// A measurement against the running app found .segmented buttons rendering
+// at 36px — under DESIGN.md's tap floor (44px minimum, every viewport, no
+// exceptions clause). Fixed at the base rule with the --tap token rather
+// than a literal, so the duration picker and the date-state control share
+// one height and neither can quietly slip back under the floor on its own.
+test('the segmented button height is the tap-floor token, not a literal', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.segmented button {\n    min-height: var(--tap);')
+})

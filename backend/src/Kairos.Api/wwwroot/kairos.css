@@ -884,7 +884,11 @@
     grid-auto-columns: minmax(0, 1fr);
   }
   .segmented button {
-    min-height: 36px;
+    min-height: var(--tap); /* DESIGN.md's tap floor: 44px minimum on every
+                               viewport, no exceptions clause. Fixed at the
+                               base rule so the duration picker and the
+                               date-state control share one height rather
+                               than drifting apart by modifier. */
     padding-inline: var(--space-3);
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
