@@ -863,14 +863,17 @@
     border: var(--border-width) solid var(--border-default);
     border-radius: var(--radius-md);
   }
-  /* Full-width variant: the control fills its column instead of sizing to
-     content, split into equal columns. Fixed at three rather than derived
-     from the child count — the one caller (the date panel's Weekly / Own
-     hours / Blocked control) always has exactly three, and a custom property
-     the markup would have to set is machinery this case doesn't earn. */
-  .segmented-full {
+  /* Equal-column variant: the control fills its column instead of sizing to
+     content, and every option gets the same share of it regardless of how
+     many there are. `grid-auto-flow: column` lays options out one per
+     auto-generated column instead of a fixed `repeat(N, 1fr)`, so a second
+     caller with two options or four gets equal columns for free rather than
+     a dead cell or an overflow — `minmax(0, 1fr)` is what lets a column
+     shrink below its content's width instead of blowing out the row. */
+  .segmented-equal {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
   }
   .segmented button {
     min-height: 36px;

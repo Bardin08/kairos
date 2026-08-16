@@ -88,12 +88,14 @@ test('the native number spinner is suppressed only inside .affix, not for every 
 // look for aria-checked (a radio group). One rule extended to both selectors
 // rather than a second block copied beside it — this is what would notice if
 // a future edit re-forked them, since only one of the two would keep drifting
-// styles in sync with the other.
+// styles in sync with the other. Checked through the closing brace rather than
+// the first declaration alone, so dropping `color`, `font-weight` or
+// `box-shadow` from the rule would fail this test too, not just go unnoticed.
 test('the segmented selected style covers both toggle and radio semantics in one rule', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
   expect(css).toContain(
-    '.segmented button[aria-pressed="true"],\n  .segmented button[aria-checked="true"] {\n    background: var(--surface-raised);',
+    '.segmented button[aria-pressed="true"],\n  .segmented button[aria-checked="true"] {\n    background: var(--surface-raised);\n    color: var(--text-primary);\n    font-weight: var(--weight-semi);\n    box-shadow: var(--shadow-1);\n  }',
   )
 })
 

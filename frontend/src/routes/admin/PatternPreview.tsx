@@ -544,7 +544,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               and it landing, and the rows would show for a date the server
               still holds as blocked. */}
           <div
-            className="segmented segmented-full mt-3"
+            className="segmented segmented-equal mt-3"
             role="radiogroup"
             aria-label={longDate(selected)}
           >
