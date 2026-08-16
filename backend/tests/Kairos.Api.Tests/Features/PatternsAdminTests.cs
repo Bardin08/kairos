@@ -216,6 +216,32 @@ public class PatternsAdminTests
     }
 
     /// <summary>
+    /// A date splits the way a weekday already can. Written against the context rather than the
+    /// endpoint because the unique index on (pattern, date) is the only thing that ever refused
+    /// the second row — put it back and this is the one test in the suite that goes red.
+    /// </summary>
+    [Fact]
+    public void SaveOverrides_WithTwoWindowsOnOneDate_StoresBoth()
+    {
+        using var app = NewApp();
+        var date = Day().ToDateOnly();
+
+        app.Seed(context => context.PatternOverrides.AddRange(
+            Override(date, NineAm, Noon),
+            Override(date, Noon, FivePm)));
+
+        var stored = app.Read(context => context.PatternOverrides
+            .AsNoTracking()
+            .Where(replacement => replacement.PatternId == PatternId && replacement.Date == date)
+            .OrderBy(replacement => replacement.StartMinute)
+            .ToArray());
+
+        stored.Length.ShouldBe(2);
+        stored[0].EndMinute.ShouldBe(Noon);
+        stored[1].StartMinute.ShouldBe(Noon);
+    }
+
+    /// <summary>
     /// The seam the whole tab exists to move: a pattern built here, through the admin API, and
     /// then read by an anonymous browser as times it can book. Nothing in between is stubbed —
     /// the link is repointed the way it would be from the links editor, and the last read is the
@@ -297,6 +323,15 @@ public class PatternsAdminTests
 
         return slots ?? [];
     }
+
+    private static PatternOverride Override(DateOnly date, int startMinute, int endMinute) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        PatternId = PatternId,
+        Date = date,
+        StartMinute = startMinute,
+        EndMinute = endMinute,
+    };
 
     private static KairosApp NewApp()
     {

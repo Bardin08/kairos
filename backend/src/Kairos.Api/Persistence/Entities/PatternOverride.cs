@@ -1,8 +1,9 @@
 namespace Kairos.Api.Persistence.Entities;
 
 /// <summary>
-/// Replaces the weekly rules for one date. Null times block the date entirely, which is the
-/// common case — a holiday is an override with nothing in it rather than a separate concept.
+/// One window a date offers instead of its weekly rules. Several rows may share a date.
+/// A single row with both times null blocks the date; no rows at all means the date keeps
+/// the weekly rules. That distinction is the whole reason the null pair still exists.
 /// </summary>
 public sealed class PatternOverride
 {
@@ -16,7 +17,7 @@ public sealed class PatternOverride
     /// <summary>The local date this replaces, in the organizer's zone.</summary>
     public DateOnly Date { get; set; }
 
-    /// <summary>Minutes from local midnight, or null to block the date.</summary>
+    /// <summary>Minutes from local midnight.</summary>
     public int? StartMinute { get; set; }
 
     public int? EndMinute { get; set; }
