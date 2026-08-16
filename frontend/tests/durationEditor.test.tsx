@@ -20,13 +20,19 @@ const MAX_MINUTES = 1440
 /** Mirrors the component's own CUSTOM sentinel value on the select. */
 const CUSTOM_OPTION_VALUE = 'custom'
 
+/** The select's own prompt option — held at "" so `pick` treats it as a no-op. */
+const PLACEHOLDER_OPTION_VALUE = ''
+
 /** A whole number inside the bounds but off the preset list — the custom path. */
 const CUSTOM_MINUTES = 90
 
-/** Fails Number.isInteger, not the bounds check — the other way into the same sentence. */
+/** Fails Number.isInteger, not the bounds check — one of the three disjuncts. */
 const NON_INTEGER_INPUT = '25.5'
 
-/** One past MAX_MINUTES — the bounds check itself. */
+/** One under MIN_MINUTES — the floor, the second of the three disjuncts. */
+const BELOW_MIN_INPUT = String(MIN_MINUTES - 1)
+
+/** One past MAX_MINUTES — the ceiling, the third of the three disjuncts. */
 const OVER_MAX_INPUT = String(MAX_MINUTES + 1)
 
 const ADD_LABEL = 'Add a duration'
@@ -35,15 +41,6 @@ const ADD_CUSTOM_BUTTON_LABEL = 'Add'
 
 function removeLabel(minutes: number) {
   return `Remove ${minutes} minutes`
-}
-
-// A chip and the matching preset <option> both read "N min" — the option is
-// excluded by tag rather than by class, since the task forbids class queries
-// and a chip is not a select option regardless of what CSS it wears.
-function chipText(minutes: number) {
-  const pattern = new RegExp(`${minutes} min`)
-  return (content: string, element: Element | null) =>
-    element?.tagName !== 'OPTION' && pattern.test(content)
 }
 
 // The component's own refusal wording (frontend/src/components/DurationEditor.tsx),
@@ -79,6 +76,15 @@ function sent(): number[] {
   return JSON.parse(screen.getByRole('status').textContent ?? '[]')
 }
 
+// A chip's remove button is the only element in the tree named "Remove N
+// minutes" — unlike a text query for "N min", it can't collide with the
+// matching preset <option> or with a refusal message that happens to contain
+// the same digits, and it needs no class to find (the classes on this
+// component changed under us once already).
+function chip(minutes: number) {
+  return screen.queryByRole('button', { name: removeLabel(minutes) })
+}
+
 function pickPreset(minutes: number) {
   fireEvent.change(select(), { target: { value: String(minutes) } })
 }
@@ -100,7 +106,7 @@ test('choosing a preset adds it as a chip', () => {
   pickPreset(LONGEST_PRESET)
 
   expect(sent()).toEqual([STANDARD_PRESET, LONGEST_PRESET])
-  expect(screen.getByText(chipText(LONGEST_PRESET))).toBeTruthy()
+  expect(chip(LONGEST_PRESET)).toBeTruthy()
 })
 
 test('adding a duration the link already offers is refused, and says so', () => {
@@ -112,6 +118,34 @@ test('adding a duration the link already offers is refused, and says so', () => 
   expect(sent()).toEqual([STANDARD_PRESET])
 })
 
+test('a preset duplicating a value added as custom is refused too, not just preset-vs-preset', () => {
+  render(<Harness start={[SHORT_PRESET]} />)
+
+  openCustom()
+  submitCustom(String(STANDARD_PRESET))
+  expect(sent()).toEqual([SHORT_PRESET, STANDARD_PRESET])
+
+  pickPreset(STANDARD_PRESET)
+
+  expect(screen.getByRole('alert').textContent).toContain(duplicateMessage(STANDARD_PRESET))
+  expect(sent()).toEqual([SHORT_PRESET, STANDARD_PRESET])
+})
+
+test('a successful action clears a refusal message left over from the one before it', () => {
+  render(<Harness start={[STANDARD_PRESET]} />)
+
+  pickPreset(STANDARD_PRESET)
+  expect(screen.getByRole('alert')).toBeTruthy()
+
+  // `add` calls setProblem('') on the success path — a regression that
+  // dropped that call would pass every other test here and leave a stale
+  // refusal on screen next to a duration that was, in fact, just added.
+  pickPreset(LONGEST_PRESET)
+
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(sent()).toEqual([STANDARD_PRESET, LONGEST_PRESET])
+})
+
 test('the last remaining duration cannot be removed', () => {
   render(<Harness start={[STANDARD_PRESET]} />)
 
@@ -119,7 +153,20 @@ test('the last remaining duration cannot be removed', () => {
 
   expect(screen.getByRole('alert').textContent).toContain(LAST_ONE_MESSAGE)
   expect(sent()).toEqual([STANDARD_PRESET])
-  expect(screen.getByText(chipText(STANDARD_PRESET))).toBeTruthy()
+  expect(chip(STANDARD_PRESET)).toBeTruthy()
+})
+
+test('removing down to one duration, then hitting the floor guard on the one that is left', () => {
+  render(<Harness start={[SHORT_PRESET, STANDARD_PRESET]} />)
+
+  fireEvent.click(screen.getByRole('button', { name: removeLabel(SHORT_PRESET) }))
+  expect(sent()).toEqual([STANDARD_PRESET])
+
+  fireEvent.click(screen.getByRole('button', { name: removeLabel(STANDARD_PRESET) }))
+
+  expect(screen.getByRole('alert').textContent).toContain(LAST_ONE_MESSAGE)
+  expect(sent()).toEqual([STANDARD_PRESET])
+  expect(chip(STANDARD_PRESET)).toBeTruthy()
 })
 
 test('removing one of several durations leaves the rest, in order', () => {
@@ -140,11 +187,16 @@ test('a shorter duration added after a longer one keeps insertion order, not asc
   expect(sent()).toEqual([LONGEST_PRESET, SHORT_PRESET])
 })
 
-test('a custom value outside the bounds is refused, whether non-integer or past the maximum', () => {
+test('a custom value outside the bounds is refused — non-integer, below the minimum, or past the maximum', () => {
   render(<Harness start={[STANDARD_PRESET]} />)
 
   openCustom()
   submitCustom(NON_INTEGER_INPUT)
+
+  expect(screen.getByRole('alert').textContent).toContain(BOUNDS_MESSAGE)
+  expect(sent()).toEqual([STANDARD_PRESET])
+
+  submitCustom(BELOW_MIN_INPUT)
 
   expect(screen.getByRole('alert').textContent).toContain(BOUNDS_MESSAGE)
   expect(sent()).toEqual([STANDARD_PRESET])
@@ -168,7 +220,7 @@ test('a valid custom value is accepted, and the custom field disappears', () => 
 test('the placeholder option emits nothing', () => {
   render(<Harness start={[STANDARD_PRESET]} />)
 
-  fireEvent.change(select(), { target: { value: '' } })
+  fireEvent.change(select(), { target: { value: PLACEHOLDER_OPTION_VALUE } })
 
   expect(sent()).toEqual([STANDARD_PRESET])
 })

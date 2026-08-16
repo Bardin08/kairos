@@ -92,9 +92,14 @@ export default function DurationEditor({
 
   return (
     <div className="field">
-      <label htmlFor="durations">Durations</label>
+      <label id="durations-label">Durations</label>
 
-      <div className="row gap-2 wrap" id="durations">
+      <div
+        className="row gap-2 wrap"
+        id="durations"
+        role="group"
+        aria-labelledby="durations-label"
+      >
         {durations.map((minutes) => (
           <span className="chip numeric" key={minutes}>
             {minutes} min
@@ -113,7 +118,11 @@ export default function DurationEditor({
             is an action, not a selection, and a select that stayed on "30 min"
             would read as the link's state rather than as the last thing added.
             Dressed as a chip, at chip height: the old .select-inline was 36px
-            beside 44px chips and the row never lined up. */}
+            beside 44px chips and the row never lined up. The placeholder now
+            reads "+ Add" rather than a prompt, which looks like a button — but
+            it is still option value="", so picking it is still the no-op
+            `pick` guards on with its first line; do not "fix" that guard into
+            a real option. */}
         <select
           className="chip-add"
           value=""
