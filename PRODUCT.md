@@ -20,11 +20,11 @@ The consequence, accepted deliberately: **the booking flow now requires JavaScri
 
 Two audiences with opposite situations, and the design serves the first one first.
 
-**The invitee.** Someone Vlad sent a link to — a mentee, a client, a collaborator. Anonymous, unauthenticated, arriving from a shortened URL pasted into an email or a chat. Very likely on a phone, on mobile data, in a timezone that is not the organizer's. They visit once, for ninety seconds, to answer one question: *when can I talk to this person?* They will never learn the interface. Nothing may require a second visit to understand.
+**The invitee.** Someone the operator sent a link to — a mentee, a client, a collaborator. Anonymous, unauthenticated, arriving from a URL pasted into an email or a chat, shortened or not. Very likely on a phone, on mobile data, in a timezone that is not the organizer's. They visit once, for ninety seconds, to answer one question: *when can I talk to this person?* They will never learn the interface. Nothing may require a second visit to understand.
 
-**The operator.** Vlad, the single administrator. Logs in through Pocket ID (OIDC), on a desktop most of the time and on a phone when something needs checking away from the desk. Uses three surfaces: Links (the bookable event types), Availability (named reusable patterns plus the global margin/notice/cap/increment defaults), Meetings (every booking, past and upcoming, each row carrying the link it came through). Repeat user, high frequency, tolerant of density, intolerant of ceremony.
+**The operator.** The person the calendar belongs to, and the instance's only administrator. Signs in through whichever identity provider the deployment is wired to, on a desktop most of the time and on a phone when something needs checking away from the desk. Uses three surfaces: Links (the bookable event types), Availability (named reusable patterns plus the global margin/notice/cap/increment defaults), Meetings (every booking, past and upcoming, each row carrying the link it came through). Repeat user, high frequency, tolerant of density, intolerant of ceremony.
 
-There is no third role. No teams, no organizations, no admin hierarchy.
+**One operator per instance today, and that is sequencing rather than a permanent shape.** Making every resource user-owned was designed and costed on 2026-08-14 and postponed to a later phase, not rejected. Teams, organizations and an admin hierarchy remain out.
 
 ## Product Purpose
 
@@ -32,23 +32,27 @@ Booking links that show real availability, respect the gap the operator needs be
 
 ## Positioning
 
-Built because Calendly's self-hosted equivalent costs 1.2 Gi of RAM and drags PostgreSQL into a deliberately SQLite-only cluster. Kairos targets ~120 Mi steady, SQLite plus Litestream, one container. The mechanism a neighbouring product cannot truthfully copy: **margins are part of the slot algebra, not a setting layered on top.** A booking occupies its duration plus the larger of the two adjacent links' margins; slot generation is interval arithmetic, so notice, daily cap and start increments are parameters rather than special cases. The visible consequence is that the operator's recovery time between calls is structurally protected, on every link at once.
+Built because Calendly's self-hosted equivalent costs 1.2 Gi of RAM and drags PostgreSQL in with it. Kairos is one container over SQLite, and it should cost very little to run — a booking form, a calendar query and an email have no business costing hundreds of megabytes. *(Not Litestream: 0.5.x cannot encrypt and silently ignores an `age:` block rather than refusing the config, so backup runs through an ordinary encrypted job instead.)* The mechanism a neighbouring product cannot truthfully copy: **margins are part of the slot algebra, not a setting layered on top.** A booking occupies its duration plus the larger of the two adjacent links' margins; slot generation is interval arithmetic, so notice, daily cap and start increments are parameters rather than special cases. The visible consequence is that the operator's recovery time between calls is structurally protected, on every link at once.
 
 ## Operating Context
 
-- Links are handed out through a URL shortener, so an invitee usually arrives via a redirect and has no idea what Kairos is.
-- Booking pages are public and bypass Cloudflare Access; the admin surface sits behind it. One route-level split.
+- A link may be handed out directly or through a shortener, and both have to work. `kairos.example.com/consulting`, rewritten by an ingress to `/book/consulting`, is as ordinary an entry point as a shortened URL. Either way the invitee arrives cold and usually has no idea what Kairos is.
+- Booking pages are public and reachable with no authentication; the admin surface is not. One route-level split.
 - Timezones are load-bearing and adversarial: availability is wall-clock local plus an IANA zone, materialized per request. DST changes are a correctness event, not an edge case.
-- Every link draws from one shared conflict pool, plus external Google Calendar busy blocks. A slot taken on one link disappears from all of them.
-- The whole thing runs on a Raspberry Pi 5 in a k3s cluster. Resource limits are 192Mi/500m.
+- Every link draws from one shared conflict pool, plus external calendar busy blocks. A slot taken on one link disappears from all of them.
+- **Where it runs is the self-hoster's choice.** Kairos is open source and has no preferred host. The reference instance is a Raspberry Pi 5 in a k3s cluster at `limits 192Mi/500m` behind Cloudflare Access — one deployment, not a requirement. The requirement is the philosophy behind it: this is a simple application and it must be cheap to run wherever it runs.
 
 ## Capabilities and Constraints
 
 **Confirmed in scope (phase 1):** multiple event types each with its own link and availability window; reusable named availability patterns; correct timezone and DST handling for both sides; margins, minimum notice, daily booking cap, constrained start increments; global conflict pool plus external busy check; Google Meet link created on booking; confirmation email with a working `.ics`; self-serve cancel and reschedule via signed tokens; Meetings list with source link per row; OIDC admin login; a narrow REST surface plus booking webhooks.
 
-**Later phases:** prefilled single-use personal links, custom booking questions, email reminders, Zoom (phase 3); recurring bookings as an RFC 5545 series (phase 4); post-meeting workflows (phase 5, conditional).
+**Later phases:** prefilled single-use personal links, custom booking questions, email reminders, Zoom, a clickable Meetings detail view (phase 3); recurring bookings as an RFC 5545 series with a customizable end date (phase 4); outbound triggers on meeting events (phase 5); user-owned resources, postponed rather than rejected.
 
-**Out, permanently:** traffic analytics of any kind — the shortener owns clicks, Kairos owns outcomes, and two disagreeing counters are worse than one. Also out: teams, round-robin, group events, payments, routing forms, polls, embeds, SMS, browser extension, SAML, SCIM, and PostgreSQL.
+**Outbound triggers are thin by design.** Kairos fires an HTTP call with configured headers when a meeting event happens, and that is the whole feature. Transcribing, recording and note-taking belong to whatever receives the call; Kairos never grows the ability to do any of them, and it is not a workflow engine.
+
+**Undecided:** per-link analytics. Raised 2026-08-05 and still an idea rather than a requirement — nothing is committed either way. An earlier revision of this file called it permanently out; that overstated a decision nobody had made.
+
+**Out:** teams, round-robin, group events, payments, routing forms, polls, embeds, SMS, browser extension, SAML, SCIM, a general workflow engine, and PostgreSQL.
 
 **Duration is a free per-link value, confirmed 2026-08-14.** Any whole number of minutes, configured on the link, not chosen from a menu of 15/30/45/60. A 25-minute call and a 50-minute call are ordinary cases, not exceptions — they are how an operator keeps a real gap without spending the whole hour. Consequences the slot generator must carry: the end time is arithmetic and often lands off the half hour; the interval a booking occupies is duration plus the resolved margin; and the next legal start is the following start-increment boundary after that, not the moment the previous meeting ends. No surface may hard-code a duration or assume a round one.
 
@@ -73,7 +77,7 @@ No customers, no testimonials, no benchmarks, no pricing, no screenshots of a ru
 1. **The invitee never learns the interface.** Ninety seconds, one visit, on a phone. Anything that requires orientation has failed before it is judged on taste.
 2. **Time is data, and it must be unambiguous.** Which slot is selected, in which zone, for how long — never inferable, always stated. Tabular figures, explicit timezone, no relative-date cleverness.
 3. **The gap between meetings is a feature, not a setting.** Margins, notice and caps are the reason this exists; the operator's surfaces should make them visible rather than bury them three panels deep.
-4. **Weight is a correctness property.** 192Mi and a Pi 5 upstream; a mid-range Android on mobile data downstream. Effects that cost frames are wrong here regardless of how they look.
+4. **Weight is a correctness property.** This is a form, a calendar query and an email. It has no business being heavy, wherever somebody chooses to run it, and the invitee's phone is on mobile data. Effects that cost frames are wrong here regardless of how they look.
 5. **One operator, no ceremony.** No onboarding, no empty-state coaching, no dashboards of numbers nobody acts on. Admin is a workbench.
 
 ## Accessibility & Inclusion
