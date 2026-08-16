@@ -50,6 +50,31 @@ test('the durations count once however many of them changed', () => {
   expect(changedCount(BASE, { ...BASE, durations: replaced })).toBe(ONE_FIELD)
 })
 
+// sameDurations is a length check followed by an element check. The element
+// check alone (`baseline.every((minutes, index) => minutes === draft[index])`)
+// only visits the indices the shorter array has, so when the baseline is a
+// strict prefix of the draft, every index it looks at matches and nothing
+// notices the extra elements. The test above does not isolate this: it changes
+// both the length and the contents, so it cannot tell "the length check caught
+// it" apart from "the element check happened to fail first." This one isolates
+// the length check — delete it from the implementation and this test fails.
+test('a baseline durations array that is a strict prefix of the draft is still a change', () => {
+  const prefixBaseline = { ...BASE, durations: [SHORT_CALL] }
+  expect(changedCount(prefixBaseline, BASE)).toBe(ONE_FIELD)
+})
+
+// The reverse prefix direction, pinned for symmetry with the case above. Unlike
+// that one, this direction does not actually exercise the length check: with the
+// baseline as the longer array, `every` walks past the end of the draft and
+// compares a real number against `undefined`, which already fails the element
+// check on its own. Verified by deleting the length check from a scratch copy —
+// this case still returns the right answer without it. Kept anyway because the
+// behaviour — a truncated draft is a change — is real and worth pinning.
+test('a draft durations array that is a strict prefix of the baseline is also a change', () => {
+  const shortDraft = { ...BASE, durations: [SHORT_CALL] }
+  expect(changedCount(BASE, shortDraft)).toBe(ONE_FIELD)
+})
+
 test('inheriting a limit that was overridden is a change', () => {
   const draft = { ...BASE, limits: { ...BASE.limits, marginMinutes: null } }
   expect(changedCount(BASE, draft)).toBe(ONE_FIELD)
@@ -63,6 +88,37 @@ test('an explicit zero is not the same as inheriting', () => {
   // `||` or `??` anywhere in it would call these equal and leave the save
   // button dead on a change the operator can see on screen.
   expect(changedCount(inherited, zero)).toBe(ONE_FIELD)
+})
+
+const NINE_FIELDS = 9
+const ALL_NINE_NAME = 'A completely different name'
+const ALL_NINE_SLUG = 'a-completely-different-slug'
+const ALL_NINE_DESCRIPTION = 'A completely different description.'
+const ALL_NINE_PATTERN_ID = 'pattern-2'
+const ALL_NINE_DURATIONS = [QUARTER_HOUR]
+const ALL_NINE_MARGIN = 45
+const ALL_NINE_NOTICE = 20
+const ALL_NINE_DAILY_CAP = 3
+const ALL_NINE_INCREMENT = 10
+
+// One test moving every one of the nine at once: the only way to catch a field
+// counted twice, or a tenth field added to EditorDraft and forgotten here.
+test('every one of the nine editable values changing counts as nine', () => {
+  const draft: EditorDraft = {
+    name: ALL_NINE_NAME,
+    slug: ALL_NINE_SLUG,
+    description: ALL_NINE_DESCRIPTION,
+    patternId: ALL_NINE_PATTERN_ID,
+    durations: ALL_NINE_DURATIONS,
+    limits: {
+      marginMinutes: ALL_NINE_MARGIN,
+      minNoticeMinutes: ALL_NINE_NOTICE,
+      dailyCap: ALL_NINE_DAILY_CAP,
+      startIncrementMinutes: ALL_NINE_INCREMENT,
+    },
+  }
+
+  expect(changedCount(BASE, draft)).toBe(NINE_FIELDS)
 })
 
 // --- draftOf -----------------------------------------------------------
@@ -126,6 +182,16 @@ test('draftOf null starts a new link with every limit inherited and one duration
   })
 })
 
+const NO_PATTERNS_YET_ID = ''
+
+// The state the editor is genuinely in when the operator has created no
+// patterns yet: there is no id to pass, so an empty string must pass through
+// unchanged rather than being substituted or rejected.
+test('draftOf null with no pattern id yet passes the empty string through', () => {
+  const draft = draftOf(null, NO_PATTERNS_YET_ID)
+  expect(draft.patternId).toBe(NO_PATTERNS_YET_ID)
+})
+
 test('draftOf compared against itself is clean', () => {
   const draft = draftOf(EXISTING_LINK, NEW_LINK_FIRST_PATTERN_ID)
   expect(changedCount(draft, draftOf(EXISTING_LINK, NEW_LINK_FIRST_PATTERN_ID))).toBe(CLEAN)
@@ -155,4 +221,8 @@ test('unsavedLabel with exactly one change is singular', () => {
 
 test('unsavedLabel with more than one change is plural', () => {
   expect(unsavedLabel(TWO_FIELDS)).toBe('2 unsaved changes')
+})
+
+test('unsavedLabel stays plural well past the singular boundary', () => {
+  expect(unsavedLabel(NINE_FIELDS)).toBe('9 unsaved changes')
 })
