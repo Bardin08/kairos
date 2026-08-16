@@ -50,29 +50,45 @@ public sealed record ReplaceRulesRequest
 }
 
 /// <summary>
-/// What one date does instead of the weekly rules: different times, or — with both fields absent
-/// — nothing at all, which is how a holiday is expressed. The two nulls are the whole reason this
-/// is not a copy of <see cref="SaveRuleRequest"/> with an extra date on it.
+/// One window a date offers. No day of the week and no date: the date is the route, so a window
+/// here is only its hours.
 /// </summary>
-public sealed record SaveOverrideRequest
+public sealed record OverrideWindowRequest
 {
+    /// <summary>Minutes from local midnight.</summary>
     [Range(FirstMinuteOfDay, AvailabilityQuery.LastMinuteOfDay)]
-    public int? StartMinute { get; init; }
+    public required int StartMinute { get; init; }
 
     [Range(FirstMinuteOfDay, AvailabilityQuery.LastMinuteOfDay)]
-    public int? EndMinute { get; init; }
+    public required int EndMinute { get; init; }
 
     private const int FirstMinuteOfDay = 0;
 }
 
+/// <summary>
+/// What a date offers instead of its weekly rules. An empty list blocks it; DELETE on the same
+/// route puts the date back on the weekly rules, which is a different thing.
+/// </summary>
+public sealed record SaveOverrideRequest
+{
+    [Required]
+    public required IReadOnlyList<OverrideWindowRequest> Windows { get; init; }
+}
+
 public sealed record PatternRuleResponse(Guid Id, int IsoDayOfWeek, int StartMinute, int EndMinute);
 
+public sealed record OverrideWindowResponse(int StartMinute, int EndMinute);
+
 /// <summary>
-/// Keyed by date rather than by id, because the date is what identifies it: the unique index on
-/// (PatternId, Date) means one date has at most one of these, so the operator's route to it is
-/// the day they are thinking about and never an identifier they would have to look up first.
+/// Keyed by date rather than by id, because the date is what identifies it: the operator's route
+/// to it is the day they are thinking about and never an identifier they would have to look up
+/// first. A date with an empty <see cref="Windows"/> is blocked and offers nothing; a date absent
+/// from the list is still on the weekly rules, and telling those two apart is the point of
+/// keeping a row for a date that offers nothing.
 /// </summary>
-public sealed record PatternOverrideResponse(DateOnly Date, int? StartMinute, int? EndMinute);
+public sealed record PatternOverrideResponse(
+    DateOnly Date,
+    IReadOnlyList<OverrideWindowResponse> Windows);
 
 /// <summary>
 /// A pattern whole: its weekly shape, its exceptions, and the links standing on it.
@@ -121,28 +137,16 @@ public static class PatternsAdminEndpoints
     public const string PatternNameRequiredCode = "pattern_name_required";
 
     /// <summary>
-    /// Two windows on one day that overlap. Overlapping windows generate the same candidate start
-    /// twice, which surfaces on the booking page as a duplicated time — a data bug wearing a
-    /// rendering bug's clothes. Windows that merely touch are not an overlap: 09:00-12:00 beside
-    /// 12:00-17:00 is a contiguous day and generates each start once.
+    /// Two windows on one day that overlap — a weekday's or one date's, since both go through the
+    /// same check. Overlapping windows generate the same candidate start twice, which surfaces on
+    /// the booking page as a duplicated time — a data bug wearing a rendering bug's clothes.
+    /// Windows that merely touch are not an overlap: 09:00-12:00 beside 12:00-17:00 is a
+    /// contiguous day and generates each start once.
     /// </summary>
     public const string RuleOverlapsCode = "rule_overlaps";
 
     /// <summary>End is not after start. Shared by rules and overrides — one meaning, one code.</summary>
     public const string WindowInvertedCode = "window_inverted";
-
-    /// <summary>
-    /// An override with a start and no end, or an end and no start. Both absent is the blocked
-    /// day and is the point of the endpoint; one absent is a half-filled form.
-    /// </summary>
-    public const string OverrideIncompleteCode = "override_incomplete";
-
-    /// <summary>
-    /// Two writes set the same date at once. Only reachable from two tabs or two windows, which
-    /// on a single-operator scheduler is rare and not impossible — and the alternative to naming
-    /// it is a 500 with a SQLite constraint in the body.
-    /// </summary>
-    public const string OverrideDateTakenCode = "override_date_taken";
 
     private const string PatternName = "Pattern";
     private const string OverrideName = "Date override";
@@ -155,9 +159,6 @@ public static class PatternsAdminEndpoints
         "Another window on that day already covers part of those hours. Overlapping windows offer "
         + "the same time twice.";
 
-    private const string DateTaken =
-        "That date was set by another change a moment ago. Reload the pattern and set it again.";
-
     public static RouteGroupBuilder MapPatternsAdmin(this RouteGroupBuilder group)
     {
         group.MapGet("/patterns", ListAsync).WithName("ListPatterns");
@@ -168,8 +169,9 @@ public static class PatternsAdminEndpoints
         group.MapPut("/patterns/{patternId:guid}/rules", ReplaceRulesAsync)
             .WithName("ReplacePatternRules");
 
-        // Keyed on the date, so it is an upsert rather than a create-or-update the caller has to
-        // choose between: setting Christmas twice is one row either way.
+        // Keyed on the date, so it is a replacement rather than a create-or-update the caller has
+        // to choose between: setting Christmas twice leaves the second request's windows and only
+        // those, whatever the date held before.
         group.MapPut("/patterns/{patternId:guid}/overrides/{date}", SaveOverrideAsync)
             .WithName("SavePatternOverride");
         group.MapDelete("/patterns/{patternId:guid}/overrides/{date}", RemoveOverrideAsync)
@@ -284,28 +286,9 @@ public static class PatternsAdminEndpoints
             .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
             ?? throw DomainException.NotFound(PatternName);
 
-        foreach (var rule in request.Rules)
-        {
-            if (rule.EndMinute <= rule.StartMinute)
-            {
-                throw DomainException.Invalid(WindowInvertedCode, WindowInverted);
-            }
-        }
-
-        // Checked before anything is written, so the set is refused entire or stored entire.
         foreach (var day in request.Rules.GroupBy(rule => rule.IsoDayOfWeek))
         {
-            // Half-open windows: sorted by start, an overlap is a window starting before the
-            // previous one ends. Written this way so two that merely touch at noon are a split
-            // day rather than a refusal.
-            var windows = day.OrderBy(rule => rule.StartMinute).ToList();
-            for (var index = 1; index < windows.Count; index++)
-            {
-                if (windows[index].StartMinute < windows[index - 1].EndMinute)
-                {
-                    throw DomainException.Conflict(RuleOverlapsCode, RuleOverlaps);
-                }
-            }
+            ValidateDay(day.Select(rule => (Start: rule.StartMinute, End: rule.EndMinute)));
         }
 
         context.PatternRules.RemoveRange(pattern.Rules);
@@ -332,54 +315,39 @@ public static class PatternsAdminEndpoints
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
-        var start = request.StartMinute;
-        var end = request.EndMinute;
+        var pattern = await context.Patterns
+            .Include(candidate => candidate.Overrides)
+            .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
+            ?? throw DomainException.NotFound(PatternName);
 
-        if ((start is null) != (end is null))
+        ValidateDay(request.Windows.Select(window => (Start: window.StartMinute, End: window.EndMinute)));
+
+        // Materialized before anything is added, so the removal is not walking the collection the
+        // additions are growing.
+        var replaced = pattern.Overrides.Where(row => row.Date == date).ToList();
+        context.PatternOverrides.RemoveRange(replaced);
+
+        if (request.Windows.Count == 0)
         {
-            throw DomainException.Invalid(
-                OverrideIncompleteCode,
-                "A date override needs both times or neither. Neither is the day being blocked "
-                + "entirely; one on its own is a form somebody stopped halfway through.");
+            // One row with no times, rather than no rows at all: no rows is the date back on the
+            // weekly rules, which is what DELETE on this route means and not what was asked for.
+            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = date });
         }
 
-        if (start is { } from && end is { } to && to <= from)
+        foreach (var window in request.Windows)
         {
-            throw DomainException.Invalid(WindowInvertedCode, WindowInverted);
-        }
-
-        if (!await ExistsAsync(context, patternId, cancellationToken))
-        {
-            throw DomainException.NotFound(PatternName);
-        }
-
-        var replaced = await context.PatternOverrides
-            .Where(row => row.PatternId == patternId && row.Date == date)
-            .ExecuteUpdateAsync(
-                row => row
-                    .SetProperty(candidate => candidate.StartMinute, start)
-                    .SetProperty(candidate => candidate.EndMinute, end),
-                cancellationToken);
-
-        if (replaced == 0)
-        {
-            context.PatternOverrides.Add(new PatternOverride
+            pattern.Overrides.Add(new PatternOverride
             {
-                PatternId = patternId,
+                PatternId = pattern.Id,
                 Date = date,
-                StartMinute = start,
-                EndMinute = end,
+                StartMinute = window.StartMinute,
+                EndMinute = window.EndMinute,
             });
-
-            // Wrapped for the same reason the name writes are, and against the same index. Two
-            // PUTs for one date both read replaced == 0 and both take this branch; the second one
-            // hits the unique index on (PatternId, Date), and unwrapped that arrives as a 500
-            // about a constraint rather than as the conflict it is.
-            await UniquelyNamedAsync(
-                () => context.SaveChangesAsync(cancellationToken), OverrideDateTakenCode, DateTaken);
         }
 
-        return await ReadAsync(context, patternId, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+
+        return await ReadAsync(context, pattern.Id, cancellationToken);
     }
 
     private static async Task<PatternResponse> RemoveOverrideAsync(
@@ -426,16 +394,53 @@ public static class PatternsAdminEndpoints
                 .Select(rule => new PatternRuleResponse(
                     rule.Id, rule.IsoDayOfWeek, rule.StartMinute, rule.EndMinute))],
             [.. pattern.Overrides
-                .OrderBy(row => row.Date)
-                .Select(row => new PatternOverrideResponse(
-                    row.Date, row.StartMinute, row.EndMinute))],
+                .GroupBy(row => row.Date)
+                .OrderBy(date => date.Key)
+                .Select(date => new PatternOverrideResponse(date.Key, [.. WindowsOf(date)]))],
             usedBy);
 
-    private static Task<bool> ExistsAsync(
-        KairosDbContext context,
-        Guid patternId,
-        CancellationToken cancellationToken) =>
-        context.Patterns.AsNoTracking().AnyAsync(pattern => pattern.Id == patternId, cancellationToken);
+    /// <summary>
+    /// A date's windows, mornings first. The row with no times is not one of them — it is the
+    /// date being blocked, and the empty list it leaves behind is what says so.
+    /// </summary>
+    private static IEnumerable<OverrideWindowResponse> WindowsOf(IEnumerable<PatternOverride> rows)
+    {
+        foreach (var row in rows.OrderBy(candidate => candidate.StartMinute))
+        {
+            if (row.StartMinute is { } start && row.EndMinute is { } end)
+            {
+                yield return new OverrideWindowResponse(start, end);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One day's windows — a weekday's or one date's — checked before anything is written, so the
+    /// set is refused entire or stored entire.
+    /// </summary>
+    private static void ValidateDay(IEnumerable<(int Start, int End)> day)
+    {
+        // Half-open windows: sorted by start, an overlap is a window starting before the previous
+        // one ends. Written this way so two that merely touch at noon are a split day rather than
+        // a refusal.
+        var windows = day.OrderBy(window => window.Start).ToList();
+
+        foreach (var (start, end) in windows)
+        {
+            if (end <= start)
+            {
+                throw DomainException.Invalid(WindowInvertedCode, WindowInverted);
+            }
+        }
+
+        for (var index = 1; index < windows.Count; index++)
+        {
+            if (windows[index].Start < windows[index - 1].End)
+            {
+                throw DomainException.Conflict(RuleOverlapsCode, RuleOverlaps);
+            }
+        }
+    }
 
     private static async Task<IReadOnlyList<string>> UsedByAsync(
         KairosDbContext context,

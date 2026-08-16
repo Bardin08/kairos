@@ -43,6 +43,7 @@ public class PatternsAdminTests
     private const int NineAm = 9 * MinutesPerHour;
     private const int TenAm = 10 * MinutesPerHour;
     private const int Noon = 12 * MinutesPerHour;
+    private const int TwoPm = 14 * MinutesPerHour;
     private const int FourPm = 16 * MinutesPerHour;
     private const int FivePm = 17 * MinutesPerHour;
 
@@ -190,55 +191,89 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The blocked day, proved where it matters rather than in the row that stores it. An
-    /// override with both times absent is the holiday case, and a form that only offered "change
-    /// the times" could not express it — so what is pinned is the public booking page: a Monday
-    /// that offered slots offers none once the date is blocked, through the same HTTP the
-    /// invitee's browser uses.
+    /// The blocked day, proved where it matters rather than in the row that stores it. A form
+    /// that only offered "change the times" could not express a holiday — so what is pinned is
+    /// the public booking page, through the same HTTP the invitee's browser uses, and then that
+    /// the date is still an override: one that deleted its rows instead would put the date back
+    /// on the weekly rules, where nothing can tell it from a date nobody ever touched.
     /// </summary>
     [Fact]
-    public async Task SaveOverride_WithNoTimesAtAll_TakesTheDateOffThePublicBookingPage()
+    public async Task SaveOverride_WithNoWindows_BlocksTheDate()
     {
         using var app = NewApp();
         using var client = app.CreateOperatorClient();
-        var day = LocalDatePattern.Iso.Format(Day());
+        var day = Day();
 
-        var before = await SlotsAsync(app, day);
+        var before = await SlotsAsync(app, Formatted(day));
 
-        var response = await client.PutAsJsonAsync(
-            $"{PatternUrl}/overrides/{day}",
-            new { startMinute = (int?)null, endMinute = (int?)null },
-            TestContext.Current.CancellationToken);
+        var response = await SaveOverrideAsync(client, day, []);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         before.ShouldNotBeEmpty();
-        (await SlotsAsync(app, day)).ShouldBeEmpty();
+        (await SlotsAsync(app, Formatted(day))).ShouldBeEmpty();
+        (await PatternOfAsync(response)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows.ShouldBeEmpty();
     }
 
     /// <summary>
-    /// A date splits the way a weekday already can. Written against the context rather than the
-    /// endpoint because the unique index on (pattern, date) is the only thing that ever refused
-    /// the second row — put it back and this is the one test in the suite that goes red.
+    /// A date splits the way a weekday already can, pinned where it is visible: not two rows, but
+    /// a booking page with a morning, an afternoon and nothing offered in between.
     /// </summary>
     [Fact]
-    public void SaveOverrides_WithTwoWindowsOnOneDate_StoresBoth()
+    public async Task SaveOverride_WithTwoWindows_StoresBoth()
     {
         using var app = NewApp();
-        var date = Day().ToDateOnly();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
 
-        app.Seed(context => context.PatternOverrides.AddRange(
-            Override(date, NineAm, Noon),
-            Override(date, Noon, FivePm)));
+        var response = await SaveOverrideAsync(
+            client,
+            day,
+            [
+                new { startMinute = NineAm, endMinute = Noon },
+                new { startMinute = TwoPm, endMinute = FivePm },
+            ]);
 
-        var stored = app.Read(context => context.PatternOverrides
-            .AsNoTracking()
-            .Where(replacement => replacement.PatternId == PatternId && replacement.Date == date)
-            .OrderBy(replacement => replacement.StartMinute)
-            .ToArray());
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await PatternOfAsync(response)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows.ShouldBe(
+                [new OverrideWindowResponse(NineAm, Noon), new OverrideWindowResponse(TwoPm, FivePm)]);
 
-        stored.Length.ShouldBe(2);
-        stored[0].EndMinute.ShouldBe(Noon);
-        stored[1].StartMinute.ShouldBe(Noon);
+        var offered = (await SlotsAsync(app, Formatted(day))).Select(MinuteOfDayOf).ToArray();
+        offered.ShouldContain(NineAm);
+        offered.ShouldContain(TwoPm);
+        offered.ShouldAllBe(minute => minute < Noon || minute >= TwoPm);
+    }
+
+    /// <summary>
+    /// Half a date is worse than none of it. Two windows covering 09:00-17:00 and 10:00-16:00
+    /// offer every 10:00-onwards start twice, and a save that cleared the date before finding out
+    /// would leave the operator with a date they never asked for — so the date that was there is
+    /// what is still there afterwards.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithTwoWindowsOverlappingOnTheDate_IsRefused()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+        await SaveOverrideAsync(client, day, [new { startMinute = NineAm, endMinute = Noon }]);
+
+        var response = await SaveOverrideAsync(
+            client,
+            day,
+            [
+                new { startMinute = NineAm, endMinute = FivePm },
+                new { startMinute = TenAm, endMinute = FourPm },
+            ]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.RuleOverlapsCode);
+        (await SeededPatternAsync(client)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows.ShouldBe([new OverrideWindowResponse(NineAm, Noon)]);
     }
 
     /// <summary>
@@ -255,7 +290,7 @@ public class PatternsAdminTests
         // A Tuesday, so the seeded Monday-only pattern offers nothing on it and the new pattern
         // is the only thing that could put a time there.
         var day = Day().PlusDays(1);
-        var date = LocalDatePattern.Iso.Format(day);
+        var date = Formatted(day);
 
         var before = await SlotsAsync(app, date);
 
@@ -314,6 +349,25 @@ public class PatternsAdminTests
             new { rules },
             TestContext.Current.CancellationToken);
 
+    /// <summary>Everything the seeded date offers, which is the whole request body.</summary>
+    private static Task<HttpResponseMessage> SaveOverrideAsync(
+        HttpClient client,
+        LocalDate day,
+        object[] windows) =>
+        client.PutAsJsonAsync(
+            $"{PatternUrl}/overrides/{Formatted(day)}",
+            new { windows },
+            TestContext.Current.CancellationToken);
+
+    /// <summary>The seeded pattern read back through the list, for what a refused write left.</summary>
+    private static async Task<PatternResponse> SeededPatternAsync(HttpClient client)
+    {
+        var patterns = await client.GetFromJsonAsync<IReadOnlyList<PatternResponse>>(
+            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+
+        return patterns!.Single(candidate => candidate.Id == PatternId);
+    }
+
     /// <summary>The public read, unauthenticated, exactly as an invitee's browser makes it.</summary>
     private static async Task<string[]> SlotsAsync(KairosApp app, string day)
     {
@@ -324,14 +378,15 @@ public class PatternsAdminTests
         return slots ?? [];
     }
 
-    private static PatternOverride Override(DateOnly date, int startMinute, int endMinute) => new()
+    /// <summary>
+    /// A slot's wall-clock minute, which the stored windows are also in. The seeded settings put
+    /// the organizer on UTC, so the instant the endpoint answers with needs no zone of its own.
+    /// </summary>
+    private static int MinuteOfDayOf(string slot)
     {
-        Id = Guid.CreateVersion7(),
-        PatternId = PatternId,
-        Date = date,
-        StartMinute = startMinute,
-        EndMinute = endMinute,
-    };
+        var start = InstantPattern.ExtendedIso.Parse(slot).Value.InUtc().TimeOfDay;
+        return (start.Hour * MinutesPerHour) + start.Minute;
+    }
 
     private static KairosApp NewApp()
     {
@@ -377,6 +432,8 @@ public class PatternsAdminTests
     /// </summary>
     private static LocalDate Day() =>
         SystemClock.Instance.GetCurrentInstant().InUtc().Date.PlusDays(WellAhead).Next(IsoDayOfWeek.Monday);
+
+    private static string Formatted(LocalDate day) => LocalDatePattern.Iso.Format(day);
 
     private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
         (await ReadJsonAsync(response)).GetProperty("code").GetString();
