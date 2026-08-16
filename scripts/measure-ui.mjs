@@ -762,11 +762,6 @@ const main = async () => {
   // desktop-only contract — see readFieldRowBreakpoint below — and are the
   // wrong check on a phone, where kairos.css deliberately overrides them.
   const CTL_WIDTH = { 'ctl-num': 88, 'ctl-sm': 176, 'ctl-md': 288, 'ctl-lg': 448 }
-  // A help line wrapping past this many lines in a two-column .field-row is
-  // the failure this check exists to catch. Not derivable from the
-  // stylesheet — there is no CSS rule that names "too many lines" — so it is
-  // a judgment call made a named constant rather than an inline 2.
-  const LABEL_MAX_LINES = 2
   // getBoundingClientRect widths are subpixel; on a control CSS sets to
   // width:100% of its track, a fraction-of-a-pixel gap between the two is
   // rounding, not a control that failed to go full width.
@@ -780,6 +775,12 @@ const main = async () => {
    * separate effort is editing kairos.css alongside this branch, and a
    * literal 640 would go stale the moment that number moved without this
    * check noticing.
+   *
+   * kairos.css nests every rule inside `@layer components`, so the target is
+   * three levels down — CSSLayerBlockRule > CSSMediaRule > CSSStyleRule — not
+   * one. Every grouping rule (layer, media, supports) exposes `.cssRules`, so
+   * the walk recurses on that alone rather than assuming media rules sit at
+   * the top level or checking for a specific rule type.
    */
   const readFieldRowBreakpoint = async (page) =>
     page.evaluate(() => {
@@ -787,15 +788,19 @@ const main = async () => {
       let found = null
       const walk = (rules, maxWidth) => {
         for (const rule of rules) {
+          let innerMaxWidth = maxWidth
           if (rule.media) {
             const match = rule.media.mediaText.match(/max-width:\s*([\d.]+)px/)
-            walk(rule.cssRules, match ? Number(match[1]) : maxWidth)
+            if (match) innerMaxWidth = Number(match[1])
+          }
+          if (rule.cssRules) {
+            walk(rule.cssRules, innerMaxWidth)
           } else if (
-            maxWidth !== null &&
+            innerMaxWidth !== null &&
             rule.selectorText &&
             rule.selectorText.split(',').some((selector) => selector.trim() === TARGET)
           ) {
-            found = maxWidth
+            found = innerMaxWidth
           }
         }
       }
@@ -848,9 +853,43 @@ const main = async () => {
       return out
     })
 
-  /** Every .field-row: its grid's column count, and its label track's width, overflow and line count. */
+  /**
+   * Every .field-row: its grid's column count, and its label track's width,
+   * line count, and the two signals that actually distinguish "wraps onto a
+   * sane number of lines because it is two sentences of help text" from
+   * "wraps one word per line because the track is too narrow to be prose":
+   *
+   * - `overflowing`: scrollWidth > clientWidth on the label element. In a
+   *   correct layout the label's content always fits its own track, so this
+   *   is 0/false everywhere nothing is wrong and true the moment it isn't.
+   * - `widestWordExceedsTrack`: the widest single word across every
+   *   text-bearing element inside the label (a <label> and a .fine help
+   *   paragraph can carry different fonts, so each is render-measured in its
+   *   own via a scratch canvas), compared against the label's own track
+   *   width. A track narrower than its own longest word cannot lay out as
+   *   prose at any line count — that is the one-word-per-line defect this
+   *   check exists to catch.
+   *
+   * Line count is reported as data, not as a threshold: a genuinely long
+   * help sentence wrapping to three lines in a narrow column is correct, and
+   * flagging it on line count alone was a false positive removed from here.
+   */
   const measureFieldRows = async (page) =>
     page.evaluate(() => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const longestWordWidth = (element) => {
+        const style = getComputedStyle(element)
+        ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+        const words = (element.textContent ?? '').trim().split(/\s+/).filter(Boolean)
+        let max = 0
+        for (const word of words) {
+          const w = ctx.measureText(word).width
+          if (w > max) max = w
+        }
+        return max
+      }
+
       const out = []
       for (const row of document.querySelectorAll('.field-row')) {
         if (!row.checkVisibility({ checkVisibilityCSS: true })) continue
@@ -860,14 +899,21 @@ const main = async () => {
         if (label !== null && label.checkVisibility({ checkVisibilityCSS: true })) {
           const rect = label.getBoundingClientRect()
           const lineHeight = Number.parseFloat(getComputedStyle(label).lineHeight)
+          const textLeaves = [...label.querySelectorAll('*')].filter((el) => el.children.length === 0)
+          const leaves = textLeaves.length > 0 ? textLeaves : [label]
+          const widestWord = Math.max(0, ...leaves.map(longestWordWidth))
           labelInfo = {
             text: (label.textContent ?? '').trim().slice(0, 60),
             width: rect.width,
             scrollWidth: label.scrollWidth,
+            clientWidth: label.clientWidth,
             lines:
               Number.isFinite(lineHeight) && lineHeight > 0
                 ? Math.round(label.clientHeight / lineHeight)
                 : null,
+            overflowing: label.scrollWidth > label.clientWidth,
+            widestWord: Number(widestWord.toFixed(1)),
+            widestWordExceedsTrack: widestWord > label.clientWidth,
           }
         }
         out.push({ columnCount: columns.length, gridTemplateColumns: columns.join(' '), label: labelInfo })
@@ -909,15 +955,20 @@ const main = async () => {
         }
 
         const breakpoint = await readFieldRowBreakpoint(page)
-        const tap = await readCssPixelVar(page, '--tap')
         // The desktop size-class caps and the phone full-width contract are
         // mutually exclusive: below the breakpoint the caps are not the rule
-        // kairos.css enforces, so checking them there is what produced the
-        // false positive on the pattern <select> at 440. `breakpoint === null`
-        // means the stylesheet's own rule for this could not be found — treat
-        // that as "desktop contract" rather than guessing, and say so in the
-        // record instead of silently picking a behaviour.
-        const isPhoneLayout = breakpoint !== null && viewport.width <= breakpoint
+        // kairos.css enforces, and checking them there is exactly what
+        // produced the false positive on the pattern <select> at 440. If the
+        // stylesheet's own rule can't be found, a silent fallback to the
+        // desktop contract reproduces that false positive and reads as a
+        // real finding — so this fails loudly instead of guessing.
+        if (breakpoint === null) {
+          throw new Error(
+            `readFieldRowBreakpoint found no @media (max-width) around ".field-row-control > .input" in the served stylesheet for ${name} — refusing to fall back to the desktop size-class contract`,
+          )
+        }
+        const tap = await readCssPixelVar(page, '--tap')
+        const isPhoneLayout = viewport.width <= breakpoint
 
         const controls = await measureNarrowControls(page)
         const fieldRows = await measureFieldRows(page)
@@ -957,7 +1008,7 @@ const main = async () => {
         // breakpoint is correct, not a finding.
         const rowsNotCollapsed = isPhoneLayout ? fieldRows.filter((row) => row.columnCount !== 1) : []
         const labels = fieldRows.map((row) => row.label).filter((label) => label !== null)
-        const wrappingLabels = labels.filter((label) => label.lines !== null && label.lines > LABEL_MAX_LINES)
+        const wrappingLabels = labels.filter((label) => label.overflowing || label.widestWordExceedsTrack)
 
         const fileBase = `${OUT}/${name}`
         await page.screenshot({ path: `${fileBase}.png`, fullPage: true })
@@ -979,8 +1030,7 @@ const main = async () => {
           viewportWidth: viewport.width,
           viewportHeight: viewport.height,
           fieldRowBreakpoint: breakpoint,
-          layoutContract:
-            breakpoint === null ? 'unknown — breakpoint rule not found in stylesheet' : isPhoneLayout ? 'stacked' : 'desktop',
+          layoutContract: isPhoneLayout ? 'stacked' : 'desktop',
           tapFloor: tap,
           controlCount: controls.length,
           controls,
