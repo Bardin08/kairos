@@ -78,6 +78,41 @@ public class AvailabilityQueryTests
     }
 
     [Fact]
+    public async Task GetWindowsAsync_DateHasTwoOverrides_ReturnsBothInsteadOfTheWeeklyRule()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context, Rule(WednesdayIso, NineAm, FivePm));
+        AddOverride(context, Wednesday, NineAm, Noon);
+        AddOverride(context, Wednesday, TwoPm, FivePm);
+
+        var windows = await new AvailabilityQuery(context)
+            .GetWindowsAsync(PatternId, Wednesday, Wednesday, TestContext.Current.CancellationToken);
+
+        LocalWindow[] expected =
+        [
+            new(Wednesday, new LocalTime(9, 0), new LocalTime(12, 0)),
+            new(Wednesday, new LocalTime(14, 0), new LocalTime(17, 0)),
+        ];
+        windows.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task GetWindowsAsync_OverridesStoredAfternoonFirst_ComeBackMorningFirst()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+        Seed(context, Rule(WednesdayIso, NineAm, FivePm));
+        AddOverride(context, Wednesday, TwoPm, FivePm);
+        AddOverride(context, Wednesday, NineAm, Noon);
+
+        var windows = await new AvailabilityQuery(context)
+            .GetWindowsAsync(PatternId, Wednesday, Wednesday, TestContext.Current.CancellationToken);
+
+        windows.Select(window => window.Start).ShouldBe([new LocalTime(9, 0), new LocalTime(14, 0)]);
+    }
+
+    [Fact]
     public async Task GetWindowsAsync_OverrideWithNullTimes_BlocksTheDayAndLeavesTheRestAlone()
     {
         using var database = new TestDatabase();

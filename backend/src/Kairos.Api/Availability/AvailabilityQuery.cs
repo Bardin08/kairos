@@ -62,11 +62,24 @@ public sealed class AvailabilityQuery(KairosDbContext context)
             rules.Add(rule);
         }
 
-        var replacements = new Dictionary<DateOnly, PatternOverride>();
+        var replacements = new Dictionary<DateOnly, List<PatternOverride>>();
         await foreach (var replacement in OverridesOfPattern(context, patternId, from.ToDateOnly(), to.ToDateOnly())
                            .WithCancellation(cancellationToken))
         {
-            replacements[replacement.Date] = replacement;
+            if (!replacements.TryGetValue(replacement.Date, out var forDate))
+            {
+                forDate = [];
+                replacements[replacement.Date] = forDate;
+            }
+
+            forDate.Add(replacement);
+        }
+
+        // Once per date rather than per day of the walk, and for the reason the rules below are
+        // sorted: a date split into a morning and an afternoon comes back mornings first.
+        foreach (var forDate in replacements.Values)
+        {
+            forDate.Sort((left, right) => Nullable.Compare(left.StartMinute, right.StartMinute));
         }
 
         // Sorted here rather than in SQL so the compiled query keeps returning IQueryable, and
@@ -76,13 +89,17 @@ public sealed class AvailabilityQuery(KairosDbContext context)
 
         for (var date = from; date <= to; date = date.PlusDays(1))
         {
-            if (replacements.TryGetValue(date.ToDateOnly(), out var replacement))
+            if (replacements.TryGetValue(date.ToDateOnly(), out var forDate))
             {
-                // An override IS the day. The weekly rules for it are not merged in, and one
-                // with no times leaves the day with nothing rather than falling back to them.
-                if (replacement.StartMinute is { } overrideStart && replacement.EndMinute is { } overrideEnd)
+                // An override IS the day. The weekly rules for it are not merged in, and a date
+                // whose only row has no times leaves the day with nothing rather than falling
+                // back to them.
+                foreach (var replacement in forDate)
                 {
-                    windows.Add(Window(patternId, date, overrideStart, overrideEnd));
+                    if (replacement.StartMinute is { } overrideStart && replacement.EndMinute is { } overrideEnd)
+                    {
+                        windows.Add(Window(patternId, date, overrideStart, overrideEnd));
+                    }
                 }
 
                 continue;
