@@ -368,6 +368,37 @@ test('a write in flight blocks the other picks, and the control agrees with the 
 })
 
 /**
+ * The ordinary failure this branch had no test for: the server refuses, or
+ * the network drops, and the pick that caused it never happened. `write`'s
+ * own catch is what this pins — `setFailure` for `Failure` to surface,
+ * `setSaving(false)` so the control is not left disabled over a write that
+ * is no longer in flight, and `overrides` untouched, so the control settles
+ * back on what the data actually says rather than on what was asked for.
+ */
+test('a rejected write surfaces the failure and leaves the control usable', async () => {
+  const said = 'The date could not be blocked.'
+  vi.mocked(savePatternOverride).mockRejectedValue(
+    new ApiError(UNAVAILABLE, 'pattern_invalid', said),
+  )
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain(said)
+
+  // Usable again — nothing stayed disabled over a write that already failed.
+  expect(screen.getByRole('radio', { name: 'Blocked' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('radio', { name: 'Weekly' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('radio', { name: 'Own hours' }).hasAttribute('disabled')).toBe(false)
+
+  // Still Weekly: the pick never landed, so the control reads what the data
+  // still says rather than what was asked for and refused.
+  expect(screen.getByRole('radio', { name: 'Weekly' }).getAttribute('aria-checked')).toBe('true')
+  expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('aria-checked')).toBe('false')
+})
+
+/**
  * A date with its own hours is an open day and the grid draws it as one, so
  * the list is the only place the third state is legible before it is opened.
  * Opened through the list rather than the square, which is the other door

@@ -265,6 +265,7 @@ Gently rounded, never soft: 8px (`{rounded.md}`) is the default for controls, 12
 - **Primary:** accent fill, white label in light mode and near-black indigo in dark, resting shadow. One per view.
 - **Secondary:** paper fill, hairline border, ink label.
 - **Ghost:** transparent, ink label, used for retreat actions (Back, Reschedule).
+- **Muted:** transparent, secondary-tone label — for an action that is neither a retreat, a selection, nor the primary one (Add window).
 - **Hover / active:** background shift at 90ms; a 0.985 scale on press so the control feels physical.
 - **Loading:** the label stays and the spinner overlays it, so the control does not resize and the reader does not lose it.
 - **Disabled:** inset fill, disabled ink, no shadow, `cursor: not-allowed`.

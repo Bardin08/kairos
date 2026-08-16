@@ -352,10 +352,14 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   /**
    * Reveals the rows; sends nothing. Own hours is the one state a pick alone
    * cannot write, because there is nothing to write until a window is typed.
-   * Guarded the same way `write` guards the other two picks, even though this
-   * one sends nothing itself: without it, Own hours could still be picked
-   * while a Weekly or Blocked write from a moment ago is in flight, and the
-   * control would show rows for a state the server had not agreed to yet.
+   * Guarded the same way `write` guards the other two picks, even though a
+   * genuine keystroke or click cannot reach this while `disabled` is set — a
+   * disabled button cannot hold focus, so real keyboard input never lands
+   * here, and a real click is refused the same way the other two buttons'
+   * are. The guard is what keeps that true if a later change loosens how
+   * `disabled` is wired rather than removing this; the test that exercises it
+   * can only do so because `fireEvent` dispatches straight at the element,
+   * which is not something a real keydown does without focus.
    */
   function pickOwnHours() {
     if (saving) return
