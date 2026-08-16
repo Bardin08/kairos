@@ -14,22 +14,24 @@ import {
 } from '../../lib/time'
 import { listLinks, type AdminLink } from './adminLinks'
 import { getSettings } from './adminSettings'
-import { clock, minuteOfDay, shiftDays } from './adminTime'
+import { clock, shiftDays, windowsOf, type Draft } from './adminTime'
 import Failure from './Failure'
-import { hoursOn, NO_HOURS, patternDays } from './patternDays'
+import { patternDays, windowsOn } from './patternDays'
 import {
   removePatternOverride,
   savePatternOverride,
+  type OverrideWindow,
   type Pattern,
   type PatternOverride,
 } from './patterns'
+import WindowRows from './WindowRows'
 
 const PREVIOUS_MONTH = -1
 const NEXT_MONTH = 1
 const DAY_BEFORE = -1
 
-/** Blocking a date is an override with no hours in it at all. */
-const BLOCKED = { startMinute: null, endMinute: null }
+/** Blocking a date is an override with no windows in it at all. */
+const BLOCKED: OverrideWindow[] = []
 
 /** The picker's own value. Not a slug, so no link can ever collide with it. */
 const DAYS_ONLY = ''
@@ -46,13 +48,20 @@ function countByDay(slots: readonly string[], zone: string): Map<string, number>
   return counts
 }
 
-/** What one date does instead of the week. */
+/**
+ * What one date does instead of the week.
+ *
+ * Every window it has, however many — this line is the only place a date's own
+ * hours are legible, since the grid draws a date with hours as an ordinary open
+ * day. A list cut short at two would hide an afternoon on the one screen that
+ * exists to show it, and the row it sits in wraps.
+ */
 function describe(override: PatternOverride | undefined): string {
   if (override === undefined) return 'Follows the weekly hours'
-  // Both minutes null is the date blocked entirely. A pair of them is the day
-  // replaced, which opens it however the week reads.
-  if (override.startMinute === null || override.endMinute === null) return 'Blocked'
-  return `${clock(override.startMinute)}–${clock(override.endMinute)}`
+  if (override.windows.length === 0) return 'Blocked'
+  return override.windows
+    .map((window) => `${clock(window.startMinute)}–${clock(window.endMinute)}`)
+    .join(', ')
 }
 
 /**
@@ -92,7 +101,10 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   // can do is open the neighbouring month of a grid with arrows on it.
   const [month, setMonth] = useState(() => startOfMonth(todayIn(localZone())))
   const [selected, setSelected] = useState<string | null>(null)
-  const [draft, setDraft] = useState(NO_HOURS)
+  // The selected date's windows while they are being typed. Empty until a date
+  // is selected, which is also when the panel holding them first renders.
+  const [draft, setDraft] = useState<Draft[]>([])
+  const [unsaved, setUnsaved] = useState(false)
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` reads the status
   // off it, and a string has already thrown that away.
@@ -196,6 +208,8 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
 
   const today = todayIn(zone)
   const states = patternDays({ month, rules: pattern.rules, overrides, today })
+  /** The exact set a save would send, or null while any window is unfinished. */
+  const windows = windowsOf(draft)
 
   function overrideOn(day: string): PatternOverride | undefined {
     return overrides.find((override) => override.date === day)
@@ -215,6 +229,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
       .then((updated) => {
         setOverrides(updated.overrides)
         setSaving(false)
+        setUnsaved(false)
         // That day is a different day now, so whatever times were counted for
         // it belong to a pattern that no longer exists.
         setAttempt((current) => current + 1)
@@ -236,10 +251,11 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
    */
   function toggle(day: string) {
     setSelected(day)
+    setUnsaved(false)
     // The week's, not the date's: whichever way this toggle goes it takes the
     // date's own hours away — blocked, or back on the weekly rules — so the
     // hours it will offer next are the weekday's either way.
-    setDraft(hoursOn(day, pattern.rules))
+    setDraft(windowsOn(day, pattern.rules))
     write(() =>
       overrideOn(day) === undefined
         ? savePatternOverride(pattern.id, day, BLOCKED)
@@ -252,18 +268,22 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     setMonth(startOfMonth(day))
     setSelected(day)
     setFailure(null)
-    setDraft(hoursOn(day, pattern.rules, overrideOn(day)))
+    setUnsaved(false)
+    setDraft(windowsOn(day, pattern.rules, overrideOn(day)))
+  }
+
+  function edit(next: Draft[]) {
+    setDraft(next)
+    setUnsaved(true)
+    // A refusal is about a set nobody is proposing any more.
+    setFailure(null)
   }
 
   function applyHours() {
-    const startMinute = minuteOfDay(draft.start)
-    const endMinute = minuteOfDay(draft.end)
-    if (selected === null || startMinute === null || endMinute === null) return
+    if (selected === null || windows === null || windows.length === 0) return
 
-    write(() => savePatternOverride(pattern.id, selected, { startMinute, endMinute }))
+    write(() => savePatternOverride(pattern.id, selected, windows))
   }
-
-  const hours = minuteOfDay(draft.start) !== null && minuteOfDay(draft.end) !== null
 
   return (
     <section className="card card-pad">
@@ -377,35 +397,46 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
             </span>
           </div>
 
-          {/* Different hours on one date, reached from the date itself. Each
-              field names the date it belongs to: on screen the line above says
-              which, but a reader listing this page's controls gets two fields
-              called "opens at" and no way to tell them from the week's. */}
+          {/* The week pane's own row editor, on a date instead of a weekday —
+              the same act on a different key, so the same rows. The label is
+              the date in full, because a reader listing this page's controls
+              would otherwise get two fields called "opens at" and no way to
+              tell them from the week's. */}
+          <div className="mt-3">
+            <WindowRows label={longDate(selected)} windows={draft} onChange={edit} />
+          </div>
+
+          {/* Typed against a draft and sent when the operator asks, exactly as
+              the week is. A pattern in use is live: a keystroke that widened a
+              window would be an hour on offer the moment it was typed, and a
+              half-typed one would be refused as a window ending before it
+              starts. The endpoint replaces the date's set entire, so one press
+              is one set — which is what makes a morning and an afternoon one
+              request rather than two. */}
           <div className="row gap-2 wrap mt-3">
-            <input
-              className="input numeric week-time"
-              type="time"
-              aria-label={`${longDate(selected)}, opens at`}
-              value={draft.start}
-              onChange={(event) => setDraft({ ...draft, start: event.target.value })}
-            />
-            <span aria-hidden="true">–</span>
-            <input
-              className="input numeric week-time"
-              type="time"
-              aria-label={`${longDate(selected)}, closes at`}
-              value={draft.end}
-              onChange={(event) => setDraft({ ...draft, end: event.target.value })}
-            />
             <button
               className="btn"
               type="button"
-              aria-disabled={hours ? undefined : true}
+              aria-disabled={windows !== null && windows.length > 0 ? undefined : true}
               data-loading={saving || undefined}
               onClick={applyHours}
             >
               Use these hours on this date
             </button>
+            {/* Words rather than a colour on the button, and the reason it is
+                refusing rather than only the fact of it. Removing the last
+                window is not a way to block the date: this button promises
+                hours, and blocking is the click on the square, which is one
+                gesture and undone by itself. */}
+            {windows === null ? (
+              <span className="fine">Every window needs an opening and a closing time</span>
+            ) : windows.length === 0 ? (
+              <span className="fine">
+                A date needs a window. Click the date above to block it instead.
+              </span>
+            ) : (
+              unsaved && <span className="fine">Not saved yet</span>
+            )}
           </div>
 
           {overrideOn(selected) !== undefined && (

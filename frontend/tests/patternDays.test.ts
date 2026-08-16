@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import { hoursOn, patternDays } from '../src/routes/admin/patternDays'
+import { patternDays, windowsOn } from '../src/routes/admin/patternDays'
 import type { PatternRule } from '../src/routes/admin/patterns'
 
 // Minutes from local midnight.
@@ -35,7 +35,7 @@ test('reads a blocked date as blocked, not as a day with no hours', () => {
   const states = patternDays({
     month: MONTH,
     rules: onTuesdays,
-    overrides: [{ date: '2026-08-18', startMinute: null, endMinute: null }],
+    overrides: [{ date: '2026-08-18', windows: [] }],
     today: TODAY,
   })
 
@@ -75,7 +75,7 @@ test('a date before today is past, and today itself is not', () => {
     rules: onTuesdays,
     // 11 August is a Tuesday the week opens and 6 August a blocked Thursday:
     // the two readings that must both give way to the date being gone.
-    overrides: [{ date: '2026-08-06', startMinute: null, endMinute: null }],
+    overrides: [{ date: '2026-08-06', windows: [] }],
     today: TODAY,
   })
 
@@ -107,15 +107,17 @@ test('every day of a month before this one is past', () => {
  * open on what the date would otherwise offer instead.
  */
 test('a date borrows the hours its weekday already opens on', () => {
-  expect(hoursOn('2026-08-18', onTuesdays)).toEqual({ start: '09:00', end: '17:00' })
+  expect(windowsOn('2026-08-18', onTuesdays)).toEqual([{ start: '09:00', end: '17:00' }])
 })
 
 /**
  * A weekday the pattern never opens has nothing to borrow, and hours invented
- * here would be hours nobody chose to offer on a day nobody chose to work.
+ * here would be hours nobody chose to offer on a day nobody chose to work. One
+ * blank window rather than none: a panel that opened with no windows in it
+ * would be proposing to block the date, which is a stronger thing than empty.
  */
-test('a date on a closed weekday borrows nothing', () => {
-  expect(hoursOn('2026-08-23', onTuesdays)).toEqual({ start: '', end: '' })
+test('a date on a closed weekday borrows nothing, and still has a window to type in', () => {
+  expect(windowsOn('2026-08-23', onTuesdays)).toEqual([{ start: '', end: '' }])
 })
 
 /**
@@ -128,27 +130,32 @@ test('a date with its own hours opens on them, and a blocked one on the week', (
   const day = '2026-08-18'
 
   expect(
-    hoursOn(day, onTuesdays, { date: day, startMinute: NINE_AM, endMinute: ONE_PM }),
-  ).toEqual({ start: '09:00', end: '13:00' })
-  expect(hoursOn(day, onTuesdays, { date: day, startMinute: null, endMinute: null })).toEqual({
-    start: '09:00',
-    end: '17:00',
-  })
+    windowsOn(day, onTuesdays, {
+      date: day,
+      windows: [{ startMinute: NINE_AM, endMinute: ONE_PM }],
+    }),
+  ).toEqual([{ start: '09:00', end: '13:00' }])
+  expect(windowsOn(day, onTuesdays, { date: day, windows: [] })).toEqual([
+    { start: '09:00', end: '17:00' },
+  ])
 })
 
 /**
- * A split day has two windows and a date can hold one, so the earliest is what
- * seeds the fields — the window the day opens on, and the first one WeekEditor
- * lists. Breaks if the rules' own order is trusted, which is the server's and
- * not the clock's.
+ * A date holds as many windows as a weekday does, so a split weekday seeds both
+ * of them and not only the one the day opens on — seeding the morning alone
+ * would propose closing an afternoon nobody asked to change. Sorted here,
+ * because the order the rules arrive in is the server's and not the clock's.
  */
-test('a split weekday seeds the fields from its earliest window', () => {
+test('a split weekday seeds every one of its windows, earliest first', () => {
   const split: PatternRule[] = [
     { id: 'r2', isoDayOfWeek: TUESDAY, startMinute: ONE_PM, endMinute: FIVE_PM },
     { id: 'r1', isoDayOfWeek: TUESDAY, startMinute: NINE_AM, endMinute: NOON },
   ]
 
-  expect(hoursOn('2026-08-18', split)).toEqual({ start: '09:00', end: '12:00' })
+  expect(windowsOn('2026-08-18', split)).toEqual([
+    { start: '09:00', end: '12:00' },
+    { start: '13:00', end: '17:00' },
+  ])
 })
 
 /**
@@ -161,7 +168,7 @@ test('a date given its own hours is open even where the week is closed', () => {
   const states = patternDays({
     month: MONTH,
     rules: onTuesdays,
-    overrides: [{ date: '2026-08-23', startMinute: NINE_AM, endMinute: ONE_PM }],
+    overrides: [{ date: '2026-08-23', windows: [{ startMinute: NINE_AM, endMinute: ONE_PM }] }],
     today: TODAY,
   })
 

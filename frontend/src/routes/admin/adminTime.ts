@@ -13,6 +13,8 @@
 // A third vocabulary starts here and nowhere else: a MINUTE OF DAY, which is
 // what an availability rule holds — minutes from local midnight in the
 // organizer's zone, with no date attached and therefore no instant to derive.
+// A DRAFT is the same window while it is still in a form, and the two travel
+// together: everything that turns one into the other is below.
 
 const LOCALE = 'en-GB'
 const START_OF_DAY = 'T00:00:00Z'
@@ -68,4 +70,46 @@ export function minuteOfDay(value: string): number | null {
   if (hour > LAST_HOUR || minute >= MINUTES_PER_HOUR) return null
 
   return hour * MINUTES_PER_HOUR + minute
+}
+
+/**
+ * One window while it is being edited, in the `HH:MM` an `<input type="time">`
+ * speaks. Minutes are the tidier shape and cannot hold the state that matters
+ * most in a form: a field opened and not yet filled in.
+ */
+export type Draft = { start: string; end: string }
+
+/**
+ * What Add window adds, and what a day with nothing to borrow opens on.
+ *
+ * Empty rather than a working nine-to-five, and that is a safety property
+ * rather than an omission: hours nobody typed are hours nobody chose to offer,
+ * and a default window on a day that already has one would also be an overlap
+ * the server exists to refuse.
+ */
+export const BLANK: Draft = { start: '', end: '' }
+
+/**
+ * The minutes a set of drafts would send, or null while any window in it is
+ * unfinished.
+ *
+ * Order is kept, so the request reads the way the screen does and a refusal
+ * naming a window can be found on it. A set with nothing in it is a set, not a
+ * failure — what an empty one means is the caller's question, and the week pane
+ * and the date panel answer it differently.
+ */
+export function windowsOf(
+  drafts: readonly Draft[],
+): { startMinute: number; endMinute: number }[] | null {
+  const windows: { startMinute: number; endMinute: number }[] = []
+
+  for (const draft of drafts) {
+    const startMinute = minuteOfDay(draft.start)
+    const endMinute = minuteOfDay(draft.end)
+    if (startMinute === null || endMinute === null) return null
+
+    windows.push({ startMinute, endMinute })
+  }
+
+  return windows
 }
