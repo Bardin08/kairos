@@ -159,6 +159,30 @@ test('the Copy button flips to Copied, and reverts once the address is edited ag
   expect(screen.getByRole('button', { name: 'Copy link address' }).textContent).toBe('Copy')
 })
 
+test('the address input carries no fixed size class, so it can grow to fill the column', () => {
+  show()
+
+  // ctl-md fixed it at 288px, well short of the column — the bug this test
+  // guards against. Removing the class is what lets .prefix's own flex and
+  // min-width: 0 (kairos.css) take over sizing it instead.
+  expect(screen.getByLabelText('Address').classList.contains('ctl-md')).toBe(false)
+})
+
+test('Copy sits on the label line, and the help text and control stay below it, in order', () => {
+  show()
+
+  const label = screen.getByText('Address')
+  const row = label.parentElement
+  const button = screen.getByRole('button', { name: 'Copy link address' })
+  const help = screen.getByText('Lowercase words joined by hyphens.')
+
+  // Same row as the label — not the control row below, which is exactly the
+  // prefix and the input with nothing else to make it wrap.
+  expect(button.parentElement).toBe(row)
+  expect(row?.nextElementSibling).toBe(help)
+  expect(help.nextElementSibling?.classList.contains('prefix')).toBe(true)
+})
+
 test('the copied address keeps its scheme even though the display drops it', () => {
   show()
 

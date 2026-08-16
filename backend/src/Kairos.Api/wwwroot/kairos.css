@@ -1261,9 +1261,22 @@
 
   /* ---- control sizes ----------------------------------------------------------
      A control is as wide as its longest plausible value and no wider. The
-     100% default on .input stays, so nothing outside these screens moves. */
+     100% default on .input stays, so nothing outside these screens moves.
 
-  .ctl-num { width: 5.5rem; }
+     .ctl-num sizes for the worst real case: four digits (a margin or notice
+     in minutes can legitimately run past 999) plus the affix reservation
+     below. Digit width comes from Helvetica's AFM table — the one font in
+     --font-sans with published metrics, and a fair stand-in for the whole
+     stack since .numeric turns on tabular-nums, and Helvetica's digits are
+     already tabular (0–9 all 556/1000 em):
+       4 × 0.556em × --text-base(16px) ≈ 35.6px of digit content
+     Add the leading padding (--space-3, 12px), the border-box border
+     (2 × --border-width), and the trailing reservation this now shares with
+     the affix (--space-8, 48px — see below):
+       2 + 12 + 35.6 + 48 ≈ 97.6px
+     6rem (96px) falls 1.6px short; 6.5rem (104px) is the next half-rem step
+     in this file's own vocabulary and the first one that clears it. */
+  .ctl-num { width: 6.5rem; }
   .ctl-sm  { width: 11rem; }
   .ctl-md  { width: 18rem; }
   .ctl-lg  { width: 28rem; }
@@ -1275,7 +1288,36 @@
      worse than not seeing it once. */
 
   .affix { position: relative; display: inline-flex; }
-  .affix > .input { padding-inline-end: var(--space-7); }
+  /* Sized for `a day` (dailyCap's affix in limitCopy.ts) rather than `min`
+     (the other three limits' affix) — it is the wider of the two strings
+     this reserves room for. Same Helvetica AFM table, at --text-xs (13px):
+     a 556, space 278, d 556, a 556, y 500, all /1000 em, sums to 2.446em ≈
+     31.8px. .affix-unit sits --space-3 (12px) off the control's trailing
+     edge, so the reservation needs at least 31.8 + 12 ≈ 43.8px before the
+     affix's own left edge would reach the digits. --space-7 (40px) falls
+     short by 3.8px — the gap `4` and `a day` were colliding into before the
+     spinner suppression below stopped the browser's own stepper from
+     painting over that same gap and hiding the shortfall entirely. --space-8
+     (48px) is the next token up and the first that clears it; `min` was
+     never the tight case (1.611em ≈ 20.9px, room to spare either way). */
+  .affix > .input { padding-inline-end: var(--space-8); }
+  /* Suppresses the native stepper wherever the unit text lives in that same
+     trailing zone — every type="number" input in the app sits inside an
+     .affix (Settings' four globals, InheritableNumber's override field,
+     DurationEditor's custom duration), so scoping here reaches all of them
+     without a blanket input[type=number] rule that would also catch a plain
+     number field this app does not have. Keyboard stepping is untouched:
+     arrow keys still call the input's own stepUp/stepDown, only the drawn
+     spinner is gone. */
+  .affix > input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  .affix > input[type="number"]::-webkit-outer-spin-button,
+  .affix > input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
   /* .affix-unit overlays the trailing edge of a control; .unit-inline sits
      beside a value rendered as plain text. Same quiet label treatment,
      different placement, so the shared pair is declared once. */

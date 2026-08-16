@@ -39,3 +39,46 @@ test('the invalid-state border and focus ring cover the row shape, not only the 
     `.field[data-invalid="true"] .input:focus,\n  .field[data-invalid="true"] .textarea:focus,\n  ${ROW_INVALID_INPUT}:focus {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
   )
 })
+
+// A margin or notice in minutes can legitimately run past 999. .ctl-num's
+// width and .affix's trailing reservation are derived together (see the
+// comments beside each in kairos.css) — this pins the two numbers the
+// arithmetic landed on, not the reasoning itself, so a future width change
+// still has to walk through that math rather than editing the number in place.
+test('the numeric control is wide enough for four digits plus the affix reservation', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.ctl-num { width: 6.5rem; }')
+})
+
+// `a day` (dailyCap's affix in limitCopy.ts) is wider than `min`, the other
+// three limits' affix — a single reservation sized for the shorter one is
+// exactly what let the spinner-and-affix collision in the bug report happen
+// in the first place. Sizing for the wider string serves both.
+test('the affix reservation is sized for `a day`, not just `min`', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.affix > .input { padding-inline-end: var(--space-8); }')
+})
+
+// A design system that puts its own unit text in an input's trailing zone
+// cannot also let the browser paint a stepper into that same zone. Scoped to
+// .affix rather than a blanket input[type=number] rule, so a plain number
+// field elsewhere in the app — should one ever exist — keeps its native
+// spinner rather than losing it silently to a rule that reaches further than
+// this bug needed it to.
+test('the native number spinner is suppressed only inside .affix, not for every number input', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    '.affix > input[type="number"] {\n    appearance: textfield;\n    -moz-appearance: textfield;\n  }',
+  )
+  expect(css).toContain(
+    '.affix > input[type="number"]::-webkit-outer-spin-button,\n  .affix > input[type="number"]::-webkit-inner-spin-button {\n    -webkit-appearance: none;\n    margin: 0;\n  }',
+  )
+  // Every occurrence of the selector in the sheet is scoped to .affix — there
+  // is no second, unscoped input[type="number"] rule reaching further.
+  const occurrences = css.split('input[type="number"]').length - 1
+  const scopedOccurrences = css.split('.affix > input[type="number"]').length - 1
+  expect(occurrences).toBe(scopedOccurrences)
+})
