@@ -3,6 +3,7 @@ import { Link } from 'wouter'
 
 import Failure from './Failure'
 import { listPatterns, type Pattern } from './patterns'
+import WeekEditor from './WeekEditor'
 
 /**
  * Relative, because the shell is mounted with `nest` and wouter's base is
@@ -80,9 +81,9 @@ export default function PatternEditor({ params }: { params: { patternId: string 
 
       {pattern !== null && (
         <div className="editor-cols">
-          <section className="card card-pad">
-            <h2 className="title-section">Weekly hours</h2>
-          </section>
+          {/* The write answers with the whole pattern, so what comes back
+              replaces this page's copy rather than being merged into it. */}
+          <WeekEditor pattern={pattern} onChange={setPattern} />
           <section className="card card-pad">
             <h2 className="title-section">Preview</h2>
           </section>
