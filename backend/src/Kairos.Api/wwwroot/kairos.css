@@ -805,10 +805,15 @@
   .day[data-state="available"] {
     color: var(--text-primary);
     font-weight: var(--weight-medium);
-    cursor: pointer;
   }
+  /* Keyed on the button being enabled rather than on the day having times in
+     it, because in the pattern editor those are different questions: every
+     square there is live — blocking a Sunday the pattern never opens is a
+     legitimate thing to do — while only the days with times are available. On
+     the booking page the two coincide, so nothing there moves. */
+  .day:enabled { cursor: pointer; }
   @media (hover: hover) {
-    .day[data-state="available"]:hover:not([aria-pressed="true"]) {
+    .day:enabled:hover:not([aria-pressed="true"]) {
       background: var(--surface-active);
       color: var(--text-primary);
     }
