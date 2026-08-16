@@ -21,9 +21,6 @@ public sealed class PatternOverrideConfiguration : IEntityTypeConfiguration<Patt
             .HasForeignKey(patternOverride => patternOverride.PatternId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // An override replaces the day, so two of them for one date is a contradiction the
-        // database should refuse rather than a precedence rule the code has to invent.
-        builder.HasIndex(patternOverride => new { patternOverride.PatternId, patternOverride.Date })
-            .IsUnique();
+        builder.HasIndex(patternOverride => new { patternOverride.PatternId, patternOverride.Date });
     }
 }
