@@ -749,18 +749,78 @@ const main = async () => {
   }))
   record('inversion', inversion)
 
-  // ---- 12. Narrow column: control widths, the tap floor, and page overflow,
-  // on the two screens this branch moved to a 620px column, at the widths a
-  // real screenshot and a real operator actually see.
+  // ---- 12. Narrow column: control widths, the label track beside them, the
+  // tap floor, and page overflow, on the two screens this branch moved to a
+  // 620px column, at the widths a real screenshot and a real operator
+  // actually see.
   //
   // The four size classes' intended pixel widths, read out of kairos.css
   // (.ctl-num/.ctl-sm/.ctl-md/.ctl-lg: 5.5rem/11rem/18rem/28rem, and no `html`
   // font-size rule anywhere in the sheet, so 1rem is the browser default of
-  // 16px) — and --tap, the design system's floor on every control on every
-  // viewport, not only touch ones. A .textarea carries none of the four
-  // classes and is exempt by construction: it never matches `sizeClass` below.
+  // 16px). A .textarea carries none of the four classes and is exempt by
+  // construction: it never matches `sizeClass` below. These caps are a
+  // desktop-only contract — see readFieldRowBreakpoint below — and are the
+  // wrong check on a phone, where kairos.css deliberately overrides them.
   const CTL_WIDTH = { 'ctl-num': 88, 'ctl-sm': 176, 'ctl-md': 288, 'ctl-lg': 448 }
-  const TAP = 44
+  // A help line wrapping past this many lines in a two-column .field-row is
+  // the failure this check exists to catch. Not derivable from the
+  // stylesheet — there is no CSS rule that names "too many lines" — so it is
+  // a judgment call made a named constant rather than an inline 2.
+  const LABEL_MAX_LINES = 2
+  // getBoundingClientRect widths are subpixel; on a control CSS sets to
+  // width:100% of its track, a fraction-of-a-pixel gap between the two is
+  // rounding, not a control that failed to go full width.
+  const FULL_WIDTH_SLACK = 1
+
+  /**
+   * The px value of the max-width query that collapses .field-row to one
+   * column and sends its own .input/.select/.prefix children to width:100%
+   * (kairos.css, `.field-row-control > .input, > .select, > .prefix`).
+   * Read out of the page's own served stylesheet rather than hardcoded: a
+   * separate effort is editing kairos.css alongside this branch, and a
+   * literal 640 would go stale the moment that number moved without this
+   * check noticing.
+   */
+  const readFieldRowBreakpoint = async (page) =>
+    page.evaluate(() => {
+      const TARGET = '.field-row-control > .input'
+      let found = null
+      const walk = (rules, maxWidth) => {
+        for (const rule of rules) {
+          if (rule.media) {
+            const match = rule.media.mediaText.match(/max-width:\s*([\d.]+)px/)
+            walk(rule.cssRules, match ? Number(match[1]) : maxWidth)
+          } else if (
+            maxWidth !== null &&
+            rule.selectorText &&
+            rule.selectorText.split(',').some((selector) => selector.trim() === TARGET)
+          ) {
+            found = maxWidth
+          }
+        }
+      }
+      for (const sheet of document.styleSheets) {
+        let rules
+        try {
+          rules = sheet.cssRules
+        } catch {
+          continue
+        }
+        walk(rules, null)
+        if (found !== null) break
+      }
+      return found
+    })
+
+  /** A CSS custom property on :root, resolved to a number of px, or null. */
+  const readCssPixelVar = async (page, name) => {
+    const raw = await page.evaluate(
+      (propName) => getComputedStyle(document.documentElement).getPropertyValue(propName).trim(),
+      name,
+    )
+    const value = Number.parseFloat(raw)
+    return Number.isNaN(value) ? null : value
+  }
 
   const measureNarrowControls = async (page) =>
     page.evaluate(() => {
@@ -768,13 +828,49 @@ const main = async () => {
       for (const element of document.querySelectorAll('.input, .select, .textarea')) {
         if (!element.checkVisibility({ checkVisibilityCSS: true })) continue
         const rect = element.getBoundingClientRect()
+        const track = element.closest('.field-row-control')
         out.push({
           tag: element.tagName.toLowerCase(),
           id: element.id || null,
           classes: (element.getAttribute('class') ?? '').split(/\s+/).filter(Boolean),
           width: rect.width,
           height: rect.height,
+          // .affix wraps a unit-affixed number one level inside
+          // .field-row-control (InheritableNumber.tsx, DurationEditor.tsx,
+          // Settings.tsx). kairos.css's phone full-width rule targets only
+          // .field-row-control's own direct children, so a control nested in
+          // .affix is excluded from it by the child combinator and
+          // legitimately stays compact on a phone.
+          inAffix: element.closest('.affix') !== null,
+          controlTrackWidth: track ? track.getBoundingClientRect().width : null,
         })
+      }
+      return out
+    })
+
+  /** Every .field-row: its grid's column count, and its label track's width, overflow and line count. */
+  const measureFieldRows = async (page) =>
+    page.evaluate(() => {
+      const out = []
+      for (const row of document.querySelectorAll('.field-row')) {
+        if (!row.checkVisibility({ checkVisibilityCSS: true })) continue
+        const columns = getComputedStyle(row).gridTemplateColumns.trim().split(/\s+/).filter(Boolean)
+        const label = row.querySelector('.field-row-label')
+        let labelInfo = null
+        if (label !== null && label.checkVisibility({ checkVisibilityCSS: true })) {
+          const rect = label.getBoundingClientRect()
+          const lineHeight = Number.parseFloat(getComputedStyle(label).lineHeight)
+          labelInfo = {
+            text: (label.textContent ?? '').trim().slice(0, 60),
+            width: rect.width,
+            scrollWidth: label.scrollWidth,
+            lines:
+              Number.isFinite(lineHeight) && lineHeight > 0
+                ? Math.round(label.clientHeight / lineHeight)
+                : null,
+          }
+        }
+        out.push({ columnCount: columns.length, gridTemplateColumns: columns.join(' '), label: labelInfo })
       }
       return out
     })
@@ -812,20 +908,56 @@ const main = async () => {
           return
         }
 
+        const breakpoint = await readFieldRowBreakpoint(page)
+        const tap = await readCssPixelVar(page, '--tap')
+        // The desktop size-class caps and the phone full-width contract are
+        // mutually exclusive: below the breakpoint the caps are not the rule
+        // kairos.css enforces, so checking them there is what produced the
+        // false positive on the pattern <select> at 440. `breakpoint === null`
+        // means the stylesheet's own rule for this could not be found — treat
+        // that as "desktop contract" rather than guessing, and say so in the
+        // record instead of silently picking a behaviour.
+        const isPhoneLayout = breakpoint !== null && viewport.width <= breakpoint
+
         const controls = await measureNarrowControls(page)
-        const exceedingSizeClass = controls
-          .map((control) => {
-            const sizeClass = control.classes.find((className) => className in CTL_WIDTH)
-            if (sizeClass === undefined) return null
-            const maxWidth = CTL_WIDTH[sizeClass]
-            if (control.width <= maxWidth) return null
-            return { ...control, sizeClass, maxWidth, overBy: Number((control.width - maxWidth).toFixed(1)) }
-          })
-          .filter((control) => control !== null)
-        const underTapHeight = controls
-          .filter((control) => control.height < TAP)
-          .map((control) => ({ ...control, shortBy: Number((TAP - control.height).toFixed(1)) }))
+        const fieldRows = await measureFieldRows(page)
         const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+
+        let exceedingSizeClass = []
+        let notFullWidth = []
+        if (isPhoneLayout) {
+          notFullWidth = controls
+            .filter((control) => !control.inAffix && control.controlTrackWidth !== null)
+            .filter((control) => control.width < control.controlTrackWidth - FULL_WIDTH_SLACK)
+            .map((control) => ({
+              ...control,
+              shortOfTrackBy: Number((control.controlTrackWidth - control.width).toFixed(1)),
+            }))
+        } else {
+          exceedingSizeClass = controls
+            .map((control) => {
+              const sizeClass = control.classes.find((className) => className in CTL_WIDTH)
+              if (sizeClass === undefined) return null
+              const maxWidth = CTL_WIDTH[sizeClass]
+              if (control.width <= maxWidth) return null
+              return { ...control, sizeClass, maxWidth, overBy: Number((control.width - maxWidth).toFixed(1)) }
+            })
+            .filter((control) => control !== null)
+        }
+
+        const underTapHeight =
+          tap === null
+            ? []
+            : controls
+                .filter((control) => control.height < tap)
+                .map((control) => ({ ...control, shortBy: Number((tap - control.height).toFixed(1)) }))
+
+        // "The row has collapsed to a single column" is only a meaningful
+        // assertion under the stacked contract — a 2-column row above the
+        // breakpoint is correct, not a finding.
+        const rowsNotCollapsed = isPhoneLayout ? fieldRows.filter((row) => row.columnCount !== 1) : []
+        const labels = fieldRows.map((row) => row.label).filter((label) => label !== null)
+        const wrappingLabels = labels.filter((label) => label.lines !== null && label.lines > LABEL_MAX_LINES)
 
         const fileBase = `${OUT}/${name}`
         await page.screenshot({ path: `${fileBase}.png`, fullPage: true })
@@ -841,11 +973,24 @@ const main = async () => {
 
         record(name, {
           reachable: true,
-          viewport,
+          // Plain numbers beside scrollWidth, not a nested object — so a
+          // reader of results.json can compare the two without knowing the
+          // record's own name encodes the viewport.
+          viewportWidth: viewport.width,
+          viewportHeight: viewport.height,
+          fieldRowBreakpoint: breakpoint,
+          layoutContract:
+            breakpoint === null ? 'unknown — breakpoint rule not found in stylesheet' : isPhoneLayout ? 'stacked' : 'desktop',
+          tapFloor: tap,
           controlCount: controls.length,
           controls,
           exceedingSizeClass,
+          notFullWidth,
           underTapHeight,
+          fieldRowCount: fieldRows.length,
+          labels,
+          wrappingLabels,
+          rowsNotCollapsed,
           scrollWidth,
           scrollsSideways: scrollWidth > viewport.width,
         })
