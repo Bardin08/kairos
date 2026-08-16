@@ -211,7 +211,7 @@ export default function Settings() {
             <div className="field">
               <label htmlFor={zoneId}>The zone your availability is written in</label>
               <select
-                className="select ctl-md"
+                className="select ctl-lg"
                 id={zoneId}
                 value={zone}
                 onChange={(event) => {
@@ -250,17 +250,16 @@ export default function Settings() {
                   <div className="field-row" data-invalid={invalid ? 'true' : undefined} key={key}>
                     <div className="field-row-label">
                       <label htmlFor={`${zoneId}-${key}`}>{limit.label}</label>
-                      {invalid ? (
+                      <p className="fine">
+                        {limit.help}
+                        {note === null ? '' : ` ${note}`}
+                      </p>
+                      {invalid && (
                         <p className="field-error" role="alert">
                           <AlertIcon />
                           {limit.floor === ZERO_FLOOR
                             ? `A whole number of ${limit.unit}, and never below zero.`
                             : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
-                        </p>
-                      ) : (
-                        <p className="fine">
-                          {limit.help}
-                          {note === null ? '' : ` ${note}`}
                         </p>
                       )}
                     </div>

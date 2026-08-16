@@ -1025,11 +1025,13 @@
   /* Errors name the problem and the fix, and they sit under the control that
      caused them, never in a banner at the top of the form. */
   .field[data-invalid="true"] .input,
-  .field[data-invalid="true"] .textarea {
+  .field[data-invalid="true"] .textarea,
+  .field-row[data-invalid="true"] .input {
     border-color: var(--status-danger-fg);
   }
   .field[data-invalid="true"] .input:focus,
-  .field[data-invalid="true"] .textarea:focus {
+  .field[data-invalid="true"] .textarea:focus,
+  .field-row[data-invalid="true"] .input:focus {
     box-shadow: 0 0 0 3px var(--status-danger-bg);
   }
   /* `--measure` is not decoration on this one. Beside a form field the error is
