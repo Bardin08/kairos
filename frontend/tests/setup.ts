@@ -10,3 +10,12 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: window.localStorage,
   configurable: true,
 })
+
+// jsdom ships no clipboard. The editor's Copy button needs one to exist; what
+// it writes is asserted where it matters and stubbed everywhere else.
+if (navigator.clipboard === undefined) {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: () => Promise.resolve() },
+    configurable: true,
+  })
+}

@@ -14,22 +14,24 @@ import {
   type LinkLimits,
 } from './adminLinks'
 import Failure from './Failure'
+import { changedCount, draftOf, unsavedLabel, type EditorDraft } from './editorDraft'
 import { LIMIT_COPY, LIMIT_KEYS } from './limitCopy'
 
-/** The four limits of a link that does not exist yet: all inherited. */
-const NEW_LIMITS: LinkLimits = {
-  marginMinutes: null,
-  minNoticeMinutes: null,
-  dailyCap: null,
-  startIncrementMinutes: null,
-}
+/** Where a booking page lives. Fixed by App.tsx's route, not configurable. */
+const BOOK_PATH = '/book/'
 
-/** What a new link starts as. One duration, because zero is not a link. */
-const NEW_DURATIONS = [30]
+/** Nothing has moved, so there is nothing to save and nothing to discard. */
+const CLEAN = 0
 
 /**
  * One link, in full: what it is called, where it lives, how long it runs, which
- * hours it may be booked in, and which of the four global limits it narrows.
+ * hours it may be booked in, and which of the four global scheduling limits it
+ * narrows.
+ *
+ * Three cards down a 620px column rather than one card across the page. The
+ * previous version stretched every control to the width of a 1180px card, so a
+ * two-digit minute count sat in a box a thousand pixels wide while the help
+ * text beside it stopped at 68ch.
  *
  * Two writes on save, not one, and that is the shape of the API rather than an
  * accident: the limits have their own full-replace PUT precisely so that `null`
@@ -49,31 +51,27 @@ export default function LinkEditor({
   onSaved: () => void
   onCancel: () => void
 }) {
-  const [name, setName] = useState(link?.name ?? '')
-  const [slug, setSlug] = useState(link?.slug ?? '')
-  const [description, setDescription] = useState(link?.description ?? '')
-  const [patternId, setPatternId] = useState(link?.patternId ?? patterns[0]?.id ?? '')
-  const [durations, setDurations] = useState<number[]>(link?.durations ?? NEW_DURATIONS)
-  // Copied out field by field rather than by spreading the link, so a null here
-  // is this component's own null and never a value some later edit resolved.
-  const [limits, setLimits] = useState<LinkLimits>(
-    link === null
-      ? NEW_LIMITS
-      : {
-          marginMinutes: link.marginMinutes,
-          minNoticeMinutes: link.minNoticeMinutes,
-          dailyCap: link.dailyCap,
-          startIncrementMinutes: link.startIncrementMinutes,
-        },
-  )
+  // Taken once. The editor unmounts on a successful save — Links.tsx returns to
+  // the table — so there is no saved state for this to go stale against.
+  const [baseline] = useState<EditorDraft>(() => draftOf(link, patterns[0]?.id ?? ''))
+  const [draft, setDraft] = useState<EditorDraft>(baseline)
 
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` branches on the
   // status, and a string has already thrown that away.
   const [failure, setFailure] = useState<unknown>(null)
+  const [copied, setCopied] = useState(false)
+
+  const changed = changedCount(baseline, draft)
+  const address = window.location.origin + BOOK_PATH + draft.slug
+
+  function set<K extends keyof EditorDraft>(key: K, value: EditorDraft[K]) {
+    setDraft({ ...draft, [key]: value })
+  }
 
   function limit(key: keyof LinkLimits) {
-    return (value: number | null) => setLimits({ ...limits, [key]: value })
+    return (value: number | null) =>
+      setDraft({ ...draft, limits: { ...draft.limits, [key]: value } })
   }
 
   async function save() {
@@ -81,9 +79,15 @@ export default function LinkEditor({
     setFailure(null)
 
     try {
-      const draft = { slug, name, description, patternId, durations }
-      const saved = link === null ? await createLink(draft) : await updateLink(link.id, draft)
-      await updateLinkLimits(saved.id, limits)
+      const body = {
+        slug: draft.slug,
+        name: draft.name,
+        description: draft.description,
+        patternId: draft.patternId,
+        durations: draft.durations,
+      }
+      const saved = link === null ? await createLink(body) : await updateLink(link.id, body)
+      await updateLinkLimits(saved.id, draft.limits)
       onSaved()
     } catch (error: unknown) {
       // The server's own sentence, when it sent one. Every refusal this form can
@@ -110,7 +114,7 @@ export default function LinkEditor({
   }
 
   return (
-    <>
+    <div className="form-col">
       <div className="page-header">
         <h1 className="title-page">{link === null ? 'New link' : link.name}</h1>
         <button className="btn btn-ghost" type="button" onClick={onCancel}>
@@ -119,122 +123,191 @@ export default function LinkEditor({
       </div>
 
       <form
-        className="card card-pad stack"
         onSubmit={(event) => {
           event.preventDefault()
           void save()
         }}
       >
-        <div className="field">
-          <label htmlFor="link-name">Name</label>
-          <input
-            id="link-name"
-            className="input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </div>
+        <div className="card card-pad">
+          <h2 className="title-section mb-3">What it is</h2>
 
-        <div className="field">
-          <label htmlFor="link-slug">Address</label>
-          <input
-            id="link-slug"
-            className="input"
-            value={slug}
-            onChange={(event) => setSlug(event.target.value)}
-          />
-          <p className="fine">
-            The last part of the URL you send people: lowercase words joined by hyphens.
-          </p>
-        </div>
+          <div className="field-row">
+            <div className="field-row-label">
+              <label htmlFor="link-name">Name</label>
+            </div>
+            <div className="field-row-control">
+              <input
+                id="link-name"
+                className="input ctl-lg"
+                value={draft.name}
+                onChange={(event) => set('name', event.target.value)}
+              />
+            </div>
+          </div>
 
-        <div className="field">
-          <label htmlFor="link-description">Description</label>
-          <textarea
-            id="link-description"
-            className="textarea"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </div>
+          <div className="field-row">
+            <div className="field-row-label">
+              <label htmlFor="link-slug">Address</label>
+              <p className="fine">Lowercase words joined by hyphens.</p>
+            </div>
+            <div className="field-row-control">
+              {/* The whole URL, not its last word. An operator setting this is
+                  deciding what to paste into a chat, and they cannot judge
+                  `consulting` without the part in front of it. */}
+              <span className="prefix">
+                <span className="prefix-static">{window.location.origin + BOOK_PATH}</span>
+                <input
+                  id="link-slug"
+                  className="input ctl-md"
+                  value={draft.slug}
+                  onChange={(event) => {
+                    setCopied(false)
+                    set('slug', event.target.value)
+                  }}
+                />
+              </span>
+              {/* Only for a link that exists. A slug that has never been saved
+                  is not an address yet, and offering to copy it hands out a 404. */}
+              {link !== null && (
+                <button
+                  className="btn btn-ghost"
+                  type="button"
+                  aria-label="Copy link address"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(address)
+                    setCopied(true)
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              )}
+            </div>
+          </div>
 
-        <div className="field">
-          <label htmlFor="link-pattern">Pattern</label>
-          <select
-            id="link-pattern"
-            className="select"
-            value={patternId}
-            onChange={(event) => setPatternId(event.target.value)}
-          >
-            {patterns.map((pattern) => (
-              <option key={pattern.id} value={pattern.id}>
-                {pattern.name}
-              </option>
-            ))}
-          </select>
-          <p className="fine">The hours this link may be booked in.</p>
-        </div>
-
-        <DurationEditor durations={durations} onChange={setDurations} />
-
-        <h2 className="title-section section-break">Limits</h2>
-        <p className="prose t-sm">
-          Each of these follows the global default until you turn it off here. Turning it off and
-          typing 0 is a real setting and not the same thing: no gap between meetings, bookable with
-          no notice, nothing bookable that day.
-        </p>
-
-        {LIMIT_KEYS.map((key) => {
-          const copy = LIMIT_COPY[key]
-          return (
-            <InheritableNumber
-              key={key}
-              label={copy.label}
-              short={copy.short}
-              help={copy.help}
-              value={limits[key]}
-              globalValue={globals[key]}
-              min={copy.floor}
-              onChange={limit(key)}
+          <div className="field">
+            <label htmlFor="link-description">Description</label>
+            <textarea
+              id="link-description"
+              className="textarea"
+              value={draft.description}
+              onChange={(event) => set('description', event.target.value)}
             />
-          )
-        })}
+          </div>
+        </div>
 
-        <Failure error={failure} />
+        <div className="card card-pad mt-4">
+          <h2 className="title-section mb-3">When it can be booked</h2>
 
-        <div className="row gap-2 wrap">
-          <button className="btn btn-primary" type="submit" data-loading={saving || undefined}>
+          <div className="field-row">
+            <div className="field-row-label">
+              <label htmlFor="link-pattern">Pattern</label>
+              <p className="fine">The hours this link may be booked in, in your own zone.</p>
+            </div>
+            <div className="field-row-control">
+              <select
+                id="link-pattern"
+                className="select ctl-md"
+                value={draft.patternId}
+                onChange={(event) => set('patternId', event.target.value)}
+              >
+                {patterns.map((pattern) => (
+                  <option key={pattern.id} value={pattern.id}>
+                    {pattern.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <DurationEditor
+            durations={draft.durations}
+            onChange={(durations) => set('durations', durations)}
+          />
+        </div>
+
+        <div className="card card-pad mt-4">
+          <h2 className="title-section mb-3">Limits</h2>
+          <p className="prose t-sm mb-3">
+            Each of these follows the global default until you override it here. Overriding and
+            typing 0 is a real setting and not the same thing: no gap between meetings, bookable
+            with no notice, nothing bookable that day.
+          </p>
+
+          <div className="rowgroup">
+            {LIMIT_KEYS.map((key) => {
+              const copy = LIMIT_COPY[key]
+              return (
+                <InheritableNumber
+                  key={key}
+                  label={copy.label}
+                  short={copy.short}
+                  help={copy.help}
+                  value={draft.limits[key]}
+                  globalValue={globals[key]}
+                  min={copy.floor}
+                  onChange={limit(key)}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        <Failure error={failure} className="mt-4" />
+
+        <div className="savebar">
+          <span className="savebar-state" role="status">
+            {unsavedLabel(changed)}
+          </span>
+          <button
+            className="btn"
+            type="button"
+            disabled={changed === CLEAN || saving}
+            onClick={() => setDraft(baseline)}
+          >
+            Discard
+          </button>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={changed === CLEAN || saving}
+            data-loading={saving || undefined}
+          >
             Save link
           </button>
-          {link !== null &&
-            (link.active ? (
-              <button
-                className="btn btn-danger"
-                type="button"
-                disabled={saving}
-                onClick={() => void setActive(false)}
-              >
-                Archive link
-              </button>
-            ) : (
-              <button
-                className="btn"
-                type="button"
-                disabled={saving}
-                onClick={() => void setActive(true)}
-              >
-                Restore link
-              </button>
-            ))}
         </div>
-
-        {link !== null && !link.active && (
-          <p className="fine">
-            Archived: this address answers as though it never existed, and the meetings already
-            booked through it are untouched.
-          </p>
-        )}
       </form>
-    </>
+
+      {link !== null && (
+        <div className="card card-pad mt-5">
+          <h2 className="title-section mb-3">{link.active ? 'Archive' : 'Restore'}</h2>
+          {/* Stated before the button rather than after the fact. Archiving is
+              reversible and Restore is right here, which is why there is no
+              confirmation dialog in front of it. */}
+          <p className="prose t-sm mb-4">
+            An archived link answers as though it never existed, and the meetings already booked
+            through it are untouched.
+          </p>
+          {link.active ? (
+            <button
+              className="btn btn-danger"
+              type="button"
+              disabled={saving}
+              onClick={() => void setActive(false)}
+            >
+              Archive link
+            </button>
+          ) : (
+            <button
+              className="btn"
+              type="button"
+              disabled={saving}
+              onClick={() => void setActive(true)}
+            >
+              Restore link
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
