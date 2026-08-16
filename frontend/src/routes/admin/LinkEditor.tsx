@@ -125,25 +125,24 @@ export default function LinkEditor({
           void save()
         }}
       >
-        <div className="card card-pad">
-          <h2 className="title-section mb-3">What it is</h2>
+        <div className="card card-pad stack">
+          <h2 className="title-section">What it is</h2>
 
-          <div className="field-row">
-            <div className="field-row-label">
-              <label htmlFor="link-name">Name</label>
-            </div>
-            <div className="field-row-control">
-              {/* ctl-md, not ctl-lg: this column's content box is ~556px, and
-                  ctl-lg's 448px leaves a label track under 100px wide — which
-                  is the same disease the Address field had. ctl-md at 288px
-                  leaves the label room to breathe. */}
-              <input
-                id="link-name"
-                className="input ctl-md"
-                value={draft.name}
-                onChange={(event) => set('name', event.target.value)}
-              />
-            </div>
+          {/* Stacked, not a field-row: a bare one-word label next to a 288px
+              control leaves roughly 200px of dead space in the label track —
+              the same complaint that started this piece of work, rotated
+              ninety degrees. A row only reads as intentional when the label
+              column has something in it, the way Pattern's help text and the
+              limits' do. Name has none, so it takes the full column instead,
+              matching Address and Description below. */}
+          <div className="field">
+            <label htmlFor="link-name">Name</label>
+            <input
+              id="link-name"
+              className="input"
+              value={draft.name}
+              onChange={(event) => set('name', event.target.value)}
+            />
           </div>
 
           {/* Stacked rather than a two-column field-row: the composite here is
@@ -204,8 +203,8 @@ export default function LinkEditor({
           </div>
         </div>
 
-        <div className="card card-pad mt-4">
-          <h2 className="title-section mb-3">When it can be booked</h2>
+        <div className="card card-pad mt-4 stack">
+          <h2 className="title-section">When it can be booked</h2>
 
           <div className="field-row">
             <div className="field-row-label">
@@ -234,9 +233,12 @@ export default function LinkEditor({
           />
         </div>
 
-        <div className="card card-pad mt-4">
-          <h2 className="title-section mb-3">Limits</h2>
-          <p className="prose t-sm mb-3">
+        <div className="card card-pad mt-4 stack">
+          <h2 className="title-section">Limits</h2>
+          {/* No mb-3 here either: it would stack with `.stack`'s own margin-top
+              on the rowgroup that follows, for the same double-gap reason the
+              heading's mb-3 was dropped. */}
+          <p className="prose t-sm">
             Each of these follows the global default until you override it here. Overriding and
             typing 0 is a real setting and not the same thing: no gap between meetings, bookable
             with no notice, nothing bookable that day.
