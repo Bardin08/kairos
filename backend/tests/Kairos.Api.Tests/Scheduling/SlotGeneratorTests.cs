@@ -1,0 +1,233 @@
+using Kairos.Api.Scheduling;
+
+using NodaTime;
+
+using Shouldly;
+
+// NodaTime ships its own Interval; the alias says which one this file means.
+using Interval = Kairos.Api.Scheduling.Interval;
+
+namespace Kairos.Api.Tests.Scheduling;
+
+public class SlotGeneratorTests
+{
+    private const int NoMargin = 0;
+    private const int NoNotice = 0;
+    private const int UnlimitedDailyCap = 99;
+    private const int HourLong = 60;
+    private const int HalfHour = 30;
+
+    /// <summary>The margin the busy meeting demands in the max-versus-sum test. Larger than the link's.</summary>
+    private const int MeetingMargin = 30;
+
+    private const int NoIncrement = 0;
+    private const int WholeDayIncrement = 1440;
+    private const int MinuteIncrement = 1;
+
+    /// <summary>An increment that divides neither an hour nor a day. 25 and 50 are the plan's own example.</summary>
+    private const int AwkwardIncrement = 25;
+
+    private const int SlotsInTheLateEvening = 3;
+    private const int SlotsOnAMinuteGrid = 31;
+    private const int SlotsAfterALateOpening = 3;
+    private const int SlotsOnTheAwkwardGrid = 4;
+
+    /// <summary>23:59 is how "available until the end of the day" is written: LocalTime has no 24:00.</summary>
+    private static readonly LocalTime LastMinuteOfTheDay = new(23, 59);
+
+    private static readonly DateTimeZone Utc =
+        DateTimeZoneProviders.Tzdb[SchedulingDefaults.TimeZoneId];
+    private static readonly LocalDate Weekday = new(2026, 9, 7);
+    private static readonly LocalWindow NineToFive =
+        new(Weekday, new LocalTime(9, 0), new LocalTime(17, 0));
+    private static readonly Dictionary<LocalDate, int> NoBookingsYet = [];
+
+    private static Instant At(int hour, int minute) =>
+        Weekday.At(new LocalTime(hour, minute)).InZoneStrictly(Utc).ToInstant();
+
+    private static Limits Limits(
+        int margin = NoMargin,
+        int notice = NoNotice,
+        int cap = UnlimitedDailyCap,
+        int step = SchedulingDefaults.StartIncrementMinutes) =>
+        new(margin, notice, cap, step);
+
+    private static IReadOnlyList<Instant> Generate(
+        BusyBlock[] busy,
+        int durationMinutes,
+        Limits limits,
+        Instant now,
+        IReadOnlyDictionary<LocalDate, int>? perDay = null) =>
+        new SlotGenerator().Generate(
+            [NineToFive],
+            busy,
+            Duration.FromMinutes(durationMinutes),
+            limits,
+            now,
+            Utc,
+            perDay ?? NoBookingsYet);
+
+    /// <summary>The same call over arbitrary windows, for the bound and grid facts below.</summary>
+    private static IReadOnlyList<Instant> GenerateOver(
+        LocalWindow[] windows, int durationMinutes, int step) =>
+        new SlotGenerator().Generate(
+            windows,
+            [],
+            Duration.FromMinutes(durationMinutes),
+            Limits(step: step),
+            At(0, 0),
+            Utc,
+            NoBookingsYet);
+
+    private static LocalWindow Window(LocalTime start, LocalTime end) => new(Weekday, start, end);
+
+    [Fact]
+    public void Generate_EmptyDay_ProducesSlotsOnTheIncrementInLocalTime()
+    {
+        var slots = Generate([], HourLong, Limits(), At(0, 0));
+
+        slots[0].ShouldBe(At(9, 0));
+        slots[1].ShouldBe(At(9, 30));
+        slots[^1].ShouldBe(At(16, 0));
+    }
+
+    [Fact]
+    public void Generate_SlotWouldRunPastTheWindow_IsNotOffered() =>
+        Generate([], HourLong, Limits(), At(0, 0)).ShouldNotContain(At(16, 30));
+
+    [Fact]
+    public void Generate_MinimumNotice_RemovesSlotsThatAreTooSoon() =>
+        Generate([], HourLong, Limits(notice: SchedulingDefaults.MinNoticeMinutes), At(9, 0))[0]
+            .ShouldBe(At(11, 0));
+
+    [Fact]
+    public void Generate_BusyBlock_RemovesTheSlotsItCovers()
+    {
+        BusyBlock[] busy = [new(new Interval(At(12, 0), At(13, 0)), NoMargin)];
+
+        var slots = Generate(busy, HourLong, Limits(), At(0, 0));
+
+        slots.ShouldNotContain(At(12, 0));
+        slots.ShouldNotContain(At(11, 30));
+        slots.ShouldContain(At(11, 0));
+        slots.ShouldContain(At(13, 0));
+    }
+
+    [Fact]
+    public void Generate_TwoDifferentMargins_UsesTheLargerNotTheSum()
+    {
+        // Existing meeting demands 30, querying link demands 15. The gap is 30, not 45.
+        BusyBlock[] busy = [new(new Interval(At(12, 0), At(13, 0)), MeetingMargin)];
+
+        var slots = Generate(busy, HalfHour, Limits(margin: SchedulingDefaults.MarginMinutes), At(0, 0));
+
+        slots.ShouldNotContain(At(13, 0));
+        slots.ShouldContain(At(13, 30));
+        slots.ShouldContain(At(11, 0));      // ends 11:30, touching the padded start
+        slots.ShouldNotContain(At(11, 30));
+    }
+
+    [Fact]
+    public void Generate_QueryingLinkHasTheLargerMargin_ItWins()
+    {
+        BusyBlock[] busy = [new(new Interval(At(12, 0), At(13, 0)), NoMargin)];
+
+        var slots = Generate(busy, HalfHour, Limits(margin: HourLong), At(0, 0));
+
+        slots.ShouldNotContain(At(13, 30));
+        slots.ShouldContain(At(14, 0));
+    }
+
+    [Fact]
+    public void Generate_DailyCapReached_ProducesNoSlotsForThatDay() =>
+        Generate([], HourLong, Limits(cap: SchedulingDefaults.DailyCap), At(0, 0),
+                 new Dictionary<LocalDate, int> { [Weekday] = SchedulingDefaults.DailyCap })
+            .ShouldBeEmpty();
+
+    /// <summary>
+    /// The walk is bounded in minutes from midnight rather than stepped through a LocalTime,
+    /// whose arithmetic is modular. Stepped as a LocalTime this wraps to 00:00, satisfies every
+    /// bound again and appends slots until the process is killed — so a regression here does not
+    /// fail, it exhausts memory. "Available until the end of the day" is the ordinary way to
+    /// reach it: LocalTime cannot hold 24:00, so the last minute of the day is 23:59.
+    /// </summary>
+    [Fact]
+    public void Generate_WindowEndingAtTheLastMinuteOfTheDay_StopsAtTheLastWholeSlot()
+    {
+        var slots = GenerateOver(
+            [Window(new LocalTime(22, 0), LastMinuteOfTheDay)],
+            HalfHour,
+            SchedulingDefaults.StartIncrementMinutes);
+
+        slots.Count.ShouldBe(SlotsInTheLateEvening);
+        slots[^1].ShouldBe(At(23, 0));   // 23:30 would end at 24:00, past the window
+    }
+
+    /// <summary>An increment past a day cannot place a second start, and must not wrap to place a first.</summary>
+    [Fact]
+    public void Generate_IncrementLongerThanTheWindow_ProducesNothingRatherThanLooping() =>
+        GenerateOver([NineToFive], HalfHour, WholeDayIncrement).ShouldBeEmpty();
+
+    /// <summary>
+    /// Zero is a value an operator deliberately types — the override column documents null as
+    /// inherit and zero as zero — and it divided by zero on a public GET.
+    /// </summary>
+    [Fact]
+    public void Generate_ZeroIncrement_FallsBackToAMinuteGrid()
+    {
+        var slots = GenerateOver(
+            [Window(new LocalTime(9, 0), new LocalTime(10, 0))], HalfHour, NoIncrement);
+
+        slots.Count.ShouldBe(SlotsOnAMinuteGrid);
+        slots[1].ShouldBe(At(9, MinuteIncrement));
+        slots[^1].ShouldBe(At(9, HalfHour));
+    }
+
+    [Fact]
+    public void Generate_WindowOpensPartWayThroughAnIncrement_StartsAtTheNextGridPoint()
+    {
+        var slots = GenerateOver(
+            [Window(new LocalTime(9, 7), new LocalTime(11, 0))],
+            HalfHour,
+            SchedulingDefaults.StartIncrementMinutes);
+
+        slots[0].ShouldBe(At(9, 30));
+        slots.Count.ShouldBe(SlotsAfterALateOpening);
+    }
+
+    /// <summary>
+    /// The grid is anchored on midnight, not on the window, so a 25-minute increment offers
+    /// 09:10 and never 09:00. One shared grid across every window is the deliberate choice.
+    /// </summary>
+    [Fact]
+    public void Generate_IncrementDividingNeitherHourNorDay_AnchorsTheGridOnMidnight()
+    {
+        var slots = GenerateOver(
+            [Window(new LocalTime(9, 0), new LocalTime(11, 0))], AwkwardIncrement, AwkwardIncrement);
+
+        slots[0].ShouldBe(At(9, 10));
+        slots.Count.ShouldBe(SlotsOnTheAwkwardGrid);
+    }
+
+    /// <summary>
+    /// Callers read the result as a sorted list — the booking page renders it in order and the
+    /// write path re-checks against it — so ascending output is a guarantee, not a side effect
+    /// of every fixture happening to pass its windows in order.
+    /// </summary>
+    [Fact]
+    public void Generate_WindowsPassedOutOfOrder_ReturnsSlotsAscending()
+    {
+        var morning = new LocalTime(9, 0);
+        var midMorning = new LocalTime(10, 0);
+        LocalWindow[] laterDayFirst =
+        [
+            new(Weekday.PlusDays(1), morning, midMorning),
+            new(Weekday, morning, midMorning),
+        ];
+
+        var slots = GenerateOver(laterDayFirst, HalfHour, SchedulingDefaults.StartIncrementMinutes);
+
+        slots[0].ShouldBe(At(9, 0));
+        slots.ShouldBe(slots.OrderBy(instant => instant).ToArray());
+    }
+}

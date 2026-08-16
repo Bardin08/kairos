@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          ".superpowers/brainstorm/18726-1786700091/content/kairos-gallery.html"
+        ],
+        "createdAt": "2026-08-14T09:52:04.019Z",
+        "reason": "assistant judgment: harness chrome, not product UI — a control panel of segmented buttons and 10px labels where flat type is correct; the file is a throwaway brainstorm fixture, superseded by the impeccable direction flow"
+      }
+    ]
+  }
+}

@@ -32,18 +32,33 @@ skip() {  # skip <description> <reason>
   SKIP=$((SKIP+1)); printf '  skip %s — %s\n' "$1" "$2"
 }
 
-# Tasks 1-3 have no frontend/ at all. Reporting those checks as failures would
-# make the suite red by construction, and a suite that is always red stops being
-# read. CI gates the same way.
-HAS_FRONTEND=no
-[ -d frontend ] && HAS_FRONTEND=yes
-readonly HAS_FRONTEND
+# Three states, because they call for three different actions. Reporting any of
+# them as a failure would make the suite red for a reason that has nothing to do
+# with what it is checking — the same defect class as a check that passes when
+# its subject is missing.
+#
+#   absent  — Tasks 1-3, no frontend/ at all. CI gates the same way.
+#   no-deps — frontend/ exists but nobody ran npm ci in this clone.
+#   ready   — run it all.
+#
+# npm ci is deliberately NOT run from here: this script reports on the tree, it
+# does not mutate it, and a surprise multi-second install inside a check is worse
+# than a sentence telling you which command to run.
+FRONTEND_STATE=absent
+if [ -d frontend ]; then
+  FRONTEND_STATE=ready
+  [ -d frontend/node_modules ] || FRONTEND_STATE=no-deps
+fi
+readonly FRONTEND_STATE
 readonly NO_FRONTEND_YET="frontend/ does not exist yet"
+readonly NO_FRONTEND_DEPS="frontend/node_modules is missing — run: (cd frontend && npm ci)"
 
 echo "== supply chain =="
 check "no floating nuget versions"   bash -c '! grep -E "Version=\"[^[]" backend/Directory.Packages.props'
 check "transitive pinning enabled"   grep -q "CentralPackageTransitivePinningEnabled>true" backend/Directory.Packages.props
-if [ "$HAS_FRONTEND" = yes ]; then
+# These two read committed files, so they are real work the moment frontend/
+# exists — node_modules has nothing to do with them.
+if [ "$FRONTEND_STATE" != absent ]; then
   check "no caret ranges in npm"     bash -c '! grep -E "\"[\^~]" frontend/package.json'
   check "npm lockfile committed"     test -f frontend/package-lock.json
 else
@@ -56,8 +71,16 @@ check "dependabot split by stack"    bash -c '[ "$(grep -c "package-ecosystem" .
 
 echo "== layout =="
 check "no razor pages"               bash -c '! find backend -name "*.cshtml" | grep -q .'
-check "backend tests ignore the ui"  bash -c '! grep -rlE "\.tsx|kairos\.css|wwwroot" backend/tests | grep -q .'
-check "git hooks installed"          grep -q lefthook .git/hooks/pre-commit
+# git grep rather than grep -r, so the search sees committed sources and not
+# bin/obj: once wwwroot holds files, the static web assets manifests dropped in
+# every test project's bin/ name kairos.css, and a plain recursive grep reads
+# that as a test reaching for the UI.
+check "backend tests ignore the ui"  bash -c '! git grep -lE "\.tsx|kairos\.css|wwwroot" -- backend/tests | grep -q .'
+# Asked for by path, not as .git/hooks/…: inside a git worktree .git is a file
+# pointing at the real git dir, so the literal path is "not a directory" and the
+# check fails on exactly the workflow the plan asks for.
+# shellcheck disable=SC2016  # the $() is meant for the inner shell, not this one
+check "git hooks installed"          bash -c 'grep -q lefthook "$(git rev-parse --git-path hooks/pre-commit)"'
 
 echo "== backend =="
 check "formatted"                    bash -c 'cd backend && dotnet format --verify-no-changes'
@@ -69,16 +92,18 @@ else
 fi
 
 echo "== frontend =="
-if [ "$HAS_FRONTEND" = yes ]; then
+if [ "$FRONTEND_STATE" = ready ]; then
   check "lints"                      bash -c 'cd frontend && npx eslint . --max-warnings 0'
   check "typechecks"                 bash -c 'cd frontend && npx tsc --noEmit'
   check "tests pass"                 bash -c 'cd frontend && npx vitest run'
   check "bundle under budget"        bash -c '(cd frontend && npm run build) && bash scripts/bundle-budget.sh'
 else
-  skip "lints"                       "$NO_FRONTEND_YET"
-  skip "typechecks"                  "$NO_FRONTEND_YET"
-  skip "tests pass"                  "$NO_FRONTEND_YET"
-  skip "bundle under budget"         "$NO_FRONTEND_YET"
+  frontend_reason="$NO_FRONTEND_YET"
+  [ "$FRONTEND_STATE" = no-deps ] && frontend_reason="$NO_FRONTEND_DEPS"
+  skip "lints"                       "$frontend_reason"
+  skip "typechecks"                  "$frontend_reason"
+  skip "tests pass"                  "$frontend_reason"
+  skip "bundle under budget"         "$frontend_reason"
 fi
 
 echo

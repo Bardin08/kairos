@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Mentorship session — Vlad Bardin · Kairos</title>
+<link rel="stylesheet" href="kairos.css">
+</head>
+<body>
+<!--
+THESIS: The booking arrangement every invitee has already used, executed at the finish of Linear, Stripe, Notion Calendar and iOS. It refuses the expressive visual world that would make a stranger hesitate over which slot is selected.
+OWN-WORLD: Cool-neutral ramp, one indigo accent spent only on the selected time and the primary action, 8-12px radii, offset-and-blur elevation, system sans with tabular figures throughout, hairline borders, drawn 1.5px icons.
+STORY: A stranger picks how long they need, sees which times that length actually fits, reads back what they are committing to in their own timezone, and confirms.
+FIRST VIEWPORT: Phone — title, duration picker, two facts, month, times, sticky action bar naming the choice. Desktop — one card, details left, calendar and times right, primary action under the times.
+FORM: The category standard (canon), taken by the user's own words after two re-rolls; seed key 8071c74d.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+
+<div class="page">
+  <header class="appbar">
+    <a class="wordmark" href="#">
+      <span class="wordmark-glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/>
+        </svg>
+      </span>
+      Kairos
+    </a>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/>
+      </svg>
+    </button>
+  </header>
+
+  <main id="step-choose">
+    <div class="card card-lg booking-panes">
+
+      <section class="card-pad">
+        <div class="row mb-4">
+          <span class="avatar" aria-hidden="true">VB</span>
+          <span class="muted t-sm">Vlad Bardin</span>
+        </div>
+
+        <h1 class="title-event mb-5">Mentorship session</h1>
+
+        <div class="facts">
+          <div class="fact fact-control">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/></svg>
+            <div class="segmented" id="durations" role="group" aria-label="How long do you need?"></div>
+          </div>
+          <p class="fact">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5l6-3v9l-6-3z"/></svg>
+            <span>Google Meet, link sent on booking</span>
+          </p>
+          <p class="fact">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18 15 15 0 010-18"/></svg>
+            <span>Times in <strong>Europe/Warsaw</strong></span>
+          </p>
+        </div>
+
+        <p class="prose sep-top t-sm">
+          A working session on backend architecture, career direction, or whatever you are stuck on. Come with one concrete question. We will get further than with five vague ones.
+        </p>
+      </section>
+
+      <section class="card-pad">
+        <div class="month-head">
+          <h2 class="title-section">Choose a time</h2>
+          <div class="row gap-2">
+            <button class="icon-btn" type="button" aria-label="Previous month" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
+            </button>
+            <span class="month-label" id="month-label">August 2026</span>
+            <button class="icon-btn" type="button" aria-label="Next month">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 5.5L16 12l-6.5 6.5"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="calendar-cols">
+          <div>
+            <div class="weekdays" aria-hidden="true">
+              <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+            </div>
+            <div class="days" id="days" role="group" aria-label="August 2026"></div>
+          </div>
+
+          <div>
+            <div class="slots-head">
+              <h3 class="slots-date" id="slots-date">Thursday 20 August</h3>
+              <span class="fine" id="slots-count"></span>
+            </div>
+            <div class="slots" id="slots" data-animate="true" role="group" aria-label="Available times"></div>
+
+            <div class="empty" id="slots-empty" hidden>
+              <p id="empty-reason">Nothing open on this day.</p>
+              <button class="btn" type="button" id="jump-next">Go to the next open day</button>
+            </div>
+
+            <div class="tz">
+              <label class="tz-label" for="tz-select">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18 15 15 0 010-18"/></svg>
+                Times shown in
+              </label>
+              <select class="select select-inline" id="tz-select">
+                <option>Europe/Warsaw (UTC+2)</option>
+                <option>Europe/London (UTC+1)</option>
+                <option>America/New_York (UTC−4)</option>
+                <option>Asia/Tokyo (UTC+9)</option>
+              </select>
+            </div>
+
+            <div class="desktop-cta">
+              <button class="btn btn-primary" type="button" id="continue-desktop">Continue</button>
+              <span class="muted t-sm" id="pick-desktop"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Step 2: details. Same card, replaced content — not a modal; nothing
+       here needs interruption or protected focus. -->
+  <main id="step-details" hidden>
+    <div class="card card-lg card-pad card-narrow">
+      <button class="btn btn-ghost btn-inline mb-5" type="button" id="back-to-times">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>
+        Change time
+      </button>
+
+      <h1 class="title-page mb-5">Your details</h1>
+
+      <div class="summary mb-6">
+        <p class="summary-when" id="summary-when"></p>
+        <p class="summary-meta" id="summary-meta"></p>
+      </div>
+
+      <form class="stack stack-lg" id="booking-form" novalidate>
+        <div class="field">
+          <label for="name">Your name</label>
+          <input class="input" id="name" name="name" autocomplete="name" required>
+        </div>
+
+        <!-- Error state, shown as authored demonstration material. -->
+        <div class="field" data-invalid="true">
+          <label for="email">Email</label>
+          <input class="input" id="email" name="email" type="email" value="ada@example" aria-describedby="email-error" autocomplete="email" required>
+          <p class="field-error" id="email-error">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16h.01"/></svg>
+            This address has no domain. The invite and the Meet link are sent here, so it has to be reachable.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="topic">What do you want to cover?</label>
+          <textarea class="textarea" id="topic" name="topic" placeholder="One concrete question."></textarea>
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit" id="confirm-btn">Confirm booking</button>
+        <p class="fine">A calendar invite and a Meet link arrive by email. You can cancel or reschedule from that email at any time.</p>
+      </form>
+    </div>
+  </main>
+
+  <!-- Step 3: confirmed. -->
+  <main id="step-done" hidden>
+    <div class="card card-lg card-pad card-narrow">
+      <span class="confirm-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </span>
+      <h1 class="title-page mt-5">You are booked</h1>
+      <p class="prose mt-3 t-sm">
+        An invite is on its way to <strong>ada@example.com</strong>. It carries the Meet link and a calendar attachment.
+      </p>
+      <div class="summary mt-5">
+        <p class="summary-when" id="done-when"></p>
+        <p class="summary-meta" id="done-meta"></p>
+      </div>
+      <div class="row gap-2 wrap mt-5">
+        <button class="btn" type="button">Add to calendar</button>
+        <button class="btn btn-ghost" type="button">Reschedule</button>
+        <button class="btn btn-ghost btn-danger" type="button">Cancel</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="fine page-foot">
+    Scheduled with Kairos
+  </footer>
+</div>
+
+<!-- Phone only. States the choice, not just the verb. -->
+<div class="actionbar" id="actionbar" hidden>
+  <div class="grow">
+    <p class="actionbar-when" id="actionbar-when"></p>
+    <p class="actionbar-meta" id="actionbar-meta"></p>
+  </div>
+  <button class="btn btn-primary" type="button" id="continue-mobile">Continue</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---- theme: system by default, explicit choice persisted -------------- */
+  var root = document.documentElement;
+  var toggle = document.getElementById("theme-toggle");
+  var stored = null;
+  try { stored = localStorage.getItem("kairos-theme"); } catch (e) {}
+  if (stored) root.setAttribute("data-theme", stored);
+
+  function currentlyDark() {
+    var explicit = root.getAttribute("data-theme");
+    if (explicit) return explicit === "dark";
+    return matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function syncToggleLabel() {
+    toggle.setAttribute("aria-label", currentlyDark() ? "Switch to light theme" : "Switch to dark theme");
+  }
+  syncToggleLabel();
+  toggle.addEventListener("click", function () {
+    var next = currentlyDark() ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("kairos-theme", next); } catch (e) {}
+    syncToggleLabel();
+  });
+
+  /* ======================================================================
+     The link's configuration, and a slot generator that honours it.
+
+     Durations are whole minutes, configured per link. When a link offers
+     more than one, the invitee picks, and the choice changes which times
+     exist: a 25-minute call fits gaps a 50-minute call cannot. That is
+     interval arithmetic, not a relabelled list, so it is written as
+     interval arithmetic here too.
+
+       candidate = [start, start + duration)
+       busy      = [from - margin, to + margin)   the margin pads the
+                                                  existing meeting, never
+                                                  the candidate
+       start advances on the increment grid
+
+     Everything below is authored demonstration data: the blocked hours and
+     the month are invented.
+     ====================================================================== */
+
+  var LINK = {
+    durations: [25, 50],   /* a single-duration link would list one */
+    margin: 15,            /* minutes of protected gap around a meeting */
+    increment: 30,         /* starts land on this grid */
+    dayStart: 9 * 60,
+    dayEnd: 17 * 60
+  };
+
+  /* Existing meetings, minutes from midnight, organiser's zone. */
+  var BUSY = {
+    4:  [[13 * 60, 14 * 60]],
+    6:  [[9 * 60, 10 * 60], [15 * 60, 16 * 60]],
+    11: [[11 * 60, 12 * 60]],
+    13: [[9 * 60, 12 * 60]],
+    14: [[9 * 60, 17 * 60]],
+    18: [[14 * 60, 15 * 60]],
+    20: [[10 * 60 + 30, 11 * 60 + 30]],
+    21: [[9 * 60, 13 * 60]],
+    25: [[12 * 60, 13 * 60]],
+    27: [[16 * 60, 17 * 60]]
+  };
+
+  var ZONES = {
+    "Europe/Warsaw (UTC+2)": 2,
+    "Europe/London (UTC+1)": 1,
+    "America/New_York (UTC−4)": -4,
+    "Asia/Tokyo (UTC+9)": 9
+  };
+  var BASE_OFFSET = 2;
+
+  var WEEKDAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  var SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  var LEAD_BLANKS = 5;          /* 1 August 2026 is a Saturday */
+  var DAYS_IN_MONTH = 31;
+
+  var state = {
+    day: 20,
+    minutes: null,              /* start, minutes from midnight, organiser zone */
+    duration: LINK.durations[LINK.durations.length - 1],
+    zone: "Europe/Warsaw (UTC+2)"
+  };
+
+  function weekdayIndex(day) { return (LEAD_BLANKS + day - 1) % 7; }
+  function isWeekend(day) { return weekdayIndex(day) > 4; }
+
+  function slotsFor(day, duration) {
+    if (isWeekend(day)) return [];
+    var busy = BUSY[day] || [];
+    var out = [];
+    for (var t = LINK.dayStart; t + duration <= LINK.dayEnd; t += LINK.increment) {
+      var clear = true;
+      for (var i = 0; i < busy.length; i++) {
+        var from = busy[i][0] - LINK.margin;
+        var to = busy[i][1] + LINK.margin;
+        if (t < to && t + duration > from) { clear = false; break; }
+      }
+      if (clear) out.push(t);
+    }
+    return out;
+  }
+
+  /* ---- rendering time ---------------------------------------------------- */
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function display(minutes) {
+    var total = minutes + (ZONES[state.zone] - BASE_OFFSET) * 60;
+    var dayShift = Math.floor(total / 1440);
+    total = ((total % 1440) + 1440) % 1440;
+    return { text: pad(Math.floor(total / 60)) + ":" + pad(total % 60), dayShift: dayShift };
+  }
+  function dayMark(d) { return d === 0 ? "" : (d > 0 ? " +1d" : " −1d"); }
+  function zoneName() { return state.zone.replace(/ \(.*\)$/, ""); }
+  function longDate(day) { return WEEKDAY[weekdayIndex(day)] + " " + day + " August"; }
+
+  /* ---- duration picker ----------------------------------------------------
+     A control with one option is furniture, so a single-duration link states
+     its duration as text instead. */
+
+  var durationsEl = document.getElementById("durations");
+
+  function renderDurations() {
+    if (LINK.durations.length < 2) {
+      durationsEl.outerHTML = "<span><strong>" + state.duration + " minutes</strong></span>";
+      return;
+    }
+    durationsEl.innerHTML = LINK.durations.map(function (d) {
+      return '<button type="button" data-duration="' + d + '"'
+        + ' aria-pressed="' + (d === state.duration ? "true" : "false") + '">'
+        + d + " min</button>";
+    }).join("");
+  }
+
+  durationsEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-duration]");
+    if (!btn) return;
+    state.duration = parseInt(btn.getAttribute("data-duration"), 10);
+    renderDurations();
+    /* A longer meeting can empty a day a shorter one filled, so the month is
+       recomputed, not only the list. */
+    renderDays();
+    renderSlots(true);
+  });
+
+  /* ---- month --------------------------------------------------------------- */
+
+  var daysEl = document.getElementById("days");
+
+  function renderDays() {
+    var html = "";
+    for (var b = 0; b < LEAD_BLANKS; b++) html += '<span class="day" data-state="empty"></span>';
+    for (var d = 1; d <= DAYS_IN_MONTH; d++) {
+      var count = slotsFor(d, state.duration).length;
+      html += '<button type="button" class="day"'
+        + ' data-day="' + d + '"'
+        + ' data-state="' + (count ? "available" : "unavailable") + '"'
+        + ' aria-pressed="' + (d === state.day ? "true" : "false") + '"'
+        + (count ? "" : " disabled")
+        + ' aria-label="' + longDate(d) + ", "
+        + (count ? count + " times available" : "no times available") + '">'
+        + d + "</button>";
+    }
+    daysEl.innerHTML = html;
+  }
+
+  daysEl.addEventListener("click", function (e) {
+    var btn = e.target.closest('.day[data-state="available"]');
+    if (!btn) return;
+    state.day = parseInt(btn.getAttribute("data-day"), 10);
+    daysEl.querySelectorAll(".day").forEach(function (d) { d.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+    renderSlots(true);
+  });
+
+  /* ---- times ----------------------------------------------------------------- */
+
+  var slotsEl = document.getElementById("slots");
+  var emptyEl = document.getElementById("slots-empty");
+
+  function renderSlots(animate) {
+    var times = slotsFor(state.day, state.duration);
+
+    document.getElementById("slots-date").textContent = longDate(state.day);
+    document.getElementById("slots-count").textContent =
+      times.length === 1 ? "1 time" : times.length + " times";
+
+    slotsEl.hidden = times.length === 0;
+    emptyEl.hidden = times.length !== 0;
+
+    if (!times.length) {
+      document.getElementById("empty-reason").textContent = isWeekend(state.day)
+        ? "This link only takes bookings on weekdays."
+        : "No gap long enough for " + state.duration + " minutes here, once the "
+          + LINK.margin + " minute margin around the existing meetings is counted.";
+      state.minutes = null;
+      syncChoice();
+      return;
+    }
+
+    if (times.indexOf(state.minutes) === -1) state.minutes = times[0];
+
+    slotsEl.setAttribute("data-animate", animate ? "true" : "false");
+    slotsEl.innerHTML = times.map(function (t, i) {
+      var d = display(t);
+      return '<button type="button" class="slot" style="--i:' + i + '"'
+        + ' data-minutes="' + t + '"'
+        + ' aria-pressed="' + (t === state.minutes ? "true" : "false") + '">'
+        + d.text + dayMark(d.dayShift) + "</button>";
+    }).join("");
+
+    syncChoice();
+  }
+
+  slotsEl.addEventListener("click", function (e) {
+    var btn = e.target.closest(".slot");
+    if (!btn) return;
+    state.minutes = parseInt(btn.getAttribute("data-minutes"), 10);
+    slotsEl.querySelectorAll(".slot").forEach(function (s) { s.setAttribute("aria-pressed", "false"); });
+    btn.setAttribute("aria-pressed", "true");
+    syncChoice();
+  });
+
+  document.getElementById("jump-next").addEventListener("click", function () {
+    for (var d = state.day + 1; d <= DAYS_IN_MONTH; d++) {
+      if (slotsFor(d, state.duration).length) {
+        state.day = d;
+        renderDays();
+        renderSlots(true);
+        return;
+      }
+    }
+  });
+
+  /* ---- what the invitee is committing to -------------------------------------- */
+
+  function currentStep() {
+    if (!document.getElementById("step-choose").hidden) return "step-choose";
+    if (!document.getElementById("step-details").hidden) return "step-details";
+    return "step-done";
+  }
+
+  function syncChoice() {
+    var has = state.minutes !== null;
+    var from = has ? display(state.minutes) : null;
+    var to = has ? display(state.minutes + state.duration) : null;
+    var span = has ? from.text + "–" + to.text + dayMark(from.dayShift) : "";
+    var meta = state.duration + " minutes · " + state.zone + " · Google Meet";
+
+    document.getElementById("pick-desktop").textContent =
+      has ? longDate(state.day) + ", " + span : "Pick a time to continue";
+    document.getElementById("continue-desktop").disabled = !has;
+
+    document.getElementById("actionbar").hidden = !has || currentStep() !== "step-choose";
+    if (has) {
+      document.getElementById("actionbar-when").textContent =
+        SHORT[weekdayIndex(state.day)] + " " + state.day + " Aug, " + from.text + dayMark(from.dayShift);
+      document.getElementById("actionbar-meta").textContent = state.duration + " min · " + zoneName();
+    }
+
+    document.getElementById("summary-when").textContent = longDate(state.day) + " 2026, " + span;
+    document.getElementById("summary-meta").textContent = meta;
+    document.getElementById("done-when").textContent = longDate(state.day) + " 2026, " + span;
+    document.getElementById("done-meta").textContent = meta;
+  }
+
+  /* ---- steps ------------------------------------------------------------------- */
+
+  function show(id) {
+    ["step-choose", "step-details", "step-done"].forEach(function (s) {
+      document.getElementById(s).hidden = (s !== id);
+    });
+    document.getElementById("actionbar").hidden = (id !== "step-choose") || state.minutes === null;
+    window.scrollTo(0, 0);
+  }
+  document.getElementById("continue-desktop").addEventListener("click", function () { show("step-details"); });
+  document.getElementById("continue-mobile").addEventListener("click", function () { show("step-details"); });
+  document.getElementById("back-to-times").addEventListener("click", function () { show("step-choose"); });
+
+  document.getElementById("booking-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = document.getElementById("confirm-btn");
+    btn.setAttribute("data-loading", "true");
+    setTimeout(function () {
+      btn.removeAttribute("data-loading");
+      show("step-done");
+    }, 700);
+  });
+
+  document.getElementById("tz-select").addEventListener("change", function (e) {
+    state.zone = e.target.value;
+    renderSlots(true);
+  });
+
+  renderDurations();
+  renderDays();
+  renderSlots(false);
+})();
+</script>
+</body>
+</html>

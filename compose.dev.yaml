@@ -1,0 +1,39 @@
+# The identity provider a laptop does not have, and nothing else.
+#
+# A deployment signs the operator into Pocket ID — or Authentik, or Keycloak, or
+# anything else that speaks OIDC — running somewhere on the cluster. A laptop has
+# none of that, and nothing has ever listened on the committed `https://id.localhost`
+# placeholder, so /admin/login answered 500 and the workbench could not be signed
+# into locally at all. This file is what makes that leg runnable.
+#
+# It is a MOCK provider on purpose: it serves real OIDC discovery and issues real
+# signed tokens, but it accepts any client id, any client secret, any redirect URI,
+# and any username typed into its login form. That is exactly what makes it useful
+# — the real AddOpenIdConnect handler runs end to end, so the code path under test
+# is the shipping one, and no authentication bypass is added to the application to
+# get there.
+#
+# Nothing in this file is needed to run Kairos in production, and nothing outside
+# appsettings.Development.json points at it. `compose.dev.yaml` rather than
+# `compose.yaml` so that a bare `docker compose up` in this repository does not
+# start an identity provider that trusts everybody.
+services:
+  oidc:
+    # Pinned by tag AND digest. The tag records which release a human chose; the
+    # digest is what actually runs, and it is the half that a re-tagged image
+    # cannot move underneath us.
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.1@sha256:b97e48a499d312631206d166e2f2266adb9af34ef8b411dba9b15e48c6dc0dbe
+    # Bound to the loopback interface, not to 0.0.0.0. A provider that mints a
+    # token for anyone who types a name into a form is not something to publish
+    # onto a café's wireless network.
+    ports:
+      - "127.0.0.1:5400:8080"
+    environment:
+      # `interactiveLogin` puts a login form in front of the authorize endpoint
+      # instead of issuing a token immediately. That is the point: the browser leg
+      # — challenge, consent, callback, correlation cookie, code exchange — is
+      # exercised rather than short-circuited. Whatever is typed becomes the
+      # subject, and `default` is the issuer id, which is why the authority in
+      # appsettings.Development.json ends in /default.
+      JSON_CONFIG: '{"interactiveLogin": true}'
+    restart: unless-stopped
