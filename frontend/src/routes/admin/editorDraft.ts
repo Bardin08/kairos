@@ -25,13 +25,47 @@ const NEW_LIMITS: LinkLimits = {
   startIncrementMinutes: null,
 }
 
-/** What a new link starts as. One duration, because zero is not a link. */
+/**
+ * What a new link starts as. One duration, because zero is not a link.
+ *
+ * 30 is not pinned to anything: `DurationEditor.tsx`'s `PRESETS` is the module
+ * that owns "the four lengths nearly every link uses", and nothing keeps this
+ * value inside that set. Drop 30 from `PRESETS` and this default sits here
+ * unchanged, offering new links a length the picker no longer has.
+ */
 const NEW_DURATION_MINUTES = 30
 const NEW_DURATIONS = [NEW_DURATION_MINUTES]
 
-/** Nothing has moved. Named because it is a state, not an arithmetic zero. */
-const CLEAN = 0
+/**
+ * Nothing has moved. Named because it is a state, not an arithmetic zero, and
+ * exported so a caller checking dirtiness writes `changedCount(...) !== CLEAN`
+ * instead of a bare `0` — the self-documentation this module keeps everywhere
+ * else.
+ */
+export const CLEAN = 0
 const ONE_FIELD = 1
+
+/** The four scalar fields — everything in `EditorDraft` that isn't compared structurally. */
+type ScalarKey = keyof Omit<EditorDraft, 'durations' | 'limits'>
+
+/**
+ * Drives the scalar half of `changedCount`'s loop. `LIMIT_KEYS` protects the
+ * limits half of the count with the equivalent assertion below; before this,
+ * the scalar half had nothing stopping a field added to `EditorDraft` from
+ * silently going uncounted — `draftOf` would fail to compile on both of its
+ * return literals, but `changedCount` would compile clean and undercount.
+ */
+const SCALAR_KEYS = ['name', 'slug', 'description', 'patternId'] as const satisfies readonly ScalarKey[]
+
+/**
+ * `SCALAR_KEYS` is exhaustive because `satisfies` only checks one direction —
+ * every listed key is a real `ScalarKey`, not that every `ScalarKey` is listed.
+ * This is the other direction: a scalar field added to `EditorDraft` and left
+ * out of `SCALAR_KEYS` fails here instead of silently undercounting.
+ */
+type EveryScalarKeyListed = [ScalarKey] extends [(typeof SCALAR_KEYS)[number]] ? true : never
+const _everyScalarKeyListed: EveryScalarKeyListed = true
+void _everyScalarKeyListed
 
 /**
  * The link as a draft, or the shape a new one starts in.
@@ -81,10 +115,9 @@ export function draftOf(link: AdminLink | null, firstPatternId: string): EditorD
 export function changedCount(baseline: EditorDraft, draft: EditorDraft): number {
   let changed = CLEAN
 
-  if (baseline.name !== draft.name) changed += ONE_FIELD
-  if (baseline.slug !== draft.slug) changed += ONE_FIELD
-  if (baseline.description !== draft.description) changed += ONE_FIELD
-  if (baseline.patternId !== draft.patternId) changed += ONE_FIELD
+  for (const key of SCALAR_KEYS) {
+    if (baseline[key] !== draft[key]) changed += ONE_FIELD
+  }
 
   const sameDurations =
     baseline.durations.length === draft.durations.length &&
