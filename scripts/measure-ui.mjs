@@ -778,29 +778,53 @@ const main = async () => {
    *
    * kairos.css nests every rule inside `@layer components`, so the target is
    * three levels down — CSSLayerBlockRule > CSSMediaRule > CSSStyleRule — not
-   * one. Every grouping rule (layer, media, supports) exposes `.cssRules`, so
-   * the walk recurses on that alone rather than assuming media rules sit at
-   * the top level or checking for a specific rule type.
+   * one. Every grouping rule exposes `.cssRules`, but so, under the CSS
+   * Nesting spec, does a plain CSSStyleRule with nothing nested inside it —
+   * as an always-present, usually *empty* CSSRuleList. Recursing on mere
+   * truthiness (verified against a live CSSStyleRule with Playwright's own
+   * Chromium: `!!rule.cssRules` is true, `rule.cssRules.length` is 0)
+   * silently swallowed every leaf into a no-op recursion and its own
+   * selectorText was never checked — the actual reason this returned null
+   * against the live instance, not the regex. Recursing only when there is
+   * something to descend into (`rule.cssRules.length > 0`), and checking a
+   * rule's own selectorText independently of whether it also has children,
+   * fixes both: a real grouping rule with content still recurses, and an
+   * ordinary leaf falls straight through to the selector check.
+   *
+   * The selector match itself is whitespace-normalised `includes`, not a
+   * split-and-strict-equality: `rule.selectorText` serialises the whole
+   * comma-joined group as one string, and two rules on this exact path share
+   * a `.field-row-control` prefix, so the needle has to be normalised the
+   * same way as the haystack and specific enough (`> .input`) to land on the
+   * rule that actually sets `width: 100%`, not the bare one above it.
    */
   const readFieldRowBreakpoint = async (page) =>
     page.evaluate(() => {
-      const TARGET = '.field-row-control > .input'
-      let found = null
-      const walk = (rules, maxWidth) => {
+      const normalize = (text) => text.replace(/\s+/g, ' ').trim()
+      const TARGET = normalize('.field-row-control > .input')
+      let breakpoint = null
+      let mediaText = null
+      const walk = (rules, maxWidth, currentMediaText) => {
         for (const rule of rules) {
           let innerMaxWidth = maxWidth
+          let innerMediaText = currentMediaText
           if (rule.media) {
             const match = rule.media.mediaText.match(/max-width:\s*([\d.]+)px/)
-            if (match) innerMaxWidth = Number(match[1])
+            if (match) {
+              innerMaxWidth = Number(match[1])
+              innerMediaText = rule.media.mediaText
+            }
           }
-          if (rule.cssRules) {
-            walk(rule.cssRules, innerMaxWidth)
-          } else if (
+          if (
             innerMaxWidth !== null &&
             rule.selectorText &&
-            rule.selectorText.split(',').some((selector) => selector.trim() === TARGET)
+            normalize(rule.selectorText).includes(TARGET)
           ) {
-            found = innerMaxWidth
+            breakpoint = innerMaxWidth
+            mediaText = innerMediaText
+          }
+          if (rule.cssRules && rule.cssRules.length > 0) {
+            walk(rule.cssRules, innerMaxWidth, innerMediaText)
           }
         }
       }
@@ -811,10 +835,10 @@ const main = async () => {
         } catch {
           continue
         }
-        walk(rules, null)
-        if (found !== null) break
+        walk(rules, null, null)
+        if (breakpoint !== null) break
       }
-      return found
+      return { breakpoint, mediaText }
     })
 
   /** A CSS custom property on :root, resolved to a number of px, or null. */
@@ -954,17 +978,21 @@ const main = async () => {
           return
         }
 
-        const breakpoint = await readFieldRowBreakpoint(page)
+        const { breakpoint, mediaText } = await readFieldRowBreakpoint(page)
         // The desktop size-class caps and the phone full-width contract are
         // mutually exclusive: below the breakpoint the caps are not the rule
         // kairos.css enforces, and checking them there is exactly what
         // produced the false positive on the pattern <select> at 440. If the
-        // stylesheet's own rule can't be found, a silent fallback to the
-        // desktop contract reproduces that false positive and reads as a
-        // real finding — so this fails loudly instead of guessing.
-        if (breakpoint === null) {
+        // stylesheet's own rule can't be found — or parses to something that
+        // isn't a real breakpoint — a silent fallback to the desktop contract
+        // reproduces that false positive and reads as a real finding, so this
+        // fails loudly instead of guessing. mediaText travels alongside the
+        // parsed number in both the error and the record, so a future reader
+        // can see the raw string and the number side by side and judge the
+        // parse themselves rather than trust it blind.
+        if (breakpoint === null || !Number.isFinite(breakpoint) || breakpoint <= 0) {
           throw new Error(
-            `readFieldRowBreakpoint found no @media (max-width) around ".field-row-control > .input" in the served stylesheet for ${name} — refusing to fall back to the desktop size-class contract`,
+            `readFieldRowBreakpoint could not parse a positive max-width around ".field-row-control > .input" in the served stylesheet for ${name} — got breakpoint=${breakpoint} from mediaText=${JSON.stringify(mediaText)} — refusing to fall back to the desktop size-class contract`,
           )
         }
         const tap = await readCssPixelVar(page, '--tap')
@@ -1030,6 +1058,7 @@ const main = async () => {
           viewportWidth: viewport.width,
           viewportHeight: viewport.height,
           fieldRowBreakpoint: breakpoint,
+          fieldRowBreakpointMediaText: mediaText,
           layoutContract: isPhoneLayout ? 'stacked' : 'desktop',
           tapFloor: tap,
           controlCount: controls.length,
