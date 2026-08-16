@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { clock, minuteOfDay } from './adminTime'
 import Failure from './Failure'
 import { replacePatternRules, type Pattern, type PatternRule } from './patterns'
 
@@ -16,9 +17,6 @@ const WEEKDAYS = [
 
 /** ISO-8601: 1 is Monday, 7 is Sunday. Not `Date.getDay()`, whose Sunday is 0. */
 const MONDAY = 1
-const MINUTES_PER_HOUR = 60
-const LAST_HOUR = 23
-const CLOCK_DIGITS = 'HH'.length
 
 /**
  * One window while it is being edited, in the `HH:MM` an `<input type="time">`
@@ -42,31 +40,6 @@ type Hours = { isoDayOfWeek: number; startMinute: number; endMinute: number }
  * overlap the server exists to refuse.
  */
 const BLANK: Draft = { start: '', end: '' }
-
-/** `540` → `09:00`. Zero-padded, so a column of them keeps one width. */
-function clock(minutes: number): string {
-  const hour = Math.floor(minutes / MINUTES_PER_HOUR)
-  const minute = minutes % MINUTES_PER_HOUR
-  return `${String(hour).padStart(CLOCK_DIGITS, '0')}:${String(minute).padStart(CLOCK_DIGITS, '0')}`
-}
-
-/**
- * `09:00` → `540`, and null for anything else.
- *
- * `<input type="time">` answers with an empty string until it is filled in, so
- * null is "not stated yet" — which is what keeps a half-typed window out of the
- * request rather than out of the field.
- */
-function minuteOfDay(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (match === null) return null
-
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (hour > LAST_HOUR || minute >= MINUTES_PER_HOUR) return null
-
-  return hour * MINUTES_PER_HOUR + minute
-}
 
 /** The pattern's rules as seven days of windows, earliest first within each day. */
 function weekOf(rules: readonly PatternRule[]): Week {

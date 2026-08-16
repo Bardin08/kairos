@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'wouter'
 
 import { getSettings } from './adminSettings'
+import { clock } from './adminTime'
 import Failure from './Failure'
 import {
   createPattern,
@@ -26,15 +27,7 @@ const WEEKDAYS = [
   { short: 'Su', long: 'Sun' },
 ]
 
-const MINUTES_PER_HOUR = 60
 const MONDAY = 1
-
-/** `540` → `09:00`. Zero-padded, so a column of them keeps one width. */
-function clock(minuteOfDay: number): string {
-  const hour = Math.floor(minuteOfDay / MINUTES_PER_HOUR)
-  const minute = minuteOfDay % MINUTES_PER_HOUR
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-}
 
 /**
  * `Mon, Tue, Wed · 09:00–17:00` — the card's one line of hours.

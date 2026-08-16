@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 
 import Failure from './Failure'
+import PatternPreview from './PatternPreview'
 import { listPatterns, type Pattern } from './patterns'
 import WeekEditor from './WeekEditor'
 
@@ -84,9 +85,10 @@ export default function PatternEditor({ params }: { params: { patternId: string 
           {/* The write answers with the whole pattern, so what comes back
               replaces this page's copy rather than being merged into it. */}
           <WeekEditor pattern={pattern} onChange={setPattern} />
-          <section className="card card-pad">
-            <h2 className="title-section">Preview</h2>
-          </section>
+          {/* No onChange of its own, deliberately: it writes overrides and the
+              pane above is the only reader of the rest of the pattern. The
+              reason that is not an oversight is in PatternPreview's header. */}
+          <PatternPreview pattern={pattern} />
         </div>
       )}
     </>
