@@ -51,6 +51,10 @@ const TODAY = '2026-08-15T12:00:00Z'
 // August 2026: the 18th and the 25th are Tuesdays, the 23rd a Sunday.
 const A_TUESDAY = '2026-08-18'
 const A_SUNDAY = '2026-08-23'
+// The operator's own date, which is a Saturday, and the Thursday they blocked
+// by accident nine days before it.
+const TODAYS_DATE = '2026-08-15'
+const A_PAST_THURSDAY = '2026-08-06'
 
 const weekdays: Pattern = {
   id: PATTERN_ID,
@@ -174,6 +178,98 @@ test('a date with its own hours is readable without being changed', () => {
   expect(
     screen.getByLabelText(/23 August, opens at/).getAttribute('value'),
   ).toBe('09:00')
+})
+
+/**
+ * The reported defect, at the surface the operator met it on: 6 August was
+ * blocked from this grid on the 15th, and no click on a day that has already
+ * happened can change what any invitee was offered. Today stays live — the rest
+ * of it is still ahead, and closing it would take a working day away to fix an
+ * untidiness in the past.
+ */
+test('a date before today writes nothing, and today is still live', async () => {
+  vi.mocked(savePatternOverride).mockResolvedValue(weekdays)
+
+  render(<PatternPreview pattern={weekdays} />)
+  // Waited for, because the zone that decides which dates have passed is the
+  // organizer's and arrives from settings — the browser's is only the guess the
+  // first paint is drawn on.
+  await waitFor(() => expect(getSettings).toHaveBeenCalled())
+
+  // A Tuesday, so the weekly rule opened it and only its date closes it.
+  expect(day('11 August').hasAttribute('disabled')).toBe(true)
+
+  fireEvent.click(day('11 August'))
+
+  expect(savePatternOverride).not.toHaveBeenCalled()
+  expect(removePatternOverride).not.toHaveBeenCalled()
+  // No panel: the fields belong to a selected date, and none was selected.
+  expect(screen.queryByLabelText(/11 August, opens at/)).toBeNull()
+
+  fireEvent.click(day('15 August'))
+
+  await waitFor(() =>
+    expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, TODAYS_DATE, {
+      startMinute: null,
+      endMinute: null,
+    }),
+  )
+})
+
+/**
+ * History is shown, not hidden. The operator's accidental block on 6 August is
+ * still in the pattern and still says so — in the list, which is where a date's
+ * own hours have always been read — while the date itself carries no control
+ * that could change it.
+ */
+test('an override on a past date is still readable and no longer editable', async () => {
+  render(
+    <PatternPreview
+      pattern={{
+        ...weekdays,
+        overrides: [{ date: A_PAST_THURSDAY, startMinute: null, endMinute: null }],
+      }}
+    />,
+  )
+  await waitFor(() => expect(getSettings).toHaveBeenCalled())
+
+  expect(screen.getByText(/Blocked · already passed/)).toBeDefined()
+  expect(screen.queryByRole('button', { name: 'Show Thursday 6 August' })).toBeNull()
+  expect(day('6 August').hasAttribute('disabled')).toBe(true)
+})
+
+/**
+ * The second defect. The fields used to open on whatever an unset time input
+ * shows — a start equal to its end, which the server refuses as
+ * `window_inverted` — so moving one end of a day meant setting both. They open
+ * on the hours that weekday already offers, and one edit is one edit again.
+ */
+test("a date's hours open on the week's, so moving one end is enough", async () => {
+  const blocked = { date: A_TUESDAY, startMinute: null, endMinute: null }
+  vi.mocked(savePatternOverride).mockResolvedValue({ ...weekdays, overrides: [blocked] })
+
+  render(<PatternPreview pattern={weekdays} />)
+
+  // The click that opens the panel is also the one that blocks the date — the
+  // square is a toggle and there is no other way in. What the fields carry
+  // afterwards is the point: the hours the date would offer if it were opened.
+  fireEvent.click(day('18 August'))
+  await waitFor(() => expect(savePatternOverride).toHaveBeenCalledTimes(1))
+
+  expect(screen.getByLabelText(/18 August, opens at/).getAttribute('value')).toBe('09:00')
+  expect(screen.getByLabelText(/18 August, closes at/).getAttribute('value')).toBe('17:00')
+
+  fireEvent.change(screen.getByLabelText(/18 August, closes at/), {
+    target: { value: '13:00' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Use these hours on this date' }))
+
+  await waitFor(() =>
+    expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_TUESDAY, {
+      startMinute: NINE_AM,
+      endMinute: ONE_PM,
+    }),
+  )
 })
 
 /**

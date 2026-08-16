@@ -16,7 +16,7 @@ import { listLinks, type AdminLink } from './adminLinks'
 import { getSettings } from './adminSettings'
 import { clock, minuteOfDay, shiftDays } from './adminTime'
 import Failure from './Failure'
-import { patternDays } from './patternDays'
+import { hoursOn, NO_HOURS, patternDays } from './patternDays'
 import {
   removePatternOverride,
   savePatternOverride,
@@ -30,9 +30,6 @@ const DAY_BEFORE = -1
 
 /** Blocking a date is an override with no hours in it at all. */
 const BLOCKED = { startMinute: null, endMinute: null }
-
-/** Two empty time fields: nothing typed yet, which is not the same as 00:00. */
-const NO_HOURS = { start: '', end: '' }
 
 /** The picker's own value. Not a slug, so no link can ever collide with it. */
 const DAYS_ONLY = ''
@@ -101,10 +98,20 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   // off it, and a string has already thrown that away.
   const [failure, setFailure] = useState<unknown>(null)
 
-  // The links standing on this pattern and the zone their times are counted in.
-  // One state, because they arrive together and neither is usable alone.
-  const [catalog, setCatalog] = useState<{ links: AdminLink[]; zone: string } | null>(null)
-  const [catalogFailure, setCatalogFailure] = useState<unknown>(null)
+  // The links standing on this pattern, which is what the times picker offers.
+  const [links, setLinks] = useState<AdminLink[]>([])
+  const [linksFailure, setLinksFailure] = useState<unknown>(null)
+
+  /*
+   * The organizer's zone, which decides two things: the date a slot instant
+   * lands on, and which dates have already happened and are therefore closed to
+   * editing. Starts as the browser's and becomes the organizer's as soon as
+   * settings answer — the same opening guess Meetings.tsx makes for the same
+   * question, because the grid has to be drawn before any answer exists. Where
+   * the two differ the correction is at most a day at the boundary, and it
+   * arrives before anything can be clicked.
+   */
+  const [zone, setZone] = useState(localZone)
   const [slug, setSlug] = useState(DAYS_ONLY)
   // Null is "not read yet", never "no times": the difference is what keeps an
   // unanswered request from drawing a month that says nothing is bookable.
@@ -117,33 +124,42 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     setOverrides(pattern.overrides)
   }
 
-  const links = catalog?.links ?? []
   const chosen = links.find((link) => link.slug === slug)
-  const zone = catalog?.zone ?? ''
 
   const usedByCount = pattern.usedBy.length
 
   useEffect(() => {
-    // A pattern no link points at has nothing to offer times for, and the two
-    // requests would be two refusable calls made to fill a picker with nothing.
+    const controller = new AbortController()
+
+    // Its own request and its own silence, as on the availability list. A zone
+    // that never arrives leaves this browser's standing in for the organizer's,
+    // which is a day boundary out at worst — while a failure report over the
+    // grid would be about a setting the operator did not come here to read.
+    getSettings(controller.signal)
+      .then((settings) => setZone(settings.timeZone))
+      .catch(() => undefined)
+
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    // A pattern no link points at has nothing to offer times for, and the
+    // request would be a refusable call made to fill a picker with nothing.
     if (usedByCount === 0) return
 
     const controller = new AbortController()
 
-    Promise.all([listLinks(controller.signal), getSettings(controller.signal)])
-      .then(([page, settings]) => {
-        setCatalog({
-          // By pattern id rather than by matching `usedBy` names, which is the
-          // same set arrived at without depending on two links never sharing a
-          // name. Archived links are left out: their public slots route 404s,
-          // so offering one would be offering a preview that cannot load.
-          links: page.links.filter((link) => link.patternId === pattern.id && link.active),
-          zone: settings.timeZone,
-        })
+    listLinks(controller.signal)
+      .then((page) => {
+        // By pattern id rather than by matching `usedBy` names, which is the
+        // same set arrived at without depending on two links never sharing a
+        // name. Archived links are left out: their public slots route 404s, so
+        // offering one would be offering a preview that cannot load.
+        setLinks(page.links.filter((link) => link.patternId === pattern.id && link.active))
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setCatalogFailure(error)
+        setLinksFailure(error)
       })
 
     return () => controller.abort()
@@ -178,7 +194,8 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     return () => controller.abort()
   }, [chosen, month, zone, attempt])
 
-  const states = patternDays({ month, rules: pattern.rules, overrides })
+  const today = todayIn(zone)
+  const states = patternDays({ month, rules: pattern.rules, overrides, today })
 
   function overrideOn(day: string): PatternOverride | undefined {
     return overrides.find((override) => override.date === day)
@@ -219,7 +236,10 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
    */
   function toggle(day: string) {
     setSelected(day)
-    setDraft(NO_HOURS)
+    // The week's, not the date's: whichever way this toggle goes it takes the
+    // date's own hours away — blocked, or back on the weekly rules — so the
+    // hours it will offer next are the weekday's either way.
+    setDraft(hoursOn(day, pattern.rules))
     write(() =>
       overrideOn(day) === undefined
         ? savePatternOverride(pattern.id, day, BLOCKED)
@@ -229,16 +249,10 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
 
   /** Opens a date without changing it — how an exception is read rather than set. */
   function choose(day: string) {
-    const override = overrideOn(day)
-
     setMonth(startOfMonth(day))
     setSelected(day)
     setFailure(null)
-    setDraft(
-      override === undefined || override.startMinute === null || override.endMinute === null
-        ? NO_HOURS
-        : { start: clock(override.startMinute), end: clock(override.endMinute) },
-    )
+    setDraft(hoursOn(day, pattern.rules, overrideOn(day)))
   }
 
   function applyHours() {
@@ -321,7 +335,7 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
         </div>
       )}
 
-      <Failure error={catalogFailure} className="mb-4" />
+      <Failure error={linksFailure} className="mb-4" />
 
       {slotsFailure !== null ? (
         // Never a month with nothing in it. An empty grid and a link that
@@ -349,7 +363,9 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
       )}
 
       <p className="fine mt-3">
-        Click a date to block it. Click a blocked date to put it back on the weekly hours.
+        Click a date to block it. Click a blocked date to put it back on the weekly hours. Dates
+        before today are read-only — nothing a pattern says about them can change what has
+        already been offered.
       </p>
 
       {selected !== null && (
@@ -411,7 +427,13 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
           is an open day and looks like one. Listed rather than marked, because
           the list is also the only way to reach an exception in a month nobody
           is looking at — and reading one here does not change it, which a click
-          on the square would. */}
+          on the square would.
+
+          It is also where an exception on a past date survives. Every one of
+          them stays listed, because a pattern the operator cannot see all of is
+          worse than one carrying a holiday that has been and gone — but the
+          date is text rather than a button, since the only thing pressing it
+          leads to is the panel that edits it. */}
       {overrides.length > 0 && (
         <div className="sep-top">
           <h3 className="title-section mb-3">Exceptions</h3>
@@ -420,20 +442,27 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               .sort((left, right) => left.date.localeCompare(right.date))
               .map((override) => (
                 <li className="row gap-2 wrap" key={override.date}>
-                  {/* Named for what pressing it does, and named in full: the
-                      square for the same date is a few lines up the page with
-                      an abbreviation of the same words on it, and a list of
-                      controls that has both in it has to say which is which. */}
-                  <button
-                    className="btn btn-ghost btn-inline numeric"
-                    type="button"
-                    aria-label={`Show ${longDate(override.date)}`}
-                    aria-pressed={override.date === selected}
-                    onClick={() => choose(override.date)}
-                  >
-                    {shortDate(override.date)}
-                  </button>
-                  <span className="muted numeric t-sm">{describe(override)}</span>
+                  {override.date < today ? (
+                    <span className="numeric t-sm">{shortDate(override.date)}</span>
+                  ) : (
+                    // Named for what pressing it does, and named in full: the
+                    // square for the same date is a few lines up the page with
+                    // an abbreviation of the same words on it, and a list of
+                    // controls that has both in it has to say which is which.
+                    <button
+                      className="btn btn-ghost btn-inline numeric"
+                      type="button"
+                      aria-label={`Show ${longDate(override.date)}`}
+                      aria-pressed={override.date === selected}
+                      onClick={() => choose(override.date)}
+                    >
+                      {shortDate(override.date)}
+                    </button>
+                  )}
+                  <span className="muted numeric t-sm">
+                    {describe(override)}
+                    {override.date < today && ' · already passed'}
+                  </span>
                 </li>
               ))}
           </ul>

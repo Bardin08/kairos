@@ -10,8 +10,12 @@ function availability(count: number): string {
   return count === 1 ? '1 time available' : `${count} times available`
 }
 
-/** What a day is, when the caller knows. Absent on the booking page, which only has counts. */
-export type DayState = 'open' | 'closed' | 'blocked'
+/**
+ * What a day is, when the caller knows. Absent on the booking page, which only
+ * has counts. `past` is the one value that is not about the pattern: it says the
+ * day has already happened, and no square that carries it can be pressed.
+ */
+export type DayState = 'open' | 'closed' | 'blocked' | 'past'
 
 /**
  * A month of days, keyed on the ORGANIZER's calendar — which is what the slots
@@ -78,8 +82,10 @@ export default function MonthGrid({
           const open = counts === undefined ? state === 'open' : count > 0
           // Every square is live in the pattern editor: blocking a Sunday the
           // pattern never opens is a legitimate thing to do, and there is no
-          // count on that day to say so.
-          const actionable = open || state !== undefined
+          // count on that day to say so. A day already past is the exception,
+          // and it is the caller's word rather than a date this component works
+          // out — the day it has passed is the organizer's, not this browser's.
+          const actionable = (open || state !== undefined) && state !== 'past'
 
           return (
             <button

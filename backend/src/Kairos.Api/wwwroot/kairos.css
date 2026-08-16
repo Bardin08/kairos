@@ -844,6 +844,22 @@
      screenshot with no colour of its own. */
   .day[data-day-state="blocked"] { text-decoration: line-through; }
 
+  /* A day already past. The two marks the square had were both spent — dimming
+     on closed days, the strike on blocked ones — so this takes the third place
+     it has, the 4px slot an available day puts its dot in, and fills it with a
+     dash instead. A dash and a dot differ in shape rather than in colour, so
+     the pair survives both themes, a monochrome screenshot and a reader who
+     separates neither the greys nor the hues; and the two can never appear on
+     one square, because a day that has been cannot have times left on it.
+     Declared after the dot so that if one ever did, past wins. */
+  .day[data-day-state="past"]::after {
+    content: "";
+    position: absolute;
+    inset-block-end: 4px;
+    width: 10px; height: 1px;
+    background: currentColor;
+  }
+
   /* ---- slots ---------------------------------------------------------------
      The authored motion of this product lives here, and only here: changing
      the day re-lists the times as a short stagger of ease-out entrances from
