@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import MonthGrid from '../../components/MonthGrid'
 import { getSlots } from '../../lib/api'
@@ -14,7 +14,7 @@ import {
 } from '../../lib/time'
 import { listLinks, type AdminLink } from './adminLinks'
 import { getSettings } from './adminSettings'
-import { clock, shiftDays, windowsOf, type Draft } from './adminTime'
+import { BLANK, clock, shiftDays, windowsOf, type Draft } from './adminTime'
 import Failure from './Failure'
 import { patternDays, windowsOn } from './patternDays'
 import {
@@ -23,6 +23,7 @@ import {
   type OverrideWindow,
   type Pattern,
   type PatternOverride,
+  type PatternRule,
 } from './patterns'
 import WindowRows from './WindowRows'
 
@@ -62,6 +63,40 @@ function describe(override: PatternOverride | undefined): string {
   return override.windows
     .map((window) => `${clock(window.startMinute)}–${clock(window.endMinute)}`)
     .join(', ')
+}
+
+/**
+ * The three states a date can be in, and no more — the whole of the control
+ * that replaced the square's two hidden gestures. A named union rather than
+ * three strings scattered through the file, so a typo in one is a compile
+ * error rather than a state the control silently never reaches.
+ */
+type DateState = 'weekly' | 'own-hours' | 'blocked'
+
+/** The three, in the order the control lays them out and the order arrow keys walk them. */
+const DATE_STATES: readonly DateState[] = ['weekly', 'own-hours', 'blocked']
+
+/**
+ * Which of the three a date's override says it is in, and nothing else — the
+ * control's selection is this and only this, so a save that lands can never
+ * leave the control pointing at a state the data disagrees with.
+ */
+function dateStateOf(override: PatternOverride | undefined): DateState {
+  if (override === undefined) return 'weekly'
+  return override.windows.length === 0 ? 'blocked' : 'own-hours'
+}
+
+/**
+ * The weekday's own hours in text, for the Weekly state's one-line summary
+ * under the control. Null means the weekday has none — `windowsOn` seeds a
+ * single blank row for that case, the one shape a date's own hours can never
+ * take on their own, so recognising it here answers "is this weekday closed"
+ * without a second read of the rules that already answered it once.
+ */
+function weekdayHours(day: string, rules: readonly PatternRule[]): string | null {
+  const windows = windowsOn(day, rules)
+  if (windows.length === 1 && windows[0] === BLANK) return null
+  return windows.map((window) => `${window.start}–${window.end}`).join(', ')
 }
 
 /**
@@ -105,6 +140,18 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   // is selected, which is also when the panel holding them first renders.
   const [draft, setDraft] = useState<Draft[]>([])
   const [unsaved, setUnsaved] = useState(false)
+  // Picking Own hours writes nothing, so there is no override yet for
+  // `dateStateOf` to read it back from — this is the one bit the control adds
+  // on top of the data rather than reading out of it, and it exists for
+  // exactly that gap. Three guards keep it from disagreeing with the data
+  // rather than one: `choose` resets it on every new selection; picking
+  // Weekly or Blocked clears it in the same click that sends the write, and
+  // both are blocked — the radios disabled, `pickOwnHours` itself refusing —
+  // while a write is already in flight, so Own hours can never be picked
+  // between a write firing and it landing; and the resync below clears it
+  // whenever `pattern.overrides` moves out from under it for a reason that
+  // was not this pane's own write at all.
+  const [editingOwnHours, setEditingOwnHours] = useState(false)
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` reads the status
   // off it, and a string has already thrown that away.
@@ -134,6 +181,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   if (source !== pattern.overrides) {
     setSource(pattern.overrides)
     setOverrides(pattern.overrides)
+    // An override change this pane did not write itself — the week pane
+    // saving rules reloads the whole pattern, and a future caller might too.
+    // Own hours is the one state this pane can be showing without the data
+    // agreeing yet, so it is the one flag an outside change has to clear
+    // rather than leave pointing at a state the data no longer holds.
+    setEditingOwnHours(false)
   }
 
   const chosen = links.find((link) => link.slug === slug)
@@ -215,6 +268,18 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     return overrides.find((override) => override.date === day)
   }
 
+  // Weekly when nothing is selected, which is never rendered — the control
+  // this feeds only exists inside the `selected !== null` block below.
+  const dateState: DateState =
+    selected === null
+      ? 'weekly'
+      : editingOwnHours
+        ? 'own-hours'
+        : dateStateOf(overrideOn(selected))
+  // The Weekly state's one-line summary. Null past `selected === null` too,
+  // for the same reason: nothing renders it until a date is picked.
+  const weekdaySummary = selected === null ? null : weekdayHours(selected, pattern.rules)
+
   // Takes the request unsent so that the one refusal to make a second one while
   // the first is in flight can live here, rather than at each of the three
   // controls that write — and the one that forgot it would be the one that
@@ -240,35 +305,15 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
       })
   }
 
-  /**
-   * One click, one exception. A date the pattern has said nothing about becomes
-   * blocked; a date it has said anything about goes back to the weekly hours.
-   *
-   * The write is immediate and there is no confirmation, because the inverse is
-   * the same gesture on the same square — and a pattern in use is live, so a
-   * dialog between the click and the block would be a holiday still on offer
-   * while somebody reads it.
-   */
-  function toggle(day: string) {
-    setSelected(day)
-    setUnsaved(false)
-    // The week's, not the date's: whichever way this toggle goes it takes the
-    // date's own hours away — blocked, or back on the weekly rules — so the
-    // hours it will offer next are the weekday's either way.
-    setDraft(windowsOn(day, pattern.rules))
-    write(() =>
-      overrideOn(day) === undefined
-        ? savePatternOverride(pattern.id, day, BLOCKED)
-        : removePatternOverride(pattern.id, day),
-    )
-  }
-
   /** Opens a date without changing it — how an exception is read rather than set. */
   function choose(day: string) {
     setMonth(startOfMonth(day))
     setSelected(day)
     setFailure(null)
     setUnsaved(false)
+    // A fresh selection starts at what the data actually says, not at
+    // whatever the previous date's control happened to be showing.
+    setEditingOwnHours(false)
     setDraft(windowsOn(day, pattern.rules, overrideOn(day)))
   }
 
@@ -283,6 +328,101 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
     if (selected === null || windows === null || windows.length === 0) return
 
     write(() => savePatternOverride(pattern.id, selected, windows))
+  }
+
+  /**
+   * Weekly and Blocked write the moment they are picked. A pattern in use is
+   * live, and there is nothing left to confirm between the click and the
+   * write that the click itself did not already say.
+   */
+  function pickWeekly() {
+    if (selected === null) return
+
+    setEditingOwnHours(false)
+    write(() => removePatternOverride(pattern.id, selected))
+  }
+
+  function pickBlocked() {
+    if (selected === null) return
+
+    setEditingOwnHours(false)
+    write(() => savePatternOverride(pattern.id, selected, BLOCKED))
+  }
+
+  /**
+   * Reveals the rows; sends nothing. Own hours is the one state a pick alone
+   * cannot write, because there is nothing to write until a window is typed.
+   * Guarded the same way `write` guards the other two picks, even though a
+   * genuine keystroke or click cannot reach this while `disabled` is set — a
+   * disabled button cannot hold focus, so real keyboard input never lands
+   * here, and a real click is refused the same way the other two buttons'
+   * are. The guard is what keeps that true if a later change loosens how
+   * `disabled` is wired rather than removing this; the test that exercises it
+   * can only do so because `fireEvent` dispatches straight at the element,
+   * which is not something a real keydown does without focus.
+   */
+  function pickOwnHours() {
+    if (saving) return
+
+    setEditingOwnHours(true)
+  }
+
+  // One ref per option, keyed by the state it stands for rather than a
+  // position, so a key handler can move real DOM focus between them without
+  // another piece of state to keep in step with `dateState`.
+  const weeklyRef = useRef<HTMLButtonElement>(null)
+  const ownHoursRef = useRef<HTMLButtonElement>(null)
+  const blockedRef = useRef<HTMLButtonElement>(null)
+  const radioRefs = { weekly: weeklyRef, 'own-hours': ownHoursRef, blocked: blockedRef }
+  const pick = { weekly: pickWeekly, 'own-hours': pickOwnHours, blocked: pickBlocked }
+
+  /**
+   * Roving focus with MANUAL activation — not the APG default, which moves
+   * focus and selects together. The default is wrong here on purpose: Weekly
+   * and Blocked write to the server the instant they are selected, so
+   * automatic activation would turn arrowing across the group into a write
+   * per keystroke, and holding the key down into a burst of them against a
+   * pattern links stand on. So the arrows move focus and nothing else; only
+   * Space or Enter selects the option focus is already on, which is where a
+   * write can happen. `tabIndex` follows `dateState` rather than wherever
+   * focus last landed, so Tab always re-enters the group on the option that
+   * is actually selected — the same thing a native radio group does, and the
+   * reason there is no separate "last focused" state to keep in sync here.
+   */
+  function handleRadioKeyDown(event: KeyboardEvent<HTMLButtonElement>, state: DateState) {
+    const index = DATE_STATES.indexOf(state)
+    const last = DATE_STATES.length - 1
+
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault()
+        radioRefs[DATE_STATES[index === 0 ? last : index - 1]].current?.focus()
+        return
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault()
+        radioRefs[DATE_STATES[index === last ? 0 : index + 1]].current?.focus()
+        return
+      case 'Home':
+        event.preventDefault()
+        radioRefs[DATE_STATES[0]].current?.focus()
+        return
+      case 'End':
+        event.preventDefault()
+        radioRefs[DATE_STATES[last]].current?.focus()
+        return
+      case ' ':
+      case 'Enter':
+        // Prevented on keydown so a real browser's own Space/Enter
+        // activation of the `<button>` cannot also fire and double the
+        // write this already sends.
+        event.preventDefault()
+        pick[state]()
+        return
+      default:
+        return
+    }
   }
 
   return (
@@ -378,76 +518,140 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
           counts={counts ?? undefined}
           states={states}
           selected={selected}
-          onSelect={toggle}
+          onSelect={choose}
         />
       )}
 
       <p className="fine mt-3">
-        Click a date to block it. Click a blocked date to put it back on the weekly hours. Dates
-        before today are read-only — nothing a pattern says about them can change what has
-        already been offered.
+        Click a date to open it below. Dates before today are read-only — nothing a pattern says
+        about them can change what has already been offered.
       </p>
 
       {selected !== null && (
         <div className="sep-top">
-          <div className="row row-between gap-2 wrap">
-            <strong className="t-sm numeric">{longDate(selected)}</strong>
-            <span className="muted t-sm numeric">
-              {saving ? 'Saving…' : describe(overrideOn(selected))}
-            </span>
-          </div>
+          <strong className="t-sm numeric">{longDate(selected)}</strong>
 
-          {/* The week pane's own row editor, on a date instead of a weekday —
-              the same act on a different key, so the same rows. The label is
-              the date in full, because a reader listing this page's controls
-              would otherwise get two fields called "opens at" and no way to
-              tell them from the week's. */}
-          <div className="mt-3">
-            <WindowRows label={longDate(selected)} windows={draft} onChange={edit} />
-          </div>
+          {/* Three states, one control, and the current one visible before
+              anything is pressed — the replacement for the square's two
+              gestures whose outcome depended on state the operator could not
+              see. "Weekly" rather than the fuller "Follows the weekly hours":
+              the column is roughly 276px wide, and three full-length labels
+              overflow it. Blocked alone carries the danger treatment, because
+              it alone is the state that takes availability away.
 
-          {/* Typed against a draft and sent when the operator asks, exactly as
-              the week is. A pattern in use is live: a keystroke that widened a
-              window would be an hour on offer the moment it was typed, and a
-              half-typed one would be refused as a window ending before it
-              starts. The endpoint replaces the date's set entire, so one press
-              is one set — which is what makes a morning and an afternoon one
-              request rather than two. */}
-          <div className="row gap-2 wrap mt-3">
+              All three disabled while a write is in flight — independently
+              of what that write is for. A control that can be moved to a new
+              state before the last one has landed is lying about what state
+              it is even in, and it is also the one door `editingOwnHours`
+              would otherwise have into disagreeing with the data: without
+              this, Own hours could be picked between Blocked's write firing
+              and it landing, and the rows would show for a date the server
+              still holds as blocked. */}
+          <div
+            className="segmented segmented-equal mt-3"
+            role="radiogroup"
+            aria-label={longDate(selected)}
+          >
             <button
-              className="btn"
+              ref={weeklyRef}
               type="button"
-              aria-disabled={windows !== null && windows.length > 0 ? undefined : true}
-              data-loading={saving || undefined}
-              onClick={applyHours}
+              role="radio"
+              tabIndex={dateState === 'weekly' ? 0 : -1}
+              aria-checked={dateState === 'weekly'}
+              disabled={saving}
+              onClick={pickWeekly}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'weekly')}
             >
-              Use these hours on this date
+              Weekly
             </button>
-            {/* Words rather than a colour on the button, and the reason it is
-                refusing rather than only the fact of it. Removing the last
-                window is not a way to block the date: this button promises
-                hours, and blocking is the click on the square, which is one
-                gesture and undone by itself. */}
-            {windows === null ? (
-              <span className="fine">Every window needs an opening and a closing time</span>
-            ) : windows.length === 0 ? (
-              <span className="fine">
-                A date needs a window. Click the date above to block it instead.
-              </span>
-            ) : (
-              unsaved && <span className="fine">Not saved yet</span>
-            )}
+            <button
+              ref={ownHoursRef}
+              type="button"
+              role="radio"
+              tabIndex={dateState === 'own-hours' ? 0 : -1}
+              aria-checked={dateState === 'own-hours'}
+              disabled={saving}
+              onClick={pickOwnHours}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'own-hours')}
+            >
+              Own hours
+            </button>
+            <button
+              ref={blockedRef}
+              type="button"
+              role="radio"
+              className="segmented-danger"
+              tabIndex={dateState === 'blocked' ? 0 : -1}
+              aria-checked={dateState === 'blocked'}
+              disabled={saving}
+              onClick={pickBlocked}
+              onKeyDown={(event) => handleRadioKeyDown(event, 'blocked')}
+            >
+              Blocked
+            </button>
           </div>
 
-          {overrideOn(selected) !== undefined && (
-            <button
-              className="btn btn-ghost mt-3"
-              type="button"
-              data-loading={saving || undefined}
-              onClick={() => write(() => removePatternOverride(pattern.id, selected))}
-            >
-              Back to the weekly hours
-            </button>
+          {/* The two states that carry nothing else beyond what the control
+              already says. Own hours needs no sentence of its own — the rows
+              below are the answer. */}
+          {dateState === 'weekly' && (
+            <p className="fine mt-2">
+              {weekdaySummary === null
+                ? 'The weekday itself has no hours, so nothing is bookable on this date either.'
+                : `Follows the weekday's own hours: ${weekdaySummary}.`}
+            </p>
+          )}
+          {dateState === 'blocked' && (
+            <p className="fine mt-2">Nothing is bookable on this date.</p>
+          )}
+
+          {dateState === 'own-hours' && (
+            <>
+              {/* The week pane's own row editor, on a date instead of a
+                  weekday — the same act on a different key, so the same rows.
+                  The label is the date in full, because a reader listing this
+                  page's controls would otherwise get two fields called "opens
+                  at" and no way to tell them from the week's. */}
+              <div className="mt-3">
+                <WindowRows label={longDate(selected)} windows={draft} onChange={edit} />
+              </div>
+
+              {/* Its own hairline-separated footer, structured exactly like
+                  the week pane's: a primary button with its status beside it,
+                  so a date's own hours are saved the same way a week's are and
+                  read the same way while they are unsaved. Typed against a
+                  draft and sent when the operator asks: a pattern in use is
+                  live, a keystroke that widened a window would be an hour on
+                  offer the moment it was typed, and a half-typed one would be
+                  refused as a window ending before it starts. The endpoint
+                  replaces the date's set entire, so one press is one set —
+                  which is what makes a morning and an afternoon one request
+                  rather than two. */}
+              <div className="row gap-2 wrap sep-top">
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  aria-disabled={windows !== null && windows.length > 0 ? undefined : true}
+                  data-loading={saving || undefined}
+                  onClick={applyHours}
+                >
+                  Save this date
+                </button>
+                {/* Words rather than a colour on the button, and the reason it
+                    is refusing rather than only the fact of it. Removing the
+                    last window is not a way to block the date: this button
+                    promises hours, and Blocked is the button beside it. */}
+                {windows === null ? (
+                  <span className="fine">Every window needs an opening and a closing time</span>
+                ) : windows.length === 0 ? (
+                  <span className="fine">
+                    A date needs a window. Pick Blocked above to close it instead.
+                  </span>
+                ) : (
+                  unsaved && <span className="fine">Not saved yet</span>
+                )}
+              </div>
+            </>
           )}
 
           <Failure error={failure} className="mt-3" />

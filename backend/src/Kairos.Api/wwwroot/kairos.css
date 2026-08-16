@@ -727,6 +727,14 @@
   .btn-danger { --btn-fg: var(--status-danger-fg); }
   .btn-danger:hover { --btn-bg: var(--status-danger-bg); --btn-border: var(--status-danger-fg); }
 
+  /* Quieter than the plain ghost above, which DESIGN.md's own Ghost spec
+     keeps at ink-label weight for a retreat action (Back, Reschedule). Add
+     window is neither a retreat nor the selection nor the primary action —
+     the three things the accent and full ink weight are for — so it drops
+     one tone further, to --text-secondary, composed with .btn-ghost rather
+     than folded into it so a plain ghost elsewhere keeps its ink label. */
+  .btn-muted { --btn-fg: var(--text-secondary); }
+
   .btn-block { width: 100%; }
   .btn-inline { padding-inline: var(--space-2); }
   .btn svg { width: 16px; height: 16px; flex: none; }
@@ -863,8 +871,24 @@
     border: var(--border-width) solid var(--border-default);
     border-radius: var(--radius-md);
   }
+  /* Equal-column variant: the control fills its column instead of sizing to
+     content, and every option gets the same share of it regardless of how
+     many there are. `grid-auto-flow: column` lays options out one per
+     auto-generated column instead of a fixed `repeat(N, 1fr)`, so a second
+     caller with two options or four gets equal columns for free rather than
+     a dead cell or an overflow — `minmax(0, 1fr)` is what lets a column
+     shrink below its content's width instead of blowing out the row. */
+  .segmented-equal {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
   .segmented button {
-    min-height: 36px;
+    min-height: var(--tap); /* DESIGN.md's tap floor: 44px minimum on every
+                               viewport, no exceptions clause. Fixed at the
+                               base rule so the duration picker and the
+                               date-state control share one height rather
+                               than drifting apart by modifier. */
     padding-inline: var(--space-3);
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
@@ -874,14 +898,30 @@
     transition: background var(--dur-instant) var(--ease-standard),
                 color var(--dur-instant) var(--ease-standard);
   }
-  .segmented button[aria-pressed="true"] {
+  /* aria-pressed selects a toggle button (duration picker); aria-checked
+     selects a radio option (date-state control). Same look, one rule kept
+     in step rather than two that could drift. */
+  .segmented button[aria-pressed="true"],
+  .segmented button[aria-checked="true"] {
     background: var(--surface-raised);
     color: var(--text-primary);
     font-weight: var(--weight-semi);
     box-shadow: var(--shadow-1);
   }
+  /* Blocked is the only one of the three date states that takes availability
+     away. Weekly and Own hours keep the neutral selected treatment above;
+     Blocked selected speaks in the danger palette instead, so the state that
+     shuts a day off says so by itself and needs no warning sentence under it.
+     DESIGN.md spends the accent on the current selection and the primary
+     action alone, so this reaches for --status-danger-* rather than
+     --accent-subtle, and keeps the neutral rule's shadow. */
+  .segmented button.segmented-danger[aria-pressed="true"],
+  .segmented button.segmented-danger[aria-checked="true"] {
+    background: var(--status-danger-bg);
+    color: var(--status-danger-fg);
+  }
   @media (hover: hover) {
-    .segmented button:hover:not([aria-pressed="true"]) { color: var(--text-primary); }
+    .segmented button:hover:not([aria-pressed="true"]):not([aria-checked="true"]) { color: var(--text-primary); }
   }
   .fact strong { color: var(--text-primary); font-weight: var(--weight-medium); }
 
@@ -1379,6 +1419,8 @@
     white-space: nowrap;
   }
   .chip-x {
+    /* Also the remove button in WindowRows.tsx — a 44px round icon target,
+       not a chip, wearing this class because that shape happens to match. */
     display: grid;
     place-items: center;
     width: var(--tap);

@@ -94,6 +94,20 @@ function usedByMentorship(overrides: Pattern['overrides'] = []): Pattern {
   return { ...weekdays, overrides, usedBy: [mentorship.name] }
 }
 
+/**
+ * A promise whose settlement the test controls, for putting a write genuinely
+ * in flight rather than merely mocking its eventual answer. `mockResolvedValue`
+ * settles before the test can act in between — this is what lets a click land
+ * while the request before it is still unanswered.
+ */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -125,42 +139,270 @@ afterEach(() => {
   cleanup()
 })
 
-/**
- * The act the pane exists to make possible, and both halves of it.
- *
- * A holiday is blocked by clicking it and unblocked by clicking it again —
- * there is no second control and no dialog between the two, because the inverse
- * of the click IS the click. What is pinned is the pair of requests: an
- * override with no hours in it, and then its removal, which are two different
- * endpoints and mean two different things to the booking engine.
- */
-test('clicking a date blocks it, and clicking it again puts it back on the week', async () => {
-  const blocked = { date: A_TUESDAY, windows: [] }
-  vi.mocked(savePatternOverride).mockResolvedValue({ ...weekdays, overrides: [blocked] })
-  vi.mocked(removePatternOverride).mockResolvedValue(weekdays)
+// August 2026: the 23rd is a Sunday, which the weekly rules leave closed, so
+// nothing but an exception can put hours on it.
+const A_SUNDAY_LABEL = '23 August'
+const OWN_HOURS = { date: A_SUNDAY, windows: [{ startMinute: NINE_AM, endMinute: NOON }] }
 
-  render(<PatternPreview pattern={weekdays} />)
+test('clicking a date square selects it and writes nothing', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
 
-  // A Tuesday, so the weekly rule has it open before the click.
-  expect(day('18 August').getAttribute('data-day-state')).toBe('open')
+  fireEvent.click(day(A_SUNDAY_LABEL))
 
-  fireEvent.click(day('18 August'))
+  // The defect this replaces. The square used to save on click and do one of
+  // two opposite things — block a clean date, or delete an exception —
+  // decided by state the operator could not see before pressing.
+  expect(savePatternOverride).not.toHaveBeenCalled()
+  expect(removePatternOverride).not.toHaveBeenCalled()
+  expect(screen.getByRole('radiogroup', { name: new RegExp(A_SUNDAY_LABEL) })).toBeDefined()
+})
+
+test('a date with its own windows still has them after its square is clicked', () => {
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  // The consequence of that defect: one click destroyed a typed morning and
+  // afternoon, with no confirmation and nothing to undo it.
+  expect(removePatternOverride).not.toHaveBeenCalled()
+  expect(
+    screen.getByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)).getAttribute('value'),
+  ).toBe('09:00')
+})
+
+test('picking Blocked writes immediately', async () => {
+  const blocked = { date: A_SUNDAY, windows: [] }
+  vi.mocked(savePatternOverride).mockResolvedValue(usedByMentorship([blocked]))
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
+
+  await waitFor(() => expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY, []))
+})
+
+test('picking Weekly writes immediately', async () => {
+  vi.mocked(removePatternOverride).mockResolvedValue(usedByMentorship())
+
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Weekly' }))
+
+  await waitFor(() => expect(removePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY))
+})
+
+test('picking Own hours writes nothing until Save this date', async () => {
+  vi.mocked(savePatternOverride).mockResolvedValue(usedByMentorship([OWN_HOURS]))
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Own hours' }))
+
+  // A pattern in use is live. A keystroke that widened a window would be an
+  // hour on offer the moment it was typed, and a half-typed one would come
+  // back refused as a window ending before it starts.
+  expect(savePatternOverride).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)), {
+    target: { value: '09:00' },
+  })
+  fireEvent.change(screen.getByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, closes at`)), {
+    target: { value: '12:00' },
+  })
+  expect(savePatternOverride).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save this date' }))
 
   await waitFor(() =>
-    expect(day('18 August').getAttribute('data-day-state')).toBe('blocked'),
+    expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY, [
+      { startMinute: NINE_AM, endMinute: NOON },
+    ]),
   )
-  expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_TUESDAY, [])
-
-  fireEvent.click(day('18 August'))
-
-  await waitFor(() => expect(removePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_TUESDAY))
 })
 
 /**
- * A date with its own hours is an open day and the grid draws it as one, so the
- * list is the only place the third state is legible. Reading one must not
- * change it: the square's click is a toggle, and reaching a replacement window
- * through it would clear the window on the way in.
+ * Manual activation, checked at the one point it matters: moving focus across
+ * the group must never itself be a write. The APG default moves focus and
+ * selects together, which here would mean an arrow key fires a save at a
+ * pattern links stand on — this is the assertion that would catch a
+ * regression back to that default, so it is explicit rather than implied by
+ * the tests that check what a deliberate pick does.
+ */
+test('arrow key moves focus between options and writes nothing', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  weekly.focus()
+  expect(document.activeElement).toBe(weekly)
+
+  fireEvent.keyDown(weekly, { key: 'ArrowRight' })
+
+  expect(document.activeElement).toBe(ownHours)
+  expect(savePatternOverride).not.toHaveBeenCalled()
+  expect(removePatternOverride).not.toHaveBeenCalled()
+})
+
+test('focus wraps at both ends of the group', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const blocked = screen.getByRole('radio', { name: 'Blocked' })
+
+  weekly.focus()
+  fireEvent.keyDown(weekly, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(blocked)
+
+  blocked.focus()
+  fireEvent.keyDown(blocked, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(weekly)
+})
+
+test('Home and End move focus straight to the first and last option', () => {
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const weekly = screen.getByRole('radio', { name: 'Weekly' })
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  const blocked = screen.getByRole('radio', { name: 'Blocked' })
+
+  ownHours.focus()
+  fireEvent.keyDown(ownHours, { key: 'End' })
+  expect(document.activeElement).toBe(blocked)
+
+  fireEvent.keyDown(blocked, { key: 'Home' })
+  expect(document.activeElement).toBe(weekly)
+})
+
+test('Space selects the focused option and writes', async () => {
+  const blocked = { date: A_SUNDAY, windows: [] }
+  vi.mocked(savePatternOverride).mockResolvedValue(usedByMentorship([blocked]))
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const target = screen.getByRole('radio', { name: 'Blocked' })
+  target.focus()
+  fireEvent.keyDown(target, { key: ' ' })
+
+  await waitFor(() => expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY, []))
+})
+
+test('Enter selects the focused option and writes', async () => {
+  vi.mocked(removePatternOverride).mockResolvedValue(usedByMentorship())
+
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const target = screen.getByRole('radio', { name: 'Weekly' })
+  target.focus()
+  fireEvent.keyDown(target, { key: 'Enter' })
+
+  await waitFor(() => expect(removePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY))
+})
+
+/**
+ * Roving tabindex, and only one stop: whichever option is actually selected,
+ * so Tab enters and leaves the group in one hop instead of walking all three.
+ */
+test('only the selected option is a tab stop', () => {
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  expect(screen.getByRole('radio', { name: 'Weekly' }).getAttribute('tabindex')).toBe('-1')
+  expect(screen.getByRole('radio', { name: 'Own hours' }).getAttribute('tabindex')).toBe('0')
+  expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('tabindex')).toBe('-1')
+})
+
+/**
+ * The race: Blocked is picked and its write left hanging, then Own hours is
+ * picked before that write lands. `editingOwnHours` has no write of its own
+ * to guard it, so without the fix this is exactly the sequence that let it
+ * win — the control would show rows for a date the server had not yet agreed
+ * was anything but Blocked. `mockResolvedValue` cannot reach this sequence at
+ * all, because it settles before a second click has anywhere to land; the
+ * deferred promise is what keeps the first write genuinely open.
+ */
+test('a write in flight blocks the other picks, and the control agrees with the data once it lands', async () => {
+  const blocked = { date: A_SUNDAY, windows: [] }
+  const { promise, resolve } = deferred<Pattern>()
+  vi.mocked(savePatternOverride).mockReturnValue(promise)
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
+
+  // The write has fired and is still unanswered — the control has not yet
+  // heard back, so it still reads Weekly, the state it was in before the
+  // click. Own hours is picked through both entry points a click or a
+  // keystroke could reach it by.
+  const ownHours = screen.getByRole('radio', { name: 'Own hours' })
+  expect(ownHours.hasAttribute('disabled')).toBe(true)
+  fireEvent.click(ownHours)
+  fireEvent.keyDown(ownHours, { key: ' ' })
+
+  // Neither moved the control onto Own hours, and neither sent a second
+  // write — `pickBlocked`'s is still the only one out.
+  expect(screen.getByRole('radio', { name: 'Own hours' }).getAttribute('aria-checked')).toBe(
+    'false',
+  )
+  expect(
+    screen.queryByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)),
+  ).toBeNull()
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  resolve(usedByMentorship([blocked]))
+
+  // Once the write lands the control still agrees with the data — Blocked,
+  // never having shown Own hours for a date that was never anything else.
+  await waitFor(() =>
+    expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('aria-checked')).toBe(
+      'true',
+    ),
+  )
+  expect(
+    screen.queryByLabelText(new RegExp(`${A_SUNDAY_LABEL}, window 1, opens at`)),
+  ).toBeNull()
+})
+
+/**
+ * The ordinary failure this branch had no test for: the server refuses, or
+ * the network drops, and the pick that caused it never happened. `write`'s
+ * own catch is what this pins — `setFailure` for `Failure` to surface,
+ * `setSaving(false)` so the control is not left disabled over a write that
+ * is no longer in flight, and `overrides` untouched, so the control settles
+ * back on what the data actually says rather than on what was asked for.
+ */
+test('a rejected write surfaces the failure and leaves the control usable', async () => {
+  const said = 'The date could not be blocked.'
+  vi.mocked(savePatternOverride).mockRejectedValue(
+    new ApiError(UNAVAILABLE, 'pattern_invalid', said),
+  )
+
+  render(<PatternPreview pattern={usedByMentorship()} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain(said)
+
+  // Usable again — nothing stayed disabled over a write that already failed.
+  expect(screen.getByRole('radio', { name: 'Blocked' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('radio', { name: 'Weekly' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('radio', { name: 'Own hours' }).hasAttribute('disabled')).toBe(false)
+
+  // Still Weekly: the pick never landed, so the control reads what the data
+  // still says rather than what was asked for and refused.
+  expect(screen.getByRole('radio', { name: 'Weekly' }).getAttribute('aria-checked')).toBe('true')
+  expect(screen.getByRole('radio', { name: 'Blocked' }).getAttribute('aria-checked')).toBe('false')
+})
+
+/**
+ * A date with its own hours is an open day and the grid draws it as one, so
+ * the list is the only place the third state is legible before it is opened.
+ * Opened through the list rather than the square, which is the other door
+ * into the same panel — and either way, opening a date must never change it.
  */
 test('a date with its own hours is readable without being changed', () => {
   const ownHours = { date: A_SUNDAY, windows: [{ startMinute: NINE_AM, endMinute: ONE_PM }] }
@@ -201,10 +443,13 @@ test('a date before today writes nothing, and today is still live', async () => 
 
   expect(savePatternOverride).not.toHaveBeenCalled()
   expect(removePatternOverride).not.toHaveBeenCalled()
-  // No panel: the fields belong to a selected date, and none was selected.
-  expect(screen.queryByLabelText(/11 August, window 1, opens at/)).toBeNull()
+  // No panel: the control belongs to a selected date, and none was selected.
+  expect(screen.queryByRole('radiogroup')).toBeNull()
 
+  // Today itself carries no such attribute. Selecting it opens its own
+  // control, and that control can still write — unlike the day before it.
   fireEvent.click(day('15 August'))
+  fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
 
   await waitFor(() =>
     expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, TODAYS_DATE, []),
@@ -240,16 +485,16 @@ test('an override on a past date is still readable and no longer editable', asyn
  * on the hours that weekday already offers, and one edit is one edit again.
  */
 test("a date's hours open on the week's, so moving one end is enough", async () => {
-  const blocked = { date: A_TUESDAY, windows: [] }
-  vi.mocked(savePatternOverride).mockResolvedValue({ ...weekdays, overrides: [blocked] })
+  const trimmed = { date: A_TUESDAY, windows: [{ startMinute: NINE_AM, endMinute: ONE_PM }] }
+  vi.mocked(savePatternOverride).mockResolvedValue({ ...weekdays, overrides: [trimmed] })
 
   render(<PatternPreview pattern={weekdays} />)
 
-  // The click that opens the panel is also the one that blocks the date — the
-  // square is a toggle and there is no other way in. What the fields carry
-  // afterwards is the point: the hours the date would offer if it were opened.
+  // Selecting the date writes nothing; picking Own hours is what reveals the
+  // fields. What they carry is the point: the hours the date would offer if
+  // it followed the week, open before anything has been typed.
   fireEvent.click(day('18 August'))
-  await waitFor(() => expect(savePatternOverride).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('radio', { name: 'Own hours' }))
 
   expect(screen.getByLabelText(/18 August, window 1, opens at/).getAttribute('value')).toBe('09:00')
   expect(screen.getByLabelText(/18 August, window 1, closes at/).getAttribute('value')).toBe('17:00')
@@ -257,7 +502,7 @@ test("a date's hours open on the week's, so moving one end is enough", async () 
   fireEvent.change(screen.getByLabelText(/18 August, window 1, closes at/), {
     target: { value: '13:00' },
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Use these hours on this date' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save this date' }))
 
   await waitFor(() =>
     expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_TUESDAY, [
@@ -280,8 +525,7 @@ test('a date can offer a morning and an afternoon, and it saves in one request',
 
   render(<PatternPreview pattern={usedByMentorship([morning])} />)
 
-  // Through the list rather than the square, which is a toggle and would take
-  // the morning away on the way in.
+  // Through the list, the other door into the same panel as the square.
   fireEvent.click(screen.getByRole('button', { name: 'Show Sunday 23 August' }))
   fireEvent.click(screen.getByRole('button', { name: 'Add window to Sunday 23 August' }))
 
@@ -291,7 +535,7 @@ test('a date can offer a morning and an afternoon, and it saves in one request',
   fireEvent.change(screen.getByLabelText(/23 August, window 2, closes at/), {
     target: { value: '17:00' },
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Use these hours on this date' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save this date' }))
 
   await waitFor(() =>
     expect(savePatternOverride).toHaveBeenCalledWith(PATTERN_ID, A_SUNDAY, [
@@ -334,8 +578,8 @@ test('a date that already holds two windows lists both and opens both', () => {
 /**
  * A date with no windows is blocked, which is a stronger statement than the
  * closed day the same gesture makes in the week pane — so this button, which
- * promises hours, refuses rather than making it. Blocking stays the click on
- * the square: one gesture, undone by itself.
+ * promises hours, refuses rather than making it. Blocking is its own pick on
+ * the control above, not something this button can be talked into doing.
  */
 test("emptying a date's windows refuses to save rather than blocking the date", () => {
   const morning = { date: A_SUNDAY, windows: [{ startMinute: NINE_AM, endMinute: NOON }] }
@@ -345,7 +589,7 @@ test("emptying a date's windows refuses to save rather than blocking the date", 
   fireEvent.click(screen.getByRole('button', { name: 'Show Sunday 23 August' }))
   fireEvent.click(screen.getByRole('button', { name: 'Remove Sunday 23 August window 1' }))
 
-  const save = screen.getByRole('button', { name: 'Use these hours on this date' })
+  const save = screen.getByRole('button', { name: 'Save this date' })
   expect(save.getAttribute('aria-disabled')).toBe('true')
   expect(screen.getByText(/A date needs a window/)).toBeDefined()
 

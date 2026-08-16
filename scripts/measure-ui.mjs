@@ -202,6 +202,40 @@ async function openFirstLink(page) {
   return { opened: true, reason: null }
 }
 
+/**
+ * The pattern editor is not routed to by guessing `/availability/{id}` —
+ * Availability.tsx lists patterns as `.grid-cards .card` articles, each with
+ * an `a.btn` labelled "Edit" pointing at that pattern's own editor (see
+ * Availability.tsx: the `<Link className="btn grow" href={...}>Edit</Link>`
+ * inside `.grid-cards article.card`). Caller must already be on
+ * /admin/availability. Returns whether the editor was actually reached, and
+ * why not when it wasn't — measuring the list and calling it the editor
+ * would be a false pass this check exists to refuse.
+ */
+async function openFirstPattern(page) {
+  if ((await page.$('.empty')) !== null) {
+    return { opened: false, reason: 'no seeded patterns — /admin/availability rendered .empty, not .grid-cards' }
+  }
+  const cardCount = await page.$$eval('.grid-cards .card', (nodes) => nodes.length).catch(() => 0)
+  if (cardCount === 0) {
+    return { opened: false, reason: 'no cards in .grid-cards on /admin/availability' }
+  }
+  const editLink = await page.$('.grid-cards .card:first-child a.btn')
+  if (editLink === null) {
+    return {
+      opened: false,
+      reason: 'first card has no a.btn — card shape does not match Availability.tsx',
+    }
+  }
+  await editLink.click()
+  try {
+    await page.waitForSelector('.editor-cols', { timeout: 5000 })
+  } catch {
+    return { opened: false, reason: "clicked the first pattern's Edit link but .editor-cols never appeared" }
+  }
+  return { opened: true, reason: null }
+}
+
 const main = async () => {
   const browser = await chromium.launch()
 
@@ -1075,6 +1109,235 @@ const main = async () => {
         })
       })
     }
+  }
+
+  // ---- 13. The pattern editor's date panel: the segmented date-state
+  // control, everything the Own hours state adds beside it, and whether any
+  // of it outgrows the ~340px right column DESIGN.md caps the preview pane
+  // at — at the same three widths the narrow-column check above uses, since
+  // a control that fits the operator's laptop can still overflow the
+  // 2560px screenshot width or the 440px phone this branch also has to work
+  // on.
+  const readEditorColsBreakpoint = async (page) =>
+    page.evaluate(() => {
+      const TARGET = '.editor-cols'
+      let breakpoint = null
+      let mediaText = null
+      // Same walk as readFieldRowBreakpoint above, and the same reason: a
+      // grouping rule and a childless leaf both expose `.cssRules` under the
+      // CSS Nesting spec, so recursion is gated on `.length > 0` rather than
+      // on truthiness, and a rule's own selectorText is checked independently
+      // of whether it also has children.
+      const walk = (rules, minWidth, currentMediaText) => {
+        for (const rule of rules) {
+          let innerMinWidth = minWidth
+          let innerMediaText = currentMediaText
+          if (rule.media) {
+            const match = rule.media.mediaText.match(/min-width:\s*([\d.]+)px/)
+            if (match) {
+              innerMinWidth = Number(match[1])
+              innerMediaText = rule.media.mediaText
+            }
+          }
+          if (innerMinWidth !== null && rule.selectorText && rule.selectorText.trim() === TARGET) {
+            breakpoint = innerMinWidth
+            mediaText = innerMediaText
+          }
+          if (rule.cssRules && rule.cssRules.length > 0) {
+            walk(rule.cssRules, innerMinWidth, innerMediaText)
+          }
+        }
+      }
+      for (const sheet of document.styleSheets) {
+        let rules
+        try {
+          rules = sheet.cssRules
+        } catch {
+          continue
+        }
+        walk(rules, null, null)
+        if (breakpoint !== null) break
+      }
+      return { breakpoint, mediaText }
+    })
+
+  /**
+   * The segmented date-state control: its own box, whether its content
+   * overflows that box, and each of its three radio options against the tap
+   * floor. Scoped from `[role="radiogroup"].segmented` rather than a
+   * page-wide selector — `.segmented` also names the booking page's duration
+   * picker, which this check never visits, but the radiogroup role is the
+   * date-state control alone (see PatternPreview.tsx: the duration picker
+   * uses `aria-pressed`, this control uses `aria-checked`).
+   */
+  const measureSegmented = async (page, tap) =>
+    page.evaluate((tapFloor) => {
+      const control = document.querySelector('.segmented[role="radiogroup"]')
+      if (control === null) return { controlFound: false }
+      const rect = control.getBoundingClientRect()
+      const options = [...control.querySelectorAll('[role="radio"]')].map((option) => {
+        const optionRect = option.getBoundingClientRect()
+        return {
+          text: (option.textContent ?? '').trim(),
+          checked: option.getAttribute('aria-checked') === 'true',
+          width: optionRect.width,
+          height: optionRect.height,
+        }
+      })
+      return {
+        controlFound: true,
+        width: rect.width,
+        scrollWidth: control.scrollWidth,
+        overflowsOwnBox: control.scrollWidth > rect.width,
+        options,
+        optionsUnderTapFloor:
+          tapFloor === null
+            ? []
+            : options
+                .filter((option) => option.height < tapFloor)
+                .map((option) => ({ ...option, shortBy: Number((tapFloor - option.height).toFixed(1)) })),
+      }
+    }, tap)
+
+  /**
+   * Every control the date panel offers once Own hours is showing — each
+   * window's two time fields and its × remove target, +Add window, and Save
+   * this date — against the tap floor. Scoped to the radiogroup's own
+   * `.sep-top` ancestor (the panel `selected !== null` renders — see
+   * PatternPreview.tsx) rather than the whole page, since `.chip-x` and
+   * `.btn-primary` are not unique to this panel.
+   */
+  const measurePanelControls = async (page, tap) =>
+    page.evaluate((tapFloor) => {
+      const group = document.querySelector('.segmented[role="radiogroup"]')
+      const panel = group ? group.closest('.sep-top') : null
+      if (panel === null) return { panelFound: false, controls: [] }
+      const nodes = [
+        ...panel.querySelectorAll('.week-time, .chip-x, [aria-label^="Add window to"], .btn-primary'),
+      ].filter((node) => node.checkVisibility({ checkVisibilityCSS: true }))
+      const controls = nodes.map((node) => {
+        const rect = node.getBoundingClientRect()
+        return {
+          tag: node.tagName.toLowerCase(),
+          className: node.getAttribute('class'),
+          label: node.getAttribute('aria-label') || (node.textContent ?? '').trim().slice(0, 40),
+          width: rect.width,
+          height: rect.height,
+        }
+      })
+      return {
+        panelFound: true,
+        controlCount: controls.length,
+        controls,
+        underTapFloor:
+          tapFloor === null
+            ? []
+            : controls
+                .filter((control) => control.height < tapFloor)
+                .map((control) => ({ ...control, shortBy: Number((tapFloor - control.height).toFixed(1)) })),
+      }
+    }, tap)
+
+  /** The date panel's own scrollWidth against the clientWidth of the card
+   * that is its column — `.editor-cols`'s second grid item on the desktop
+   * contract, the only item once the layout has stacked. Found via
+   * `.closest('.card')` from the panel rather than a positional selector, so
+   * this does not care which of WeekEditor's and PatternPreview's two
+   * `.card.card-pad` sections the grid happens to put second. */
+  const measureColumnFit = async (page) =>
+    page.evaluate(() => {
+      const group = document.querySelector('.segmented[role="radiogroup"]')
+      const panel = group ? group.closest('.sep-top') : null
+      const column = panel ? panel.closest('.card') : null
+      if (panel === null || column === null) return { panelFound: false }
+      return {
+        panelFound: true,
+        panelScrollWidth: panel.scrollWidth,
+        columnClientWidth: column.clientWidth,
+        panelExceedsColumn: panel.scrollWidth > column.clientWidth,
+      }
+    })
+
+  for (const [viewportLabel, viewport] of narrowViewports) {
+    await withPage(browser, { viewport }, async (page) => {
+      const name = `pattern-editor-${viewportLabel}`
+
+      await adminReady(page, '/availability')
+      const opened = await openFirstPattern(page)
+      if (!opened.opened) {
+        record(name, { reachable: false, reason: opened.reason })
+        return
+      }
+
+      const daySelector = '.days button.day:not([disabled])'
+      const dayCount = await page.$$eval(daySelector, (nodes) => nodes.length).catch(() => 0)
+      if (dayCount === 0) {
+        record(name, {
+          reachable: false,
+          reason: 'reached the pattern editor but no selectable day was found in the month grid',
+        })
+        return
+      }
+      await page.click(`${daySelector} >> nth=0`)
+      try {
+        await page.waitForSelector('.segmented[role="radiogroup"]', { timeout: 5000 })
+      } catch {
+        record(name, {
+          reachable: false,
+          reason: 'selected a date but the segmented date-state control never appeared',
+        })
+        return
+      }
+
+      // Own hours first: it is the state carrying the most controls, and the
+      // one the screenshot and every measurement below is taken in.
+      await page.getByRole('radio', { name: 'Own hours' }).click()
+      await page.waitForTimeout(300)
+
+      const tap = await readCssPixelVar(page, '--tap')
+      const { breakpoint: editorColsBreakpoint, mediaText: editorColsMediaText } =
+        await readEditorColsBreakpoint(page)
+      // Same refusal as readFieldRowBreakpoint's caller above: a silent
+      // fallback to a guessed number would read as a real finding rather
+      // than as what it is, a parse that failed.
+      if (editorColsBreakpoint === null || !Number.isFinite(editorColsBreakpoint) || editorColsBreakpoint <= 0) {
+        throw new Error(
+          `readEditorColsBreakpoint could not parse a positive min-width around ".editor-cols" in the served stylesheet for ${name} — got breakpoint=${editorColsBreakpoint} from mediaText=${JSON.stringify(editorColsMediaText)} — refusing to guess`,
+        )
+      }
+      const layoutContract = viewport.width >= editorColsBreakpoint ? 'side-by-side' : 'stacked'
+
+      const segmented = await measureSegmented(page, tap)
+      const panelControls = await measurePanelControls(page, tap)
+      const columnFit = await measureColumnFit(page)
+      const pageScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+
+      await page.screenshot({ path: `${OUT}/${name}-own-hours.png`, fullPage: true })
+
+      // Blocked second, numbers only: a longer label in a selected state,
+      // drawn in the danger colour, is where an overflow would first show.
+      await page.getByRole('radio', { name: 'Blocked' }).click()
+      await page.waitForTimeout(300)
+      const segmentedBlocked = await measureSegmented(page, tap)
+
+      record(name, {
+        reachable: true,
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
+        editorColsBreakpoint,
+        editorColsMediaText,
+        layoutContract,
+        tapFloor: tap,
+        ownHours: {
+          segmented,
+          panelControls,
+          columnFit,
+          pageScrollWidth,
+          scrollsSideways: pageScrollWidth > viewport.width,
+        },
+        blocked: { segmented: segmentedBlocked },
+      })
+    })
   }
 
   await browser.close()
