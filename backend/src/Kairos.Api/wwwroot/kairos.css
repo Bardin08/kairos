@@ -1057,9 +1057,20 @@
      pushed to the trailing edge of a 360px screen is a control nobody's
      thumb reaches. */
 
+  /* The label track has a floor rather than minmax(0, 1fr): at 0 it is free to
+     collapse to nothing, and a control that wants more than its share of the
+     row — a composite address field, once, before it was pulled out of this
+     grid entirely — took all of it, one word per line of label left behind.
+     620px .form-col, --space-6 card padding: a ~556px content box. Subtract
+     the --space-4 gap and the widest control still meant to sit beside a
+     label here — ctl-md, 288px, the one both Name and Pattern use — and 252px
+     is the most this track could take before that control stops fitting on
+     the same row. 14rem (224px) sits under that with room to spare, and comes
+     from the label that actually needs it: "Margin between meetings", the
+     longest in the limits group, at --text-sm 500-weight. */
   .field-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(14rem, 1fr) auto;
     gap: var(--space-4);
     align-items: center;
     padding-block: var(--space-3);

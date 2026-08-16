@@ -131,12 +131,16 @@ test('discard is disabled when nothing has changed', () => {
   )
 })
 
-test('the address is shown as the whole URL, not as its last word', () => {
+test('the address prefix shows the host and path, not just the slug, and drops the scheme', () => {
   show()
 
   // The operator setting this is deciding what to paste into a chat, and they
-  // cannot judge `consulting` without the part in front of it.
-  expect(screen.getByText(`${window.location.origin}/book/`)).toBeTruthy()
+  // cannot judge `consulting` without the host and path in front of it. The
+  // scheme is left off the display — the browser's own address bar does the
+  // same — even though the Copy button still copies it in full; see the
+  // dedicated test for that below.
+  expect(screen.getByText(`${window.location.host}/book/`)).toBeTruthy()
+  expect(screen.queryByText(/http:\/\//)).toBeNull()
 })
 
 test('a link that has never been saved offers no copy button, because there is nothing to copy', () => {
@@ -149,15 +153,23 @@ test('the Copy button flips to Copied, and reverts once the address is edited ag
   show()
 
   fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
-
   expect(screen.getByRole('button', { name: 'Copy link address' }).textContent).toBe('Copied')
+
+  fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'new-slug' } })
+  expect(screen.getByRole('button', { name: 'Copy link address' }).textContent).toBe('Copy')
+})
+
+test('the copied address keeps its scheme even though the display drops it', () => {
+  show()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
+
+  // The display above shortens to host + path; what lands on the clipboard
+  // must still be the full, working absolute URL, scheme included, or a
+  // paste into a chat is a link nothing can follow.
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
     `${window.location.origin}/book/${LINK.slug}`,
   )
-
-  fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'new-slug' } })
-
-  expect(screen.getByRole('button', { name: 'Copy link address' }).textContent).toBe('Copy')
 })
 
 test('archiving states its consequence before the button, not after the fact', () => {

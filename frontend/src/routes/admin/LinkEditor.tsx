@@ -133,26 +133,38 @@ export default function LinkEditor({
               <label htmlFor="link-name">Name</label>
             </div>
             <div className="field-row-control">
+              {/* ctl-md, not ctl-lg: this column's content box is ~556px, and
+                  ctl-lg's 448px leaves a label track under 100px wide — which
+                  is the same disease the Address field had. ctl-md at 288px
+                  leaves the label room to breathe. */}
               <input
                 id="link-name"
-                className="input ctl-lg"
+                className="input ctl-md"
                 value={draft.name}
                 onChange={(event) => set('name', event.target.value)}
               />
             </div>
           </div>
 
-          <div className="field-row">
-            <div className="field-row-label">
-              <label htmlFor="link-slug">Address</label>
-              <p className="fine">Lowercase words joined by hyphens.</p>
-            </div>
-            <div className="field-row-control">
+          {/* Stacked rather than a two-column field-row: the composite here is
+              a static prefix, an input and a Copy button, comfortably over
+              500px on its own — nothing that wide belongs beside a label in a
+              620px column. Label and help go above, full column below, the
+              way Description already works. */}
+          <div className="field">
+            <label htmlFor="link-slug">Address</label>
+            <p className="fine">Lowercase words joined by hyphens.</p>
+            <div className="row gap-2 wrap">
               {/* The whole URL, not its last word. An operator setting this is
                   deciding what to paste into a chat, and they cannot judge
-                  `consulting` without the part in front of it. */}
+                  `consulting` without the part in front of it. The scheme is
+                  dropped from what is shown — the browser's own address bar
+                  does the same, and the operator does not need to read
+                  `http://` — but the Copy button below copies `address`,
+                  which still carries it: the display is shortened, the copied
+                  string must stay a full, working absolute URL. */}
               <span className="prefix">
-                <span className="prefix-static">{window.location.origin + BOOK_PATH}</span>
+                <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
                 <input
                   id="link-slug"
                   className="input ctl-md"
