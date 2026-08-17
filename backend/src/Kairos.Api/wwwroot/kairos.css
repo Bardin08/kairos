@@ -1434,9 +1434,15 @@
   }
   .chip-x {
     /* Also the remove button in WindowRows.tsx — a 44px round icon target,
-       not a chip, wearing this class because that shape happens to match. */
+       not a chip, wearing this class because that shape happens to match.
+       flex: none because WindowRows' window row now lets its two
+       .week-time siblings shrink (see .week-time below) — without this a
+       flex row short on space shrinks every child with a shrink factor,
+       this button included, and it had settled at 36px, under the tap
+       floor this rule exists to hold, before flex: none was added. */
     display: grid;
     place-items: center;
+    flex: none;
     width: var(--tap);
     min-height: var(--tap);
     border-radius: var(--radius-full);
@@ -1903,7 +1909,31 @@
     font-size: var(--text-sm);
     font-weight: var(--weight-semi);
   }
-  .week-time { width: 7.5rem; }
+  /* WindowRows.tsx shares this input between WeekEditor's fluid column,
+     which always has room for 7.5rem, and PatternPreview's date panel,
+     whose column .editor-cols caps at ~340px — card content there is
+     roughly 276px, and a window row (two of these, a separator, a 44px
+     .chip-x, three gaps) needs ~317px at a fixed 7.5rem. That mismatch
+     wrapped the row and dropped × onto its own line, so this is a flex
+     item now: flex-basis holds the 7.5rem both panes are drawn at where
+     there is room, flex-shrink lets the narrow column give it back
+     instead. min-width is the floor below which the digits themselves
+     start clipping — verified by screenshot down to that width, 24-hour
+     form (`09:00`), the only form reproducible in headless Chromium. The
+     12-hour form the platform renders for the operator (`09:00 AM`) is
+     wider and was not directly measurable here; the floor was left with
+     headroom rather than tuned to the 24-hour case's last pixel, but is
+     not a verified fit for the wider string. */
+  .week-time {
+    flex: 0 1 7.5rem;
+    min-width: 5.5rem;
+  }
+  /* The browser's own picker icon inside a time field — same move as
+     .affix's number-spinner suppression above, same reason: control chrome
+     this narrow column has no width to spare for. Firefox paints no such
+     indicator, so this rule reaches WebKit/Blink only, which is also the
+     browser the regression was measured in. */
+  .week-time::-webkit-calendar-picker-indicator { display: none; }
   /* On a phone the name takes its own line: the two columns and a pair of time
      fields do not fit across 375px without the fields going under the floor. */
   @media (max-width: 640px) {
