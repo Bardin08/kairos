@@ -8,6 +8,8 @@ using Kairos.Api.Shared;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
+using NodaTime.Text;
+
 namespace Kairos.Api.Features.Admin;
 
 /// <summary>The name, and nothing else. Create and rename are the same one-field form.</summary>
@@ -148,8 +150,20 @@ public static class PatternsAdminEndpoints
     /// <summary>End is not after start. Shared by rules and overrides — one meaning, one code.</summary>
     public const string WindowInvertedCode = "window_inverted";
 
+    /// <summary>
+    /// The <c>{date}</c> segment of an override route is not an ISO calendar date. Thrown from the
+    /// handler rather than declared as a route constraint because no regular expression rejects
+    /// 2026-02-30: the parse has to run either way, and left to the binder the failure was a
+    /// <c>BadHttpRequestException</c> — a 500 in Development, where ThrowOnBadRequest defaults on,
+    /// and a 400 with an empty body everywhere else. Every other malformed input on this API
+    /// answers a coded 400.
+    /// </summary>
+    public const string DateInvalidCode = "date_invalid";
+
     private const string PatternName = "Pattern";
     private const string OverrideName = "Date override";
+
+    private const string DateParameter = "date";
 
     private const string NameTaken = "Another pattern already has that name.";
 
@@ -310,11 +324,15 @@ public static class PatternsAdminEndpoints
 
     private static async Task<PatternResponse> SaveOverrideAsync(
         Guid patternId,
-        DateOnly date,
+        string date,
         SaveOverrideRequest request,
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
+        // Parsed once, here, and everything below works in DateOnly as it always did — threading
+        // the raw segment further down would put the same parse in front of every use of it.
+        var day = ParseDate(date);
+
         var pattern = await context.Patterns
             .Include(candidate => candidate.Overrides)
             .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
@@ -324,14 +342,14 @@ public static class PatternsAdminEndpoints
 
         // Materialized before anything is added, so the removal is not walking the collection the
         // additions are growing.
-        var replaced = pattern.Overrides.Where(row => row.Date == date).ToList();
+        var replaced = pattern.Overrides.Where(row => row.Date == day).ToList();
         context.PatternOverrides.RemoveRange(replaced);
 
         if (request.Windows.Count == 0)
         {
             // One row with no times, rather than no rows at all: no rows is the date back on the
             // weekly rules, which is what DELETE on this route means and not what was asked for.
-            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = date });
+            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = day });
         }
 
         foreach (var window in request.Windows)
@@ -339,7 +357,7 @@ public static class PatternsAdminEndpoints
             pattern.Overrides.Add(new PatternOverride
             {
                 PatternId = pattern.Id,
-                Date = date,
+                Date = day,
                 StartMinute = window.StartMinute,
                 EndMinute = window.EndMinute,
             });
@@ -352,12 +370,14 @@ public static class PatternsAdminEndpoints
 
     private static async Task<PatternResponse> RemoveOverrideAsync(
         Guid patternId,
-        DateOnly date,
+        string date,
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
+        var day = ParseDate(date);
+
         var deleted = await context.PatternOverrides
-            .Where(row => row.PatternId == patternId && row.Date == date)
+            .Where(row => row.PatternId == patternId && row.Date == day)
             .ExecuteDeleteAsync(cancellationToken);
 
         if (deleted == 0)
@@ -412,6 +432,25 @@ public static class PatternsAdminEndpoints
                 yield return new OverrideWindowResponse(start, end);
             }
         }
+    }
+
+    /// <summary>
+    /// The <c>{date}</c> segment, in the entity's own type. Read through NodaTime's ISO pattern
+    /// rather than by the binder, so the route accepts the one spelling the rest of this API
+    /// speaks — the same pattern <see cref="Slots.SlotsEndpoints"/> and
+    /// <see cref="MeetingsAdminEndpoints"/> read their dates with. The caller's value is not
+    /// echoed back into the message, for the reason those two state.
+    /// </summary>
+    private static DateOnly ParseDate(string value)
+    {
+        var parsed = LocalDatePattern.Iso.Parse(value);
+        if (!parsed.Success)
+        {
+            throw DomainException.Invalid(
+                DateInvalidCode, $"'{DateParameter}' must be an ISO calendar date, such as 2026-09-07.");
+        }
+
+        return parsed.Value.ToDateOnly();
     }
 
     /// <summary>
