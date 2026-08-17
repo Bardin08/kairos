@@ -99,5 +99,4 @@ public class AdminBoundaryTests
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain(IntegrationEndpoints.StateInvalidCode);
     }
-
 }
