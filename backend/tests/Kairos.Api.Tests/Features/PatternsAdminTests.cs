@@ -56,6 +56,12 @@ public class PatternsAdminTests
     /// </summary>
     private const string DateThatIsNotADate = "2026-02-30";
 
+    /// <summary>
+    /// A year the ISO pattern reads and the stored type cannot hold, which fails a step later than
+    /// the 30th of February and so is the case that catches a guard looking only at the parse.
+    /// </summary>
+    private const string DateBeforeTheFirstYearStorable = "0000-01-01";
+
     private static readonly Guid PatternId = Guid.CreateVersion7();
     private static readonly Guid LinkId = Guid.CreateVersion7();
 
@@ -287,14 +293,17 @@ public class PatternsAdminTests
     /// RequestDelegateFactory: a 500 under the test host and a bodiless 400 in production, on a
     /// surface where every other malformed input carries a code the workbench can act on.
     /// </summary>
-    [Fact]
-    public async Task SaveOverride_OnADateThatIsNotADate_IsABadRequestNamingTheCode()
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task SaveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
     {
         using var app = NewApp();
         using var client = app.CreateOperatorClient();
 
         var response = await client.PutAsJsonAsync(
-            $"{PatternUrl}/overrides/{DateThatIsNotADate}",
+            $"{PatternUrl}/overrides/{date}",
             new { windows = Array.Empty<object>() },
             TestContext.Current.CancellationToken);
 
@@ -303,14 +312,17 @@ public class PatternsAdminTests
     }
 
     /// <summary>The other half of the same pair of routes, which binds the same segment.</summary>
-    [Fact]
-    public async Task RemoveOverride_OnADateThatIsNotADate_IsABadRequestNamingTheCode()
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task RemoveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
     {
         using var app = NewApp();
         using var client = app.CreateOperatorClient();
 
         var response = await client.DeleteAsync(
-            $"{PatternUrl}/overrides/{DateThatIsNotADate}", TestContext.Current.CancellationToken);
+            $"{PatternUrl}/overrides/{date}", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.DateInvalidCode);

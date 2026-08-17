@@ -165,6 +165,9 @@ public static class PatternsAdminEndpoints
 
     private const string DateParameter = "date";
 
+    /// <summary>DateOnly holds no year before this; NodaTime's ISO pattern reaches back past it.</summary>
+    private const int FirstYearDateOnlyHolds = 1;
+
     private const string NameTaken = "Another pattern already has that name.";
 
     private const string WindowInverted = "A window has to end after it starts.";
@@ -441,10 +444,16 @@ public static class PatternsAdminEndpoints
     /// <see cref="MeetingsAdminEndpoints"/> read their dates with. The caller's value is not
     /// echoed back into the message, for the reason those two state.
     /// </summary>
+    /// <remarks>
+    /// A successful parse is not enough to convert: the pattern reads years the stored type cannot
+    /// hold, and a year below it converted into an <c>ArgumentOutOfRangeException</c> that the
+    /// handler leaves alone, so the refusal had to happen here to stay a coded 400. Nothing guards
+    /// the far end because the pattern's four-digit year already refuses anything past 9999.
+    /// </remarks>
     private static DateOnly ParseDate(string value)
     {
         var parsed = LocalDatePattern.Iso.Parse(value);
-        if (!parsed.Success)
+        if (!parsed.Success || parsed.Value.Year < FirstYearDateOnlyHolds)
         {
             throw DomainException.Invalid(
                 DateInvalidCode, $"'{DateParameter}' must be an ISO calendar date, such as 2026-09-07.");
