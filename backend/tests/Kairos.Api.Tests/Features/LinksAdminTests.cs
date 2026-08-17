@@ -95,13 +95,13 @@ public class LinksAdminTests
     public async Task Create_WithNoDurations_IsRefusedRatherThanWritingAnUnbookableLink()
     {
         using var app = new KairosApp();
-        app.Seed(context => context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" }));
+        app.Seed(context => context.Patterns.Add(new Pattern { Id = PatternId, Name = PatternName }));
         using var client = app.CreateOperatorClient();
 
         var body = new
         {
-            slug = "mentorship",
-            name = "Mentorship",
+            slug = SeededSlug,
+            name = SeededName,
             description = "",
             patternId = PatternId,
             durations = Array.Empty<int>(),
@@ -137,13 +137,13 @@ public class LinksAdminTests
         using var app = new KairosApp();
         app.Seed(context =>
         {
-            context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" });
+            context.Patterns.Add(new Pattern { Id = PatternId, Name = PatternName });
             context.Links.Add(new Link
             {
-                Slug = "mentorship",
-                Name = "Mentorship",
+                Slug = SeededSlug,
+                Name = SeededName,
                 PatternId = PatternId,
-                Durations = [new LinkDuration { Minutes = 30, SortOrder = 0 }],
+                Durations = [new LinkDuration { Minutes = DurationMinutes, SortOrder = 0 }],
             });
         });
         using var client = app.CreateOperatorClient();
