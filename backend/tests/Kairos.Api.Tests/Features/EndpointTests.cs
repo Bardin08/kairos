@@ -35,6 +35,12 @@ public class EndpointTests
     /// <summary>A slug no link can have, so both link routes must answer the same way.</summary>
     private const string UnusableSlug = "ABC_%21";
 
+    /// <summary>
+    /// Well-formed and unseeded, so both link routes reach their resolver and refuse it there.
+    /// Distinctive enough that finding it anywhere in a response body means it was reflected.
+    /// </summary>
+    private const string UnknownSlug = "quenelle-of-nothing";
+
     private const int DurationMinutes = 25;
     private const int LongDurationMinutes = 50;
     private const int NineAm = 9 * 60;
@@ -343,6 +349,35 @@ public class EndpointTests
         slots.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await CodeOfAsync(detail)).ShouldBe(DomainException.NotFoundCode);
         (await CodeOfAsync(slots)).ShouldBe(DomainException.NotFoundCode);
+    }
+
+    /// <summary>
+    /// One condition, one body. A slug nothing answers to is the same fact on both routes, so the
+    /// sentence a client renders from it has to be the same sentence — and it may not be built out
+    /// of what the caller sent. The slots read reflected it and the link read did not, which made
+    /// an anonymous caller's arbitrary string a round trip into whatever a page does with a
+    /// ProblemDetails title.
+    /// </summary>
+    [Fact]
+    public async Task UnknownSlug_IsNotFoundOnBothLinkRoutes_WithOneTitleAndNoEchoOfTheSlug()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var detail = await app.Client.GetAsync(
+            $"{ApiVersions.V1}/links/{UnknownSlug}", TestContext.Current.CancellationToken);
+        var slots = await app.Client.GetAsync(
+            $"{ApiVersions.V1}/links/{UnknownSlug}/slots?from={day}&to={day}&duration={DurationMinutes}",
+            TestContext.Current.CancellationToken);
+
+        detail.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        slots.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await TitleOfAsync(slots)).ShouldBe(await TitleOfAsync(detail));
+
+        // The whole body, not just the title: a slug that reached any other field would be the
+        // same reflection wearing a different key.
+        (await BodyOfAsync(detail)).ShouldNotContain(UnknownSlug);
+        (await BodyOfAsync(slots)).ShouldNotContain(UnknownSlug);
     }
 
     /// <summary>
@@ -730,6 +765,12 @@ public class EndpointTests
 
     private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
         (await ReadJsonAsync(response)).GetProperty("code").GetString();
+
+    private static async Task<string?> TitleOfAsync(HttpResponseMessage response) =>
+        (await ReadJsonAsync(response)).GetProperty("title").GetString();
+
+    private static Task<string> BodyOfAsync(HttpResponseMessage response) =>
+        response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
