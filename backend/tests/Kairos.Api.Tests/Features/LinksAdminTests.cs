@@ -23,7 +23,15 @@ public class LinksAdminTests
     private const string SinglePagePath = "/admin";
     private const string SinglePage = "<!doctype html><title>Kairos</title>";
 
+    private const string PatternName = "Weekdays";
+    private const string SeededSlug = "mentorship";
+    private const string SeededName = "Mentorship";
+    private const int DurationMinutes = 30;
+
     private static readonly Guid PatternId = Guid.CreateVersion7();
+
+    /// <summary>Never seeded, so every route that takes an id has to refuse it.</summary>
+    private static readonly Guid MissingLinkId = Guid.CreateVersion7();
 
     [Fact]
     public async Task ListLinks_WithoutASession_IsUnauthorizedRatherThanARedirect()
@@ -143,6 +151,51 @@ public class LinksAdminTests
         var body = await client.GetStringAsync(AdminPath, TestContext.Current.CancellationToken);
 
         body.ShouldContain("\"marginMinutes\":null");
+    }
+
+    /// <summary>
+    /// The link is the resource, so its absence is the first thing an answer about it can say. The
+    /// three body validations ran ahead of the lookup, and a PUT to a guid nothing answers to came
+    /// back 409 <c>slug_taken</c> — a collision reported for a link that is not there, which sends
+    /// the operator hunting for another link to rename instead of reloading a page that has gone
+    /// stale. The other four <c>{id:guid}</c> routes resolve the link first and answer 404.
+    /// </summary>
+    [Fact]
+    public async Task Update_ForALinkThatDoesNotExist_IsNotFoundRatherThanAConflictWithAnotherLink()
+    {
+        using var app = new KairosApp();
+        app.Seed(context =>
+        {
+            context.Patterns.Add(new Pattern { Id = PatternId, Name = PatternName });
+            context.Links.Add(new Link
+            {
+                Slug = SeededSlug,
+                Name = SeededName,
+                PatternId = PatternId,
+                Durations = [new LinkDuration { Minutes = DurationMinutes, SortOrder = 0 }],
+            });
+        });
+        using var client = app.CreateOperatorClient();
+
+        // The slug the seeded link already answers to, so the collision the handler used to report
+        // is genuinely there — what is wrong with reporting it is only that the link is not.
+        var response = await client.PutAsJsonAsync(
+            $"{AdminPath}/{MissingLinkId}",
+            new
+            {
+                slug = SeededSlug,
+                name = SeededName,
+                description = string.Empty,
+                patternId = PatternId,
+                durations = new[] { DurationMinutes },
+            },
+            TestContext.Current.CancellationToken);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemWithCode>(
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        problem!.Code.ShouldBe(DomainException.NotFoundCode);
     }
 
     /// <summary>Only the machine-readable half of ProblemDetails; nothing else is asserted on.</summary>
