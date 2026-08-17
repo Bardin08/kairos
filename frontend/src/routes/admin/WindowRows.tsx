@@ -44,7 +44,13 @@ export default function WindowRows({
         // Keyed by position because a window has no identity of its own until it
         // is saved, and the ids the server gives them do not survive a set that
         // is replaced entire.
-        <div className="row gap-2 wrap" key={position}>
+        //
+        // Not .wrap: the preview pane's narrow column already has .week-time
+        // giving ground (kairos.css) so this line does not overflow it —
+        // wrapping on top of that only dropped × onto its own line beneath
+        // the times, which read as a stray extra row rather than a control
+        // still attached to them.
+        <div className="row gap-2" key={position}>
           <input
             className="input numeric week-time"
             type="time"

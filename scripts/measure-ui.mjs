@@ -1258,6 +1258,55 @@ const main = async () => {
       }
     })
 
+  /**
+   * Whether a window row (WindowRows.tsx: a `.row` holding two `.week-time`
+   * fields, a `–` separator and a `.chip-x`) has wrapped in the date panel.
+   * jsdom never lays this out, so nothing in the unit suite catches it — this
+   * check is what would have caught the regression it is named for: the
+   * narrow date-panel column is ~276px, a window row's fixed-width fields and
+   * gaps needed ~317px, and the row wrapped, dropping × onto its own line.
+   *
+   * Detected by height, not by the `top` of a row's children: a row that has
+   * not wrapped at all still spreads its children's `top` across several
+   * values, because `.row`'s own `align-items: center` centers a shorter
+   * `–` separator against its taller `.week-time` siblings — that spread was
+   * mistaken for wrapping once already and produced a false positive. Height
+   * does not have that failure mode: a single line's row resolves to exactly
+   * its tallest child's height plus its own vertical padding, and only an
+   * actual second line pushes it taller than that. The padding is read off
+   * the row's own computed style rather than assumed to be zero — `.row` in
+   * kairos.css sets none today, but a future rule adding some should not
+   * silently start reading as a wrap.
+   */
+  const measureWindowRows = async (page) =>
+    page.evaluate(() => {
+      const group = document.querySelector('.segmented[role="radiogroup"]')
+      const panel = group ? group.closest('.sep-top') : null
+      if (panel === null) return { panelFound: false, rows: [] }
+      const rows = [...panel.querySelectorAll('.row')].filter(
+        (row) => row.querySelector('.week-time') !== null,
+      )
+      return {
+        panelFound: true,
+        rows: rows.map((row) => {
+          const rect = row.getBoundingClientRect()
+          const style = getComputedStyle(row)
+          const paddingBlock = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom)
+          const tallestChild = Math.max(
+            0,
+            ...[...row.children].map((child) => child.getBoundingClientRect().height),
+          )
+          return {
+            width: rect.width,
+            height: rect.height,
+            tallestChild,
+            paddingBlock,
+            wrapped: rect.height > tallestChild + paddingBlock,
+          }
+        }),
+      }
+    })
+
   for (const [viewportLabel, viewport] of narrowViewports) {
     await withPage(browser, { viewport }, async (page) => {
       const name = `pattern-editor-${viewportLabel}`
@@ -1310,6 +1359,8 @@ const main = async () => {
       const segmented = await measureSegmented(page, tap)
       const panelControls = await measurePanelControls(page, tap)
       const columnFit = await measureColumnFit(page)
+      const windowRows = await measureWindowRows(page)
+      const wrappedWindowRows = windowRows.rows.filter((row) => row.wrapped)
       const pageScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
 
       await page.screenshot({ path: `${OUT}/${name}-own-hours.png`, fullPage: true })
@@ -1332,6 +1383,8 @@ const main = async () => {
           segmented,
           panelControls,
           columnFit,
+          windowRows,
+          wrappedWindowRows,
           pageScrollWidth,
           scrollsSideways: pageScrollWidth > viewport.width,
         },
