@@ -240,7 +240,7 @@ public static class LinksAdminEndpoints
     {
         // Before the three checks below, and that order is the whole of what this route promises:
         // the link is the resource, so a body validated against a link that is not there answers
-        // 409 or 400 about a resource that does not exist. The other four {id:guid} routes resolve
+        // 409 or 400 about a resource that does not exist. The other three {id:guid} routes resolve
         // first and 404, and an operator on a stale page has to be told to reload rather than sent
         // hunting for a collision to resolve.
         //

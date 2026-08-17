@@ -158,7 +158,7 @@ public class LinksAdminTests
     /// three body validations ran ahead of the lookup, and a PUT to a guid nothing answers to came
     /// back 409 <c>slug_taken</c> — a collision reported for a link that is not there, which sends
     /// the operator hunting for another link to rename instead of reloading a page that has gone
-    /// stale. The other four <c>{id:guid}</c> routes resolve the link first and answer 404.
+    /// stale. The other three <c>{id:guid}</c> routes resolve the link first and answer 404.
     /// </summary>
     [Fact]
     public async Task Update_ForALinkThatDoesNotExist_IsNotFoundRatherThanAConflictWithAnotherLink()
