@@ -100,19 +100,4 @@ public class AdminBoundaryTests
         response.Headers.Location!.OriginalString.ShouldContain(IntegrationEndpoints.StateInvalidCode);
     }
 
-    /// <summary>
-    /// The other half of the split, and the half a fallback policy or a stray
-    /// <c>RequireAuthorization</c> on the version group would take out: an invitee holds no
-    /// session and never will.
-    /// </summary>
-    [Fact]
-    public async Task PublicApi_WithoutASession_StillAnswers()
-    {
-        using var app = new KairosApp();
-
-        var response = await app.Client.GetAsync(
-            $"{ApiVersions.V1}/links", TestContext.Current.CancellationToken);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-    }
 }

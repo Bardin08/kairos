@@ -17,7 +17,7 @@ namespace Kairos.Api.Tests.Features;
 /// </summary>
 public class LinksAdminTests
 {
-    private const string PublicPath = $"{ApiVersions.V1}/links";
+    private const string AnonymousPath = $"{ApiVersions.V1}/sign-in";
     private const string AdminPath = $"{ApiVersions.V1}/admin/links";
     private const string UnmappedApiPath = $"{ApiVersions.V1}/nothing-is-mapped-here";
     private const string SinglePagePath = "/admin";
@@ -62,13 +62,15 @@ public class LinksAdminTests
             // index.html on disk, and without one this whole test would pass either way.
             var page = await app.Client.GetAsync(SinglePagePath, TestContext.Current.CancellationToken);
             var missing = await app.Client.GetAsync(UnmappedApiPath, TestContext.Current.CancellationToken);
-            var publicApi = await app.Client.GetAsync(PublicPath, TestContext.Current.CancellationToken);
+            var anonymousApi = await app.Client.GetAsync(AnonymousPath, TestContext.Current.CancellationToken);
 
             page.StatusCode.ShouldBe(HttpStatusCode.OK);
             missing.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-            // The other half of the fix: a literal segment beats a wildcard, so a mapped public
-            // route is untouched by the catch-all sitting above it.
-            publicApi.StatusCode.ShouldBe(HttpStatusCode.OK);
+            // The other half of the fix: a literal segment beats a wildcard, so a mapped route is
+            // untouched by the catch-all sitting above it. Sign-in stands in here because it is the
+            // cheapest anonymous, literal route under /api — what is under test is route precedence,
+            // not sign-in itself.
+            anonymousApi.StatusCode.ShouldBe(HttpStatusCode.OK);
         }
         finally
         {
