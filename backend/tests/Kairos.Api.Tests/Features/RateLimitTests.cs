@@ -89,6 +89,13 @@ public class RateLimitTests
     /// </summary>
     private static readonly TimeSpan BriefWindow = TimeSpan.FromSeconds(WholeSecond);
 
+    /// <summary>
+    /// The window every test here runs against, and the one thing that has to stay long enough for
+    /// the read test's sixty requests. Named once so the host that configures it and the assertion
+    /// that checks a reset against it cannot drift apart.
+    /// </summary>
+    private static readonly TimeSpan Window = RateLimitOptions.DefaultWindow;
+
     [Fact]
     public async Task CreateBooking_PastTheWindowsPermits_IsRefusedWith429RetryAfterAndHeaders()
     {
@@ -132,7 +139,7 @@ public class RateLimitTests
         // Somewhere inside the window that has just started, which is the only claim a caller can
         // act on and the one a dropped header would quietly stop making.
         HeaderOf(first, RateLimitPolicies.ResetHeader)
-            .ShouldBeInRange(WholeSecond, (int)RateLimitOptions.DefaultWindow.TotalSeconds);
+            .ShouldBeInRange(WholeSecond, (int)Window.TotalSeconds);
 
         var second = await AttemptAsync(client);
         spent++;
@@ -194,13 +201,15 @@ public class RateLimitTests
     /// slots — so this also pins that the two classes are two numbers and not one.
     /// </summary>
     /// <remarks>
-    /// The one test here whose correctness depends on how long it takes to run. Sixty-one requests
-    /// have to complete inside the default one-minute window; past it the fixed window replenishes
-    /// and the last request is admitted, failing as "expected 429, got 404". That needs about a
-    /// second per in-memory request, which only a badly oversubscribed machine would produce — but
-    /// it is the mechanism to check first if this is ever seen red, ahead of anything about the
-    /// limiter itself. The fix would be to give this test its own small read budget and assert
-    /// <c>RateLimit-Limit</c> against it, which shortens the loop without weakening what it pins.
+    /// This test was once seen red under parallel load and the limiter was the wrong suspect. The
+    /// cause was <c>SqliteConnection.ClearAllPools()</c> in the harness teardown, which is
+    /// process-global: a sibling test finishing disposed this one's pooled connections mid-loop
+    /// and a request came back 500, failing the <c>NotFound</c> assertion inside the loop rather
+    /// than the refusal at the end. Both teardowns now clear only their own database's pool. The
+    /// tell is which assertion fails — inside the loop is infrastructure, the last one is the
+    /// limiter. The window is pinned by <see cref="ShippingLimitHost"/> for the same reason: these
+    /// sixty-one requests must all land inside one window, and that should not depend on a
+    /// default.
     /// </remarks>
     [Fact]
     public async Task GetSlots_PastTheWindowsPermits_IsRefusedWith429()
@@ -345,6 +354,14 @@ public class RateLimitTests
         {
             builder.UseSetting(WritePermitsKey, Text(WritePermits));
             builder.UseSetting(ReadPermitsKey, Text(ReadPermits));
+
+            // Pinned rather than inherited. It happens to equal the shipping default, but the read
+            // test spends sixty permits one request at a time and every one of them has to land
+            // inside a window anchored at the limiter's construction — so the length that decides
+            // whether that test is sound belongs in the test's own configuration, where changing
+            // the default cannot silently shorten it.
+            builder.UseSetting(WindowKey, Window.ToString());
+
             builder.ConfigureServices(
                 services => services.AddSingleton<IStartupFilter, LoopbackPeer>());
         });

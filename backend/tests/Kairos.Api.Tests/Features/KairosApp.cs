@@ -130,8 +130,11 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
         _client?.Dispose();
 
         // The pool holds handles to the file, so clearing it first is what makes the delete
-        // succeed rather than leave a temp database behind on every run.
-        SqliteConnection.ClearAllPools();
+        // succeed rather than leave a temp database behind on every run. Scoped to this database's
+        // own pool: ClearAllPools is process-global, and with collections running in parallel it
+        // tears down connections belonging to every other test still in flight, which surfaces as
+        // a disposed sqlite3 handle in whichever unlucky sibling opens one next.
+        SqliteConnection.ClearPool(new SqliteConnection(ConnectionString));
 
         string[] files = [_path, $"{_path}-wal", $"{_path}-shm"];
         foreach (var file in files)
