@@ -153,6 +153,13 @@ public static class PatternsAdminEndpoints
     public const string WindowInvertedCode = "window_inverted";
 
     /// <summary>
+    /// Two writers on one date, interleaving around the delete — two admin tabs, or one tab and a
+    /// forgotten one. Named rather than left as a 500, because the operator's answer is "reload
+    /// and look at what the other one did", which a stack trace does not say.
+    /// </summary>
+    public const string OverrideDateTakenCode = "override_date_taken";
+
+    /// <summary>
     /// The <c>{date}</c> segment of an override route is not an ISO calendar date. Thrown from the
     /// handler rather than declared as a route constraint because no regular expression rejects
     /// 2026-02-30: the parse has to run either way, and left to the binder the failure was a
@@ -201,6 +208,9 @@ public static class PatternsAdminEndpoints
     private const string NameTaken = "Another pattern already has that name.";
 
     private const string WindowInverted = "A window has to end after it starts.";
+
+    private const string OverrideDateTaken =
+        "This date was changed somewhere else. Reload and try again.";
 
     private const string RuleOverlaps =
         "Another window on that day already covers part of those hours. Overlapping windows offer "
@@ -404,7 +414,14 @@ public static class PatternsAdminEndpoints
             });
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        await ConcurrentWrite.NamedAsync(
+            async () =>
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                return true;
+            },
+            OverrideDateTakenCode,
+            OverrideDateTaken);
 
         return await ReadAsync(context, pattern.Id, cancellationToken);
     }
@@ -428,6 +445,13 @@ public static class PatternsAdminEndpoints
 
         // The date goes back to the weekly rules. Removing an override is not the same as
         // blocking the day, which is why the two are different requests.
+        //
+        // Deliberately not bumping Version, unlike the save above. The token guards a
+        // read-modify-write, and this has none: ExecuteDelete decides on rows the database
+        // matched rather than on a set read earlier, so two of these racing already answer
+        // coherently — one deletes and the other is told the override does not exist, which by
+        // then is true. Bumping would mean loading the pattern to write a column nothing reads
+        // here, and would make a remove on one date refuse a save on an unrelated one.
         return await ReadAsync(context, patternId, cancellationToken);
     }
 

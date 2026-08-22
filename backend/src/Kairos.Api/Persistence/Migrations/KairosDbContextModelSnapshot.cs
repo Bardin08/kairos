@@ -350,7 +350,8 @@ namespace Kairos.Api.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PatternId", "Date");
+                    b.HasIndex("PatternId", "Date", "StartMinute", "EndMinute")
+                        .IsUnique();
 
                     b.ToTable("PatternOverrides");
                 });
