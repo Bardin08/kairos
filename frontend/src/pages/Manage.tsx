@@ -423,9 +423,18 @@ export default function Manage() {
 
               {chosen !== null && (
                 <div className="desktop-cta">
-                  <button className="btn btn-primary" type="button" data-loading={busy || undefined} onClick={runReschedule}>
-                    Move to {chosen.long}
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    data-loading={busy || undefined}
+                    onClick={runReschedule}
+                  >
+                    Move
                   </button>
+                  {/* Beside the button rather than inside its label, exactly as
+                      Book.tsx:573 does it: figures set in the numeric face, and
+                      a button that does not resize as the date changes. */}
+                  <span className="muted t-sm numeric">{chosen.long}</span>
                 </div>
               )}
             </div>
