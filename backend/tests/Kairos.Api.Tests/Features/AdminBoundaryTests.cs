@@ -27,10 +27,31 @@ public class AdminBoundaryTests
     /// <summary>A group the identity provider issues for something that is not this application.</summary>
     private const string ForeignGroup = "some-other-group";
 
+    /// <summary>A second one, so a membership list can be a list rather than a pair.</summary>
+    private const string YetAnotherGroup = "a-third-group";
+
     /// <summary>An account the allowlist does not name, carrying the right group all the same.</summary>
     private const string AnotherSubject = "another-operator";
 
     private const string FirstSubjectPath = $"{AdminAuthorization.SubjectsPath}:0";
+
+    /// <summary>The claim type an OIDC provider might spell with a capital, and often does.</summary>
+    private const string CapitalisedGroupClaimType = "Groups";
+
+    /// <summary>
+    /// Every shape of the group claim that has to be decided one way rather than the other, with
+    /// the answer beside it. Derived from <see cref="AdminAuthorization.DefaultGroup"/> rather
+    /// than written out, so a row says which near miss it is instead of asking a reader to spot
+    /// the difference between two literals.
+    /// </summary>
+    public static TheoryData<string[], HttpStatusCode> GroupClaims => new()
+    {
+        { [AdminAuthorization.DefaultGroup], HttpStatusCode.OK },
+        { [AdminAuthorization.DefaultGroup.ToUpperInvariant()], HttpStatusCode.Forbidden },
+        { [$" {AdminAuthorization.DefaultGroup} "], HttpStatusCode.Forbidden },
+        { [$"a {AdminAuthorization.DefaultGroup} b"], HttpStatusCode.Forbidden },
+        { [ForeignGroup, AdminAuthorization.DefaultGroup, YetAnotherGroup], HttpStatusCode.OK },
+    };
 
     /// <summary>
     /// The shape Tasks 3 to 6 hang their endpoints off, asserted where it is defined rather than
@@ -121,7 +142,7 @@ public class AdminBoundaryTests
     public async Task ListIntegrations_WithASessionCarryingNoGroup_IsForbiddenRatherThanAnswered()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient(group: null);
+        using var client = app.CreateOperatorClient(groups: []);
 
         var response = await client.GetAsync(
             $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
@@ -160,12 +181,58 @@ public class AdminBoundaryTests
     public async Task ListIntegrations_WithASessionCarryingAnotherApplicationsGroup_IsForbidden()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient(group: ForeignGroup);
+        using var client = app.CreateOperatorClient(groups: [ForeignGroup]);
 
         var response = await client.GetAsync(
             $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// How the group claim is compared, pinned row by row, because none of it is Kairos's own
+    /// code and all of it is Kairos's decision. <c>HasClaim(type, value)</c> compares the value
+    /// with <see cref="StringComparer.Ordinal"/>, and that is the behaviour wanted: a group name
+    /// is an opaque identifier the provider chose, so a near miss is a different group and not a
+    /// typo to be forgiven.
+    /// </summary>
+    /// <remarks>
+    /// Unpinned, the rows below are what a well-meaning edit takes away. Making the comparison
+    /// case-insensitive, or splitting the value on spaces to support a provider that packs every
+    /// membership into one claim, would each ship green today — and the second would admit
+    /// <c>"a kairos-users b"</c>, which is a string an untrusted account can often choose.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(GroupClaims))]
+    public async Task ListIntegrations_WithTheseGroupClaims_IsAnsweredOnlyOnAnExactOrdinalMatch(
+        string[] groups,
+        HttpStatusCode expected)
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(groups: groups);
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(expected);
+    }
+
+    /// <summary>
+    /// The one widening in the read, and it is on the key rather than on the value: claim TYPES
+    /// are matched case-insensitively, so a provider that spells the claim <c>Groups</c> is
+    /// admitted. Worth pinning because it is the half somebody tightening the comparison above
+    /// would tighten by accident.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithTheGroupUnderADifferentlyCasedClaimType_IsAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(groupClaimType: CapitalisedGroupClaimType);
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     /// <summary>

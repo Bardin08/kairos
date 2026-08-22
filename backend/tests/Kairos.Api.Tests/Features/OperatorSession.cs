@@ -43,11 +43,15 @@ public static class OperatorSession
     /// configuration needs no parameter here to do it. The database is the factory's, so anything
     /// seeded through <see cref="KairosApp.Seed"/> is visible here.
     /// </summary>
-    /// <param name="group">
-    /// The group the session carries. The default is the one the application admits; null is a
-    /// principal the identity provider authenticated and Kairos does not trust, and any other
-    /// value is one it authenticated for a different application. Both are cases
-    /// <see cref="AdminBoundaryTests"/> pins.
+    /// <param name="groups">
+    /// The groups the session carries, one claim each — a provider releases the claim once per
+    /// membership. Null means the one the application admits; empty is a principal the identity
+    /// provider authenticated and Kairos does not trust; anything else is memberships it holds
+    /// somewhere other than here. All three are cases <see cref="AdminBoundaryTests"/> pins.
+    /// </param>
+    /// <param name="groupClaimType">
+    /// How those groups are spelled. Varied for the one test that pins the read matching a claim
+    /// type case-insensitively, which is what admits a provider that sends <c>Groups</c>.
     /// </param>
     /// <param name="subject">
     /// The subject the session carries, issued by default because a real provider always sends
@@ -62,7 +66,8 @@ public static class OperatorSession
     public static HttpClient CreateOperatorClient(
         this WebApplicationFactory<KairosDbContext> app,
         Action<IServiceCollection>? substitutions = null,
-        string? group = AdminAuthorization.DefaultGroup,
+        IReadOnlyList<string>? groups = null,
+        string groupClaimType = AdminAuthorization.GroupClaimType,
         string? subject = Subject,
         string subjectClaimType = ClaimTypes.NameIdentifier) =>
         app.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
@@ -70,7 +75,8 @@ public static class OperatorSession
             services.AddAuthentication()
                 .AddScheme<SignedInOptions, SignedInHandler>(Scheme, options =>
                 {
-                    options.Group = group;
+                    options.Groups = groups ?? [AdminAuthorization.DefaultGroup];
+                    options.GroupClaimType = groupClaimType;
                     options.Subject = subject;
                     options.SubjectClaimType = subjectClaimType;
                 });
@@ -88,7 +94,9 @@ public static class OperatorSession
     /// <summary>What the substituted provider puts in the ticket, and the only thing it varies.</summary>
     private sealed class SignedInOptions : AuthenticationSchemeOptions
     {
-        public string? Group { get; set; }
+        public IReadOnlyList<string> Groups { get; set; } = [];
+
+        public string GroupClaimType { get; set; } = AdminAuthorization.GroupClaimType;
 
         public string? Subject { get; set; }
 
@@ -105,9 +113,9 @@ public static class OperatorSession
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
             List<Claim> claims = [new Claim(ClaimTypes.Name, Operator)];
-            if (Options.Group is { } group)
+            foreach (var group in Options.Groups)
             {
-                claims.Add(new Claim(AdminAuthorization.GroupClaimType, group));
+                claims.Add(new Claim(Options.GroupClaimType, group));
             }
 
             if (Options.Subject is { } subject)
