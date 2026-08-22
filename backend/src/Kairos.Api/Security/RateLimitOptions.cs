@@ -28,9 +28,22 @@ public sealed class RateLimitOptions
     /// </summary>
     public static readonly TimeSpan DefaultWindow = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// How many partitions are remembered so their counts can be published. Small on purpose, and
+    /// sized against the deployment rather than against the traffic: the reference instance runs at
+    /// <c>limits 192Mi</c> and its last reading was 190.2 MiB (<c>docs/measurements.md</c>), so the
+    /// headroom this may spend is under two megabytes — about a thousand entries at the few hundred
+    /// bytes a key, a window and a limiter cost. A booking link meeting a thousand distinct
+    /// addresses inside one window is being crawled rather than read, and the asymmetry settles the
+    /// rest: too low costs a caller its <c>RateLimit-*</c> headers, too high costs the pod.
+    /// </summary>
+    public const int DefaultMaxPartitions = 1_000;
+
     public int WritePermits { get; set; } = DefaultWritePermits;
 
     public int ReadPermits { get; set; } = DefaultReadPermits;
 
     public TimeSpan Window { get; set; } = DefaultWindow;
+
+    public int MaxPartitions { get; set; } = DefaultMaxPartitions;
 }

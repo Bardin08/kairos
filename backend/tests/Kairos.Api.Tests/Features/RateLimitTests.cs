@@ -48,10 +48,30 @@ public class RateLimitTests
     private const string BookerEmail = "vlad@example.com";
     private const string BookerZone = "Europe/Warsaw";
 
-    /// <summary>Two callers arriving through the same proxy, from the documentation range.</summary>
+    private const string MaxPartitionsKey =
+        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.MaxPartitions)}";
+
+    private const string WindowKey =
+        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.Window)}";
+
+    /// <summary>Three callers arriving through the same proxy, from the documentation ranges.</summary>
     private const string FirstCaller = "203.0.113.9";
 
     private const string SecondCaller = "198.51.100.4";
+
+    private const string ThirdCaller = "192.0.2.7";
+
+    /// <summary>Room for one caller, so the next one is the one past the cap.</summary>
+    private const int RememberOne = 1;
+
+    /// <summary>How many windows to wait out before an idle partition is expected to be gone.</summary>
+    private const int WindowsToWait = 3;
+
+    /// <summary>
+    /// Short enough to wait out in a test. It has to be real time rather than a stub clock: the
+    /// count the sweep reads is the limiter's own, and the limiter replenishes on its own timer.
+    /// </summary>
+    private static readonly TimeSpan BriefWindow = TimeSpan.FromSeconds(1);
 
     [Fact]
     public async Task CreateBooking_PastTheWindowsPermits_IsRefusedWith429AndRetryAfter()
@@ -155,6 +175,70 @@ public class RateLimitTests
         HeaderOf(first, RateLimitPolicies.RemainingHeader).ShouldBe(WritePermits - 1);
     }
 
+    /// <summary>
+    /// Past the cap a caller is still limited — it only stops being told where it stands. The
+    /// dictionary behind the headers is bounded because it holds one entry per source address and
+    /// is reachable through an anonymous POST; what must never follow from that bound is a caller
+    /// who gets in free because there was no room left to count it in.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_FromACallerPastTheRememberedPartitions_IsLimitedWithoutHeaders()
+    {
+        using var app = new KairosApp();
+        var host = RememberingOneCaller(app, RateLimitOptions.DefaultWindow);
+
+        using var remembered = ForwardedClient(host, FirstCaller);
+        using var forgotten = ForwardedClient(host, SecondCaller);
+
+        // The one slot there is goes to whoever arrives first.
+        Has(await AttemptAsync(remembered), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
+
+        for (var attempt = 0; attempt < WritePermits; attempt++)
+        {
+            var admitted = await AttemptAsync(forgotten);
+
+            admitted.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+            Has(admitted, RateLimitPolicies.RemainingHeader).ShouldBeFalse();
+        }
+
+        (await AttemptAsync(forgotten)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+    }
+
+    /// <summary>
+    /// An idle partition is reclaimed, so the cap bounds how many callers are remembered at once
+    /// rather than how many the process may ever serve. Without the sweep the first callers to
+    /// arrive would own the headers until a restart, however long they had been gone.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_AfterTheRememberedCallersWindowTurnsOver_ReclaimsItsSlot()
+    {
+        using var app = new KairosApp();
+        var host = RememberingOneCaller(app, BriefWindow);
+        using var idle = ForwardedClient(host, FirstCaller);
+
+        // The cap is now full, and stays full for as long as this caller's window is running.
+        Has(await AttemptAsync(idle), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
+
+        await Task.Delay(BriefWindow * WindowsToWait, TestContext.Current.CancellationToken);
+
+        using var arriving = ForwardedClient(host, ThirdCaller);
+
+        // Remembered, which can only happen if the idle caller's entry was swept to make room.
+        Has(await AttemptAsync(arriving), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
+    }
+
+    /// <summary>A host that remembers one caller, over a window of the given length.</summary>
+    private static WebApplicationFactory<KairosDbContext> RememberingOneCaller(
+        KairosApp app,
+        TimeSpan window) =>
+        ShippingLimitHost(app).WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(MaxPartitionsKey, Text(RememberOne));
+            builder.UseSetting(WindowKey, window.ToString());
+            builder.ConfigureServices(
+                services => services.AddSingleton<IStartupFilter, LoopbackPeer>());
+        });
+
     /// <summary>A host at the shipping limits rather than the ones the harness raises.</summary>
     private static WebApplicationFactory<KairosDbContext> ShippingLimitHost(KairosApp app) =>
         app.WithWebHostBuilder(builder =>
@@ -196,6 +280,9 @@ public class RateLimitTests
                 timeZone = BookerZone,
             },
             TestContext.Current.CancellationToken);
+
+    private static bool Has(HttpResponseMessage response, string name) =>
+        response.Headers.Contains(name);
 
     private static int HeaderOf(HttpResponseMessage response, string name) =>
         int.Parse(response.Headers.GetValues(name).Single(), CultureInfo.InvariantCulture);
