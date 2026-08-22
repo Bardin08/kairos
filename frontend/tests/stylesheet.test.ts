@@ -36,7 +36,7 @@ test('the invalid-state border and focus ring cover the row shape, not only the 
     `.field[data-invalid="true"] .input,\n  .field[data-invalid="true"] .textarea,\n  ${ROW_INVALID_INPUT} {\n    border-color: var(--status-danger-fg);`,
   )
   expect(css).toContain(
-    `.field[data-invalid="true"] .input:focus,\n  .field[data-invalid="true"] .textarea:focus,\n  ${ROW_INVALID_INPUT}:focus {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
+    `.field[data-invalid="true"] .input:focus-visible,\n  .field[data-invalid="true"] .textarea:focus-visible,\n  ${ROW_INVALID_INPUT}:focus-visible {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
   )
 })
 

@@ -1235,9 +1235,9 @@
   .field-row[data-invalid="true"] .input {
     border-color: var(--status-danger-fg);
   }
-  .field[data-invalid="true"] .input:focus,
-  .field[data-invalid="true"] .textarea:focus,
-  .field-row[data-invalid="true"] .input:focus {
+  .field[data-invalid="true"] .input:focus-visible,
+  .field[data-invalid="true"] .textarea:focus-visible,
+  .field-row[data-invalid="true"] .input:focus-visible {
     box-shadow: 0 0 0 3px var(--status-danger-bg);
   }
   /* `--measure` is not decoration on this one. Beside a form field the error is
