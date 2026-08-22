@@ -22,6 +22,14 @@ namespace Kairos.Api.Tests.Features;
 /// </summary>
 public class AdminBoundaryTests
 {
+    /// <summary>A group the identity provider issues for something that is not this application.</summary>
+    private const string ForeignGroup = "some-other-group";
+
+    /// <summary>An account the allowlist does not name, carrying the right group all the same.</summary>
+    private const string AnotherSubject = "another-operator";
+
+    private const string FirstSubjectPath = $"{AdminAuthorization.SubjectsPath}:0";
+
     /// <summary>
     /// The shape Tasks 3 to 6 hang their endpoints off, asserted where it is defined rather than
     /// through a route this branch would have to invent to have something to call.
@@ -136,6 +144,57 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
+    /// A group the provider does hand out, to somebody who is not an operator here. The half that
+    /// a policy asking only "is there a group claim?" would answer 200 to, and the reason the
+    /// value is compared rather than the presence of the claim.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithASessionCarryingAnotherApplicationsGroup_IsForbidden()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(group: ForeignGroup);
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// The second gate, for the deployment whose provider hands the group out more widely than
+    /// Kairos should trust. Written, it decides on top of the group rather than instead of it.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithTheGroupAndAListedSubject_IsAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(
+            configuration: builder => builder.UseSetting(FirstSubjectPath, OperatorSession.Subject));
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The same allowlist naming somebody else. Carrying the group is no longer enough, which is
+    /// the whole of what an allowlist buys and the only thing that distinguishes it from nothing.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithTheGroupAndAnUnlistedSubject_IsForbidden()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(
+            configuration: builder => builder.UseSetting(FirstSubjectPath, AnotherSubject));
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
     /// A blanked group is a deployment that fumbled its configuration, and it stops the process
     /// rather than answering 403 on every admin route. Asserted on the exception because there is
     /// no request to make against a host that did not build; the base exception is read rather
@@ -144,11 +203,28 @@ public class AdminBoundaryTests
     [Fact]
     public void CreatingTheHost_WithABlankedAdminGroup_FailsAtStartupAndNamesTheSetting()
     {
-        using var app = new KairosApp(
-            settings: [new KeyValuePair<string, string>(AdminAuthorization.GroupPath, " ")]);
+        using var app = new KairosApp();
 
-        var thrown = Should.Throw<Exception>(() => app.CreateClient());
+        var thrown = Should.Throw<Exception>(() => app
+            .WithWebHostBuilder(builder => builder.UseSetting(AdminAuthorization.GroupPath, ""))
+            .CreateClient());
 
         thrown.GetBaseException().Message.ShouldContain(AdminAuthorization.GroupPath);
+    }
+
+    /// <summary>
+    /// And a blanked entry in the allowlist, which is the same mistake one setting over: it
+    /// matches no principal, so it would lock every operator out silently rather than loudly.
+    /// </summary>
+    [Fact]
+    public void CreatingTheHost_WithABlankedAllowedSubject_FailsAtStartupAndNamesTheSetting()
+    {
+        using var app = new KairosApp();
+
+        var thrown = Should.Throw<Exception>(() => app
+            .WithWebHostBuilder(builder => builder.UseSetting(FirstSubjectPath, ""))
+            .CreateClient());
+
+        thrown.GetBaseException().Message.ShouldContain(AdminAuthorization.SubjectsPath);
     }
 }

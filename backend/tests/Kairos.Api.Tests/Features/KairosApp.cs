@@ -28,14 +28,7 @@ namespace Kairos.Api.Tests.Features;
 /// empty while these tests run — and a test about the single-page fallback would then pass whether
 /// or not the route that makes it true is there. Left null, nothing changes.
 /// </param>
-/// <param name="settings">
-/// Extra configuration, applied last so it wins over everything this harness sets. For the test
-/// that is about what a misconfigured boundary does rather than about what a route answers.
-/// </param>
-public sealed class KairosApp(
-    string? webRoot = null,
-    IReadOnlyList<KeyValuePair<string, string>>? settings = null)
-    : WebApplicationFactory<KairosDbContext>
+public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
 {
     private readonly string _path =
         Path.Combine(Path.GetTempPath(), $"kairos-api-{Guid.CreateVersion7():N}.db");
@@ -110,11 +103,6 @@ public sealed class KairosApp(
             services.AddSingleton(
                 new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(connectionString).Options);
         });
-
-        foreach (var (key, value) in settings ?? [])
-        {
-            builder.UseSetting(key, value);
-        }
     }
 
     protected override void Dispose(bool disposing)

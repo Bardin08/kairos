@@ -67,9 +67,25 @@ public static class AdminAuthorization
         return group;
     }
 
-    /// <summary>Empty means the group alone decides, which is the common deployment.</summary>
-    public static IReadOnlyList<string> AllowedSubjects(IConfiguration configuration) =>
-        configuration.GetSection(SubjectsPath).Get<string[]>() ?? [];
+    /// <summary>
+    /// Empty means the group alone decides, which is the common deployment. A blank entry is the
+    /// same mistake <see cref="RequiredGroup"/> throws for, one setting over: no principal has an
+    /// empty subject, so an allowlist containing one admits nobody and every admin route answers
+    /// 403 with nothing anywhere saying why.
+    /// </summary>
+    public static IReadOnlyList<string> AllowedSubjects(IConfiguration configuration)
+    {
+        var subjects = configuration.GetSection(SubjectsPath).Get<string[]>() ?? [];
+        if (Array.Exists(subjects, string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidOperationException(
+                $"{SubjectsPath} has an empty entry. Each entry names one account allowed to "
+                + "reach the admin surface; remove the entry to let the group alone decide, or "
+                + "give it a real subject identifier.");
+        }
+
+        return subjects;
+    }
 
     public static bool IsOperator(
         ClaimsPrincipal principal,

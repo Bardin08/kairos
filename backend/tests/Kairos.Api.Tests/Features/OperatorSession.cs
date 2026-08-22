@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using Kairos.Api.Security;
 
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,31 +30,58 @@ public static class OperatorSession
     public const string Scheme = "TestOperator";
 
     /// <summary>
+    /// The subject the substituted provider issues, spelled the way a real one does. Public
+    /// because an allowlist is configuration naming this same value, so a test that writes one
+    /// has to be able to say it.
+    /// </summary>
+    public const string Subject = "kairos-test-operator";
+
+    /// <summary>
     /// A client on its own host, so <paramref name="substitutions"/> can replace a service the
     /// composition root registered. The database is the factory's, so anything seeded through
     /// <see cref="KairosApp.Seed"/> is visible here.
     /// </summary>
     /// <param name="group">
     /// The group the session carries. The default is the one the application admits; null is a
-    /// principal the identity provider authenticated and Kairos does not trust, which is the case
+    /// principal the identity provider authenticated and Kairos does not trust, and any other
+    /// value is one it authenticated for a different application. Both are cases
     /// <see cref="AdminBoundaryTests"/> pins.
+    /// </param>
+    /// <param name="subject">
+    /// The <c>sub</c> the session carries, issued by default because a real provider always sends
+    /// one. It only decides anything where a deployment has written an allowlist.
+    /// </param>
+    /// <param name="configuration">
+    /// Settings for this client's own host, for the tests that vary what the boundary is
+    /// configured to admit rather than who is asking.
     /// </param>
     public static HttpClient CreateOperatorClient(
         this KairosApp app,
+        Action<IServiceCollection>? substitutions = null,
         string? group = AdminAuthorization.DefaultGroup,
-        Action<IServiceCollection>? substitutions = null) =>
-        app.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        string? subject = Subject,
+        Action<IWebHostBuilder>? configuration = null) =>
+        app.WithWebHostBuilder(builder =>
         {
-            services.AddAuthentication(Scheme)
-                .AddScheme<SignedInOptions, SignedInHandler>(
-                    Scheme, options => options.Group = group);
-            substitutions?.Invoke(services);
-        })).CreateClient();
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddAuthentication(Scheme)
+                    .AddScheme<SignedInOptions, SignedInHandler>(Scheme, options =>
+                    {
+                        options.Group = group;
+                        options.Subject = subject;
+                    });
+                substitutions?.Invoke(services);
+            });
+            configuration?.Invoke(builder);
+        }).CreateClient();
 
     /// <summary>What the substituted provider puts in the ticket, and the only thing it varies.</summary>
-    public sealed class SignedInOptions : AuthenticationSchemeOptions
+    private sealed class SignedInOptions : AuthenticationSchemeOptions
     {
         public string? Group { get; set; }
+
+        public string? Subject { get; set; }
     }
 
     private sealed class SignedInHandler(
@@ -63,12 +91,19 @@ public static class OperatorSession
     {
         private const string Operator = "operator";
 
+        private const string SubjectClaimType = "sub";
+
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
             List<Claim> claims = [new Claim(ClaimTypes.Name, Operator)];
             if (Options.Group is { } group)
             {
                 claims.Add(new Claim(AdminAuthorization.GroupClaimType, group));
+            }
+
+            if (Options.Subject is { } subject)
+            {
+                claims.Add(new Claim(SubjectClaimType, subject));
             }
 
             var identity = new ClaimsIdentity(claims, Scheme.Name);

@@ -118,7 +118,7 @@ public class MeetingsAdminTests
     public async Task ListMeetings_TheCalendarRefusedTheWrite_ReadsNotSyncedWithTheReasonAndTheBookingStands()
     {
         using var app = NewApp();
-        using var client = app.CreateOperatorClient(substitutions: services =>
+        using var client = app.CreateOperatorClient(services =>
         {
             services.RemoveAll<ICalendarWriter>();
             services.AddScoped<ICalendarWriter>(_ => new RefusingCalendar());
@@ -153,7 +153,7 @@ public class MeetingsAdminTests
     public async Task ListMeetings_TheGrantWasRevoked_ReadsNotSyncedWithTheReasonRatherThanAsNeverConnected()
     {
         using var app = NewApp();
-        using var client = app.CreateOperatorClient(substitutions: services =>
+        using var client = app.CreateOperatorClient(services =>
         {
             services.RemoveAll<ICalendarWriter>();
             services.AddScoped<ICalendarWriter>(_ => new RevokedCalendar());
