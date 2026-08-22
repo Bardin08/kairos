@@ -631,7 +631,9 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  aria-disabled={windows !== null && windows.length > 0 ? undefined : true}
+                  aria-disabled={
+                    saving || windows === null || windows.length === 0 ? true : undefined
+                  }
                   data-loading={saving || undefined}
                   onClick={applyHours}
                 >

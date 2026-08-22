@@ -669,3 +669,33 @@ test('the days a link offers times on are days the pattern opens', async () => {
   // A Sunday the pattern never opens, and the link has nothing on it either.
   expect(day('23 August, closed')).toBeDefined()
 })
+
+/**
+ * Finding 10's remainder. The three radios have been inert while a write is in
+ * flight since the three-state control landed; this button was not, so a second
+ * press was taken by the UI and then dropped by `write`'s own guard — the one
+ * failure mode where the operator has no way to tell a refusal from a slow
+ * network.
+ */
+test('Save this date is inert while a write is in flight', async () => {
+  const { promise, resolve } = deferred<Pattern>()
+  vi.mocked(savePatternOverride).mockReturnValue(promise)
+
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const save = screen.getByRole('button', { name: 'Save this date' })
+  fireEvent.click(save)
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  expect(save.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(save)
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  resolve(usedByMentorship([OWN_HOURS]))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save this date' }).getAttribute('aria-disabled'),
+    ).toBeNull(),
+  )
+})
