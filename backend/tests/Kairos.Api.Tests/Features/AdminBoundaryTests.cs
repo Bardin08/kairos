@@ -49,9 +49,6 @@ public class AdminBoundaryTests
     /// <summary>The claim type an OIDC provider might spell with a capital, and often does.</summary>
     private const string CapitalisedGroupClaimType = "Groups";
 
-    /// <summary>The Set-Cookie attribute that holds a cookie back from a plaintext request.</summary>
-    private const string SecureAttribute = "secure";
-
     /// <summary>Where the pinned provider configuration sends a challenge. Never fetched.</summary>
     private const string AuthorizationEndpoint = $"{KairosApp.Authority}/authorize";
 
@@ -407,7 +404,7 @@ public class AdminBoundaryTests
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task TheChallengeCookies_AreSecure()
+    public async Task TheChallengeCookies_WrittenOverPlainHttp_AreStillSecure()
     {
         using var app = new KairosApp();
         using var client = app
@@ -427,8 +424,15 @@ public class AdminBoundaryTests
         var response = await client.GetAsync(
             SignInEndpoints.DefaultUrl, TestContext.Current.CancellationToken);
 
-        var cookies = response.Headers.GetValues(HeaderNames.SetCookie).ToList();
+        // Asserted rather than left to the header read below throwing: a challenge that 500s has
+        // no Set-Cookie either, and the two failures call for opposite investigations.
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+
+        // Parsed rather than searched for the substring: "secure" appears in a protected value
+        // often enough that a match anywhere in the line is not an answer about the attribute.
+        var cookies = SetCookieHeaderValue.ParseList(
+            response.Headers.GetValues(HeaderNames.SetCookie).ToList());
         cookies.ShouldNotBeEmpty();
-        cookies.ShouldAllBe(cookie => cookie.Contains(SecureAttribute, StringComparison.OrdinalIgnoreCase));
+        cookies.ShouldAllBe(cookie => cookie.Secure);
     }
 }
