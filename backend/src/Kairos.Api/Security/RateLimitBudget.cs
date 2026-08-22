@@ -15,19 +15,24 @@ namespace Kairos.Api.Security;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Bounded by <see cref="RateLimitOptions.MaxPartitions"/>, because unbounded it would be worse
-/// than the problem it helps solve. One entry per source address, strongly referenced and never
-/// released, is reachable through an anonymous <c>POST /bookings</c> — so a caller rotating
-/// addresses would trade this API's mail-relay amplification for memory exhaustion, on a
-/// deployment measured at 190.2 MiB against a 192Mi limit.
+/// Held to roughly <see cref="RateLimitOptions.MaxPartitions"/> entries, because unbounded it
+/// would be worse than the problem it helps solve: one entry per source address, strongly
+/// referenced and never released, is reachable through an anonymous <c>POST /bookings</c>, so a
+/// caller rotating addresses would trade this API's mail-relay amplification for memory
+/// exhaustion. Roughly, and not exactly — the count is read and acted on without a lock, so
+/// requests in flight together can overshoot it. The overshoot is bounded by how many of them
+/// there are, costs a few hundred bytes each, and the next sweep takes it back; a counter precise
+/// enough to say otherwise would cost more than the thing it guards.
 /// </para>
 /// <para>
-/// The bound is recoverable rather than permanent: a partition arriving at a full dictionary
-/// first sweeps entries nobody is spending, so the cap limits how many callers are remembered at
-/// once and not how many a process may ever serve.
+/// Reclamation follows the framework's idleness policy rather than inventing one. A partition it
+/// has dropped has had its limiter disposed, which is what <see cref="Statistics"/> reports as
+/// null, and that is the only condition under which an entry is removed. So the cap limits how
+/// many callers are remembered at once and not how many a process may ever serve, and no entry
+/// belonging to a caller still being scored can be taken away.
 /// </para>
 /// <para>
-/// What the bound never does is refuse or delay a request. Past the cap the entry is simply not
+/// What none of this does is refuse or delay a request. Past the cap the entry is simply not
 /// recorded, <see cref="Read"/> answers null for it, and no <c>RateLimit-*</c> header is written.
 /// Enforcement lives in the framework's own partition table rather than in this one, so such a
 /// caller is throttled exactly as before — it just stops being told where it stands. The courtesy
@@ -36,17 +41,10 @@ namespace Kairos.Api.Security;
 /// </remarks>
 public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock clock)
 {
-    /// <summary>
-    /// How many entries one request may examine while sweeping. Bounded because the sweep runs
-    /// inline on a request that is already waiting: walking a full dictionary would charge
-    /// whichever caller happened to arrive first for every other caller's entry, which is the
-    /// kind of cost this class exists to cap rather than to introduce.
-    /// </summary>
-    private const int SweepBudget = 64;
-
     private readonly ConcurrentDictionary<string, Window> _windows = new(StringComparer.Ordinal);
 
-    private readonly int _capacity = options.Value.MaxPartitions;
+    /// <summary>When a sweep last started, as Unix ticks. Zero means never, so the first one runs.</summary>
+    private long _lastSweep;
 
     /// <summary>
     /// Called by the partitioner when a partition is met for the first time, and again if the
@@ -76,14 +74,15 @@ public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock c
             return limiter;
         }
 
-        if (_windows.Count >= _capacity)
+        var capacity = options.Value.MaxPartitions;
+        if (_windows.Count >= capacity)
         {
-            Sweep();
+            SweepIfDue(length);
         }
 
         // Recorded only if there is room, and the limiter is returned either way — see the third
         // paragraph above for what a caller past the cap does and does not lose.
-        if (_windows.Count < _capacity)
+        if (_windows.Count < capacity)
         {
             _windows[partition] = window;
         }
@@ -92,8 +91,8 @@ public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock c
     }
 
     /// <summary>
-    /// Null when the partition is not held — a request the limiter never scored, or one that
-    /// arrived past the cap and was deliberately not recorded.
+    /// Null when the partition is not held — a request the limiter never scored, one that arrived
+    /// past the cap and was deliberately not recorded, or one the framework has since dropped.
     /// </summary>
     public RateLimitReading? Read(string partition)
     {
@@ -120,33 +119,39 @@ public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock c
     }
 
     /// <summary>
-    /// Drops entries nobody is spending, so a long-running process does not end up holding one per
-    /// caller it has ever met.
+    /// At most one sweep per window, and at most one thread's.
     /// </summary>
     /// <remarks>
-    /// Idle is both halves: the budget is back to full AND the window has turned over at least
-    /// once since the limiter was built. Full permits alone would drop a partition in the instant
-    /// between its limiter being built and its first lease being taken, when the budget is briefly
-    /// untouched — a concurrent caller sweeping just then would evict an entry a request is in the
-    /// middle of using.
+    /// Bounded by time rather than by how many entries it looks at, which is what makes it
+    /// complete. A sweep that stopped after a fixed number of candidates would examine the same
+    /// ones every time — a <see cref="ConcurrentDictionary{TKey, TValue}"/> enumerates in bucket
+    /// order, so the prefix it walks is the same prefix — and if none of those were reclaimable it
+    /// would free nothing, forever, with reclaimable entries sitting past where it stopped. The
+    /// gate is what makes scanning all of them affordable: under the address-rotating flood this
+    /// exists for every request arrives over capacity, so an ungated sweep would have every thread
+    /// in the process walking the whole dictionary at once. Losing the exchange means another
+    /// thread already has it, and this one has nothing to do.
     /// </remarks>
-    private void Sweep()
+    private void SweepIfDue(TimeSpan length)
     {
-        var now = clock.GetCurrentInstant();
-        var scanned = 0;
+        var now = clock.GetCurrentInstant().ToUnixTimeTicks();
+        var last = Interlocked.Read(ref _lastSweep);
+
+        if (now - last < length.Ticks
+            || Interlocked.CompareExchange(ref _lastSweep, now, last) != last)
+        {
+            return;
+        }
 
         foreach (var (partition, window) in _windows)
         {
-            if (scanned++ == SweepBudget)
-            {
-                return;
-            }
-
-            // No statistics means the framework has disposed this limiter, which is the strongest
-            // available statement that nobody is spending it.
-            if (Statistics(window.Limiter) is not { } statistics
-                || (statistics.CurrentAvailablePermits >= window.Permits
-                    && now - window.Started >= Duration.FromTimeSpan(window.Length)))
+            // The framework's own signal and never one of ours: it disposes the limiter of a
+            // partition it has decided is idle, and a disposed limiter is what Statistics reports
+            // as null. A limiter it still holds belongs to a caller it is still scoring, and
+            // evicting that entry would take the caller's headers away for the rest of its
+            // session — the factory above only runs again on a miss in the framework's table, and
+            // for a caller it is still tracking there would not be one.
+            if (Statistics(window.Limiter) is null)
             {
                 _windows.TryRemove(partition, out _);
             }

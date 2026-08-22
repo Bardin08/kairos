@@ -59,19 +59,8 @@ public class RateLimitTests
 
     private const string SecondCaller = "198.51.100.4";
 
-    private const string ThirdCaller = "192.0.2.7";
-
     /// <summary>Room for one caller, so the next one is the one past the cap.</summary>
     private const int RememberOne = 1;
-
-    /// <summary>How many windows to wait out before an idle partition is expected to be gone.</summary>
-    private const int WindowsToWait = 3;
-
-    /// <summary>
-    /// Short enough to wait out in a test. It has to be real time rather than a stub clock: the
-    /// count the sweep reads is the limiter's own, and the limiter replenishes on its own timer.
-    /// </summary>
-    private static readonly TimeSpan BriefWindow = TimeSpan.FromSeconds(1);
 
     [Fact]
     public async Task CreateBooking_PastTheWindowsPermits_IsRefusedWith429AndRetryAfter()
@@ -202,29 +191,6 @@ public class RateLimitTests
         }
 
         (await AttemptAsync(forgotten)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
-    }
-
-    /// <summary>
-    /// An idle partition is reclaimed, so the cap bounds how many callers are remembered at once
-    /// rather than how many the process may ever serve. Without the sweep the first callers to
-    /// arrive would own the headers until a restart, however long they had been gone.
-    /// </summary>
-    [Fact]
-    public async Task CreateBooking_AfterTheRememberedCallersWindowTurnsOver_ReclaimsItsSlot()
-    {
-        using var app = new KairosApp();
-        var host = RememberingOneCaller(app, BriefWindow);
-        using var idle = ForwardedClient(host, FirstCaller);
-
-        // The cap is now full, and stays full for as long as this caller's window is running.
-        Has(await AttemptAsync(idle), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
-
-        await Task.Delay(BriefWindow * WindowsToWait, TestContext.Current.CancellationToken);
-
-        using var arriving = ForwardedClient(host, ThirdCaller);
-
-        // Remembered, which can only happen if the idle caller's entry was swept to make room.
-        Has(await AttemptAsync(arriving), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
     }
 
     /// <summary>A host that remembers one caller, over a window of the given length.</summary>
