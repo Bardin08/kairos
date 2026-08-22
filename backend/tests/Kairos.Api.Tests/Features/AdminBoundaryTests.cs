@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 using Kairos.Api.Features.Integrations;
 using Kairos.Api.Security;
@@ -125,6 +127,12 @@ public class AdminBoundaryTests
             $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        // Carried in the body rather than left to the status code, because the workbench draws a
+        // different screen for this than for a session that ran out, and 403 alone does not say
+        // which of the two happened.
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(
+            TestContext.Current.CancellationToken);
+        problem.GetProperty("code").GetString().ShouldBe(AdminAuthorization.NotAnOperatorCode);
     }
 
     /// <summary>

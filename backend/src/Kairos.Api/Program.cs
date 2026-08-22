@@ -16,6 +16,7 @@ using Kairos.Api.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -87,10 +88,25 @@ builder.Services
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
         };
-        options.Events.OnRedirectToAccessDenied = context =>
+        // A body on the refusal, in the shape DomainExceptionHandler writes, because a bodyless
+        // 403 leaves the workbench nothing to tell "you are signed in and not an operator" apart
+        // from any other refusal — and those two screens have different remedies.
+        options.Events.OnRedirectToAccessDenied = async context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            return Task.CompletedTask;
+
+            await context.HttpContext.RequestServices
+                .GetRequiredService<IProblemDetailsService>()
+                .TryWriteAsync(new ProblemDetailsContext
+                {
+                    HttpContext = context.HttpContext,
+                    ProblemDetails = new ProblemDetails
+                    {
+                        Status = StatusCodes.Status403Forbidden,
+                        Title = AdminAuthorization.NotAnOperatorTitle,
+                        Extensions = { ["code"] = AdminAuthorization.NotAnOperatorCode },
+                    },
+                });
         };
     })
     .AddOpenIdConnect(options =>

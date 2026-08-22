@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using Kairos.Api.Security;
 
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -70,6 +71,12 @@ public static class OperatorSession
                     {
                         options.Group = group;
                         options.Subject = subject;
+
+                        // Registering this scheme makes it the default for forbidding too, and
+                        // the body on a refusal is written by the application's cookie handler.
+                        // Substituting the identity provider must not quietly substitute what a
+                        // refused operator is told, so forbidding is handed back.
+                        options.ForwardForbid = CookieAuthenticationDefaults.AuthenticationScheme;
                     });
                 substitutions?.Invoke(services);
             });

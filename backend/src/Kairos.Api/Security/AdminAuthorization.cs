@@ -15,6 +15,17 @@ namespace Kairos.Api.Security;
 /// </remarks>
 public static class AdminAuthorization
 {
+    /// <summary>
+    /// What the refusal carries, so a client branches on one thing rather than on a status code
+    /// that also means half a dozen other refusals. Signed in and not an operator is a different
+    /// screen from signed out, and this is what tells them apart.
+    /// </summary>
+    public const string NotAnOperatorCode = "not_an_operator";
+
+    /// <summary>The human half of the same refusal, for a log or a client with no screen.</summary>
+    public const string NotAnOperatorTitle =
+        "This account is signed in and is not an operator of this Kairos.";
+
     /// <summary>The configuration path, named so the startup failure can quote it back.</summary>
     public const string GroupPath = "Authorization:AdminGroup";
 

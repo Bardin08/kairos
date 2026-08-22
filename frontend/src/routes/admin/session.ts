@@ -1,12 +1,12 @@
-// Whether the workbench still has a session, and the one place that question is
-// answered.
+// Whether the workbench may still ask anything, and the one place that question
+// is answered.
 //
 // Every admin call goes through `adminRequest` rather than through `request`
-// directly, and the difference is one branch: a 401 latches this module before
-// the rejection reaches the page that made the call. AdminShell subscribes and
-// replaces itself with the locked screen, so a refused read never leaves a page
-// rendering its own chrome around nothing — which is the bug this file exists
-// for. `/admin/availability` used to draw its heading, its name field, its New
+// directly, and the difference is one branch: a refusal latches this module
+// before the rejection reaches the page that made the call. AdminShell
+// subscribes and replaces itself with the screen for that refusal, so a refused
+// read never leaves a page rendering its own chrome around nothing — which is
+// the bug this file exists for. `/admin/availability` used to draw its heading, its name field, its New
 // pattern button and "No patterns yet" over a request that was refused
 // permission to ask, and an operator with fifty patterns read that as fifty
 // patterns gone.
@@ -21,28 +21,45 @@ import { asApiError, request, requestNothing } from '../../lib/api'
 const UNAUTHORIZED = 401
 
 /**
+ * Signed in, and this account is not an operator of this Kairos. Read off the
+ * body's code rather than off the 403 alone: the status is the server refusing,
+ * the code is the server saying which refusal it was, and a 403 that means
+ * something else must not be dressed as this one.
+ */
+const NOT_AN_OPERATOR = 'not_an_operator'
+
+/**
+ * The two ways an admin call is refused, and they are not one state with two
+ * wordings. A session that ran out is fixed by signing in; an account the
+ * provider authenticated and this Kairos does not admit is not fixed by signing
+ * in at all, and offering that as the way out sends an operator round a loop
+ * that ends where it started.
+ */
+export type Refusal = 'no-session' | 'not-an-operator'
+
+/**
  * Latched, never unlatched. Signing in is a full browser navigation to
- * /admin/login and back, so the way out of this state is a new document — and a
- * flag that could be cleared in place would need every page to agree on when,
+ * /admin/login and back, so the way out of either state is a new document — and
+ * a flag that could be cleared in place would need every page to agree on when,
  * which is the coordination this module exists to remove.
  */
-let locked = false
+let refused: Refusal | null = null
 
 const listeners = new Set<() => void>()
 
-/** `useSyncExternalStore`'s two halves, so no 401 can land between them. */
-export function subscribeToLock(listener: () => void): () => void {
+/** `useSyncExternalStore`'s two halves, so no refusal can land between them. */
+export function subscribeToRefusal(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
 
-export function isLocked(): boolean {
-  return locked
+export function refusal(): Refusal | null {
+  return refused
 }
 
-function lock(): void {
-  if (locked) return
-  locked = true
+function refuse(kind: Refusal): void {
+  if (refused !== null) return
+  refused = kind
   for (const listener of listeners) listener()
 }
 
@@ -57,7 +74,9 @@ async function guard<T>(work: Promise<T>): Promise<T> {
   try {
     return await work
   } catch (error: unknown) {
-    if (asApiError(error).status === UNAUTHORIZED) lock()
+    const failure = asApiError(error)
+    if (failure.status === UNAUTHORIZED) refuse('no-session')
+    else if (failure.code === NOT_AN_OPERATOR) refuse('not-an-operator')
     throw error
   }
 }
