@@ -57,6 +57,9 @@ const A_SUNDAY = '2026-08-23'
 const TODAYS_DATE = '2026-08-15'
 const A_PAST_THURSDAY = '2026-08-06'
 
+/** The picker's own value for "no link", which the pane names DAYS_ONLY. */
+const DAYS_ONLY = ''
+
 const weekdays: Pattern = {
   id: PATTERN_ID,
   name: 'Weekdays',
@@ -715,4 +718,32 @@ test('the times picker goes when the last link standing on the pattern does', as
 
   await waitFor(() => expect(screen.queryByLabelText('Show')).toBeNull())
   expect(vi.mocked(getSlots).mock.calls.length).toBe(0)
+})
+
+/**
+ * The other half of finding 11, and the half clearing the links alone cannot
+ * show. With `links` emptied `chosen` resolves to nothing whether or not `slug`
+ * was reset, so nothing on screen tells the two apart — until the pattern gains
+ * a link again and the picker comes back open on a selection that no longer
+ * exists, fetching the slots of a link the operator never picked twice.
+ */
+test('a pattern that gains a link again opens the picker on Days only', async () => {
+  vi.mocked(getSlots).mockResolvedValue([])
+
+  const { rerender } = render(<PatternPreview pattern={usedByMentorship()} />)
+
+  fireEvent.change(await screen.findByLabelText('Show'), { target: { value: mentorship.slug } })
+  expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe(mentorship.slug)
+
+  rerender(<PatternPreview pattern={{ ...weekdays, usedBy: [] }} />)
+  await waitFor(() => expect(screen.queryByLabelText('Show')).toBeNull())
+
+  // Everything read while the link was genuinely selected is behind us. What
+  // matters from here is whether anything is read for it after it has gone.
+  vi.mocked(getSlots).mockClear()
+
+  rerender(<PatternPreview pattern={usedByMentorship()} />)
+
+  expect(((await screen.findByLabelText('Show')) as HTMLSelectElement).value).toBe(DAYS_ONLY)
+  expect(getSlots).not.toHaveBeenCalled()
 })
