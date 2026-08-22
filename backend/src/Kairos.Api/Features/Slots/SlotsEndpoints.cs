@@ -79,7 +79,7 @@ public static class SlotsEndpoints
         // A month of intervals materialized per call, from an anonymous caller, with no write to
         // make the cost visible afterwards — the cheapest denial-of-service target on this API.
         group.MapGet("/links/{slug}/slots", GetSlotsAsync).WithName("GetSlots")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousRead);
+            .RateLimited(RateLimitClass.AnonymousRead);
         return group;
     }
 

@@ -1,28 +1,22 @@
 using System.Globalization;
-using System.Threading.RateLimiting;
 
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// Two policies, one per class of anonymous endpoint, and the headers that tell a caller where it
-/// stands. Named policies rather than a global limiter, so a budget is declared where the endpoint
-/// carrying it is mapped. The anonymous routes that declare none are the four outside the admin
-/// prefix, and <see cref="Shared.AdminGroup"/>'s remarks are where that decision is recorded.
+/// The rate limit as the wire sees it: which endpoints carry one, what every response tells a
+/// caller about where it stands, and what a refusal looks like. The budget is declared at each
+/// mapping site as endpoint metadata, so "which routes are limited?" is answered by reading the
+/// mapping and not by reading this file. The anonymous routes that declare none are the four
+/// outside the admin prefix, and <see cref="Shared.AdminGroup"/>'s remarks are where that decision
+/// is recorded.
 /// </summary>
 public static class RateLimitPolicies
 {
-    /// <summary>A request that writes, mails, or reaches a provider on the caller's behalf.</summary>
-    public const string AnonymousWrite = "anonymous-write";
-
-    /// <summary>A request that only reads, but computes a month of intervals to do it.</summary>
-    public const string AnonymousRead = "anonymous-read";
-
     public const string LimitHeader = "RateLimit-Limit";
     public const string RemainingHeader = "RateLimit-Remaining";
     public const string ResetHeader = "RateLimit-Reset";
@@ -45,15 +39,14 @@ public static class RateLimitPolicies
     /// </summary>
     private const string UnknownCaller = "unknown";
 
-    private const string PartitionItemKey = "kairos.rate-limit.partition";
+    private const int WholeSecond = 1;
 
     public static IServiceCollection AddRateLimitPolicies(this IServiceCollection services)
     {
         // Validated, and validated at start: every other configuration this application cannot run
-        // without stops the process rather than each request. MaxPartitions at zero would turn the
-        // headers off everywhere and say nothing; a permit count or a window at zero throws from
-        // the limiter's own constructor, which without this is a 500 on every request forever
-        // instead of one line at boot.
+        // without stops the process rather than each request. A permit count or a window at zero
+        // would refuse every anonymous caller forever, which is an outage wearing a limiter's
+        // clothes, and it would do it silently.
         services.AddOptions<RateLimitOptions>()
             .BindConfiguration(RateLimitOptions.SectionName)
             .Validate(
@@ -65,125 +58,101 @@ public static class RateLimitPolicies
                 options => options.Window > TimeSpan.Zero,
                 $"{RateLimitOptions.SectionName}: Window must be longer than zero — it is the "
                 + "period the permits above are counted over.")
-            .Validate(
-                options => options.MaxPartitions > 0,
-                $"{RateLimitOptions.SectionName}: MaxPartitions must be at least 1. Zero remembers "
-                + "no caller, so every response would silently lose its RateLimit-* headers.")
             .ValidateOnStart();
 
         services.AddSingleton<RateLimitBudget>();
-
-        services.AddRateLimiter(limiter =>
-        {
-            limiter.AddPolicy(AnonymousWrite, context => Partition(
-                context, AnonymousWrite, options => options.WritePermits));
-            limiter.AddPolicy(AnonymousRead, context => Partition(
-                context, AnonymousRead, options => options.ReadPermits));
-
-            limiter.OnRejected = async (rejected, cancellationToken) =>
-            {
-                var context = rejected.HttpContext;
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-
-                if (rejected.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
-                {
-                    context.Response.Headers.RetryAfter = Text(Seconds(retryAfter));
-                }
-
-                Publish(context);
-
-                // The same shape DomainExceptionHandler writes, so a client parses one thing.
-                // Written here rather than thrown, because a refusal happens before any handler.
-                await context.RequestServices.GetRequiredService<IProblemDetailsService>()
-                    .TryWriteAsync(new ProblemDetailsContext
-                    {
-                        HttpContext = context,
-                        ProblemDetails = new ProblemDetails
-                        {
-                            Status = StatusCodes.Status429TooManyRequests,
-                            Title = TooManyRequests,
-                            Extensions = { [ProblemCode.Key] = TooManyRequestsCode },
-                        },
-                    });
-            };
-        });
 
         return services;
     }
 
     /// <summary>
-    /// Runs after <c>UseRateLimiter</c>, so it is only reached by a request the limiter admitted.
-    /// The refused ones get their headers from <c>OnRejected</c>, which is the only place that
-    /// still has the response.
+    /// Declares which budget this endpoint spends from. The class rides along as metadata rather
+    /// than being looked up by route inside the middleware, so an endpoint added later is limited
+    /// by saying so beside it and never by editing a list somewhere else.
     /// </summary>
-    public static IApplicationBuilder UseRateLimitHeaders(this IApplicationBuilder app) =>
+    public static TBuilder RateLimited<TBuilder>(this TBuilder builder, RateLimitClass limit)
+        where TBuilder : IEndpointConventionBuilder => builder.WithMetadata(limit);
+
+    /// <summary>
+    /// Runs after routing, because the endpoint is what says whether there is a budget to spend.
+    /// A request whose endpoint declares none passes through untouched and carries no headers.
+    /// </summary>
+    public static IApplicationBuilder UseRateLimiting(this IApplicationBuilder app) =>
         app.Use(async (context, next) =>
         {
-            Publish(context);
-            await next(context);
+            if (context.GetEndpoint()?.Metadata.GetMetadata<RateLimitClass>() is not { } limit)
+            {
+                await next(context);
+                return;
+            }
+
+            var options = context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value;
+            var budget = context.RequestServices.GetRequiredService<RateLimitBudget>();
+
+            // The address is the forwarded one: UseForwardedHeaders runs first, so behind a proxy
+            // this is the caller rather than the proxy. Without that line every caller on earth
+            // would share one partition and throttle each other.
+            var address = context.Connection.RemoteIpAddress;
+            if (address is null)
+            {
+                budget.WarnAboutMissingPeerOnce();
+            }
+
+            var reading = budget.Spend(
+                $"{limit.Name}:{address?.ToString() ?? UnknownCaller}",
+                limit.Permits(options),
+                options.Window);
+
+            Publish(context, reading);
+
+            if (reading.Allowed)
+            {
+                await next(context);
+                return;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers.RetryAfter = Text(Seconds(reading.Reset));
+
+            // The same shape DomainExceptionHandler writes, so a client parses one thing. Written
+            // here rather than thrown, because the refusal happens before any handler runs.
+            await context.RequestServices.GetRequiredService<IProblemDetailsService>()
+                .TryWriteAsync(new ProblemDetailsContext
+                {
+                    HttpContext = context,
+                    ProblemDetails = new ProblemDetails
+                    {
+                        Status = StatusCodes.Status429TooManyRequests,
+                        Title = TooManyRequests,
+                        Extensions = { [ProblemCode.Key] = TooManyRequestsCode },
+                    },
+                });
         });
 
-    private static RateLimitPartition<string> Partition(
-        HttpContext context,
-        string policy,
-        Func<RateLimitOptions, int> permits)
+    private static void Publish(HttpContext context, RateLimitReading reading)
     {
-        var options = context.RequestServices.GetRequiredService<IOptions<RateLimitOptions>>().Value;
-        var budget = context.RequestServices.GetRequiredService<RateLimitBudget>();
-
-        // The address is the forwarded one: UseForwardedHeaders runs first, so behind a proxy
-        // this is the caller rather than the proxy. Without that line every caller on earth would
-        // share one partition and throttle each other.
-        var address = context.Connection.RemoteIpAddress;
-        if (address is null)
-        {
-            budget.WarnAboutMissingPeerOnce();
-        }
-
-        var partition = $"{policy}:{address?.ToString() ?? UnknownCaller}";
-
-        // Stashed rather than recomputed, so the headers publish the partition that was scored.
-        context.Items[PartitionItemKey] = partition;
-
-        return RateLimitPartition.Get(
-            partition,
-            key => budget.Limiter(key, permits(options), options.Window));
-    }
-
-    private static void Publish(HttpContext context)
-    {
-        if (context.Items[PartitionItemKey] is not string partition)
-        {
-            return;
-        }
-
-        var reading = context.RequestServices.GetRequiredService<RateLimitBudget>().Read(partition);
-        if (reading is not { } budget)
-        {
-            return;
-        }
-
-        // Registered on the response rather than written now, for two reasons and not the one it
-        // looks like: on the accepted path the handler has not run yet, and — the reason that
-        // decides it — UseExceptionHandler clears the response before re-executing the pipeline.
-        // Every DomainException in this application goes through that, so eagerly written headers
+        // Registered on the response rather than written now, and not for the reason it looks
+        // like: UseExceptionHandler clears the response before re-executing the pipeline, and
+        // every DomainException in this application goes through that. Headers written eagerly
         // would survive an ordinary 200 and vanish from exactly the 404, 409 and 400 that a client
         // hammering this API most needs them on.
         context.Response.OnStarting(() =>
         {
-            context.Response.Headers[LimitHeader] = Text(budget.Limit);
-            context.Response.Headers[RemainingHeader] = Text(budget.Remaining);
-            context.Response.Headers[ResetHeader] = Text(Seconds(budget.Reset));
+            context.Response.Headers[LimitHeader] = Text(reading.Limit);
+            context.Response.Headers[RemainingHeader] = Text(reading.Remaining);
+            context.Response.Headers[ResetHeader] = Text(Seconds(reading.Reset));
             return Task.CompletedTask;
         });
     }
 
     /// <summary>
-    /// Rounded up, never truncated. These are both remainders of a window, so truncation answers
-    /// zero for any refusal in its final second — telling the caller the limiter has just decided
-    /// is asking too often to come straight back, which is the storm this exists to stop.
+    /// Rounded up, and never below a second. This is the remainder of a window, so truncating it
+    /// answers zero for any refusal in the window's final second — telling the caller the limiter
+    /// has just decided is asking too often to come straight back, which is the storm the limit
+    /// exists to stop.
     /// </summary>
-    private static int Seconds(TimeSpan value) => (int)Math.Ceiling(value.TotalSeconds);
+    private static int Seconds(TimeSpan value) =>
+        Math.Max(WholeSecond, (int)Math.Ceiling(value.TotalSeconds));
 
     private static string Text(int value) => value.ToString(CultureInfo.InvariantCulture);
 }

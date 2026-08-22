@@ -39,9 +39,6 @@ public class RateLimitTests
     private const string ReadPermitsKey =
         $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.ReadPermits)}";
 
-    private const string MaxPartitionsKey =
-        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.MaxPartitions)}";
-
     private const string WindowKey =
         $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.Window)}";
 
@@ -61,9 +58,6 @@ public class RateLimitTests
     private const string FirstCaller = "203.0.113.9";
 
     private const string SecondCaller = "198.51.100.4";
-
-    /// <summary>Room for one caller, so the next one is the one past the cap.</summary>
-    private const int RememberOne = 1;
 
     /// <summary>A budget of one, so the request after the first is refused with the window running.</summary>
     private const int SinglePermit = 1;
@@ -262,35 +256,6 @@ public class RateLimitTests
     }
 
     /// <summary>
-    /// Past the cap a caller is still limited — it only stops being told where it stands. The
-    /// dictionary behind the headers is bounded because it holds one entry per source address and
-    /// is reachable through an anonymous POST; what must never follow from that bound is a caller
-    /// who gets in free because there was no room left to count it in.
-    /// </summary>
-    [Fact]
-    public async Task CreateBooking_FromACallerPastTheRememberedPartitions_IsLimitedWithoutHeaders()
-    {
-        using var app = new KairosApp();
-        var host = RememberingOneCaller(app);
-
-        using var remembered = ForwardedClient(host, FirstCaller);
-        using var forgotten = ForwardedClient(host, SecondCaller);
-
-        // The one slot there is goes to whoever arrives first.
-        Has(await AttemptAsync(remembered), RateLimitPolicies.RemainingHeader).ShouldBeTrue();
-
-        for (var attempt = 0; attempt < WritePermits; attempt++)
-        {
-            var admitted = await AttemptAsync(forgotten);
-
-            admitted.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-            Has(admitted, RateLimitPolicies.RemainingHeader).ShouldBeFalse();
-        }
-
-        (await AttemptAsync(forgotten)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
-    }
-
-    /// <summary>
     /// A limit that cannot work stops the process instead of being discovered later. Zero permits
     /// or a zero window throw from the limiter's own constructor, which without this is a 500 on
     /// every anonymous request for as long as the deployment lasts; zero remembered partitions
@@ -301,7 +266,6 @@ public class RateLimitTests
     [InlineData(WritePermitsKey)]
     [InlineData(ReadPermitsKey)]
     [InlineData(WindowKey)]
-    [InlineData(MaxPartitionsKey)]
     public void CreateClient_WithAnUnusableRateLimitSetting_FailsAtStartup(string key)
     {
         using var app = new KairosApp();
@@ -338,11 +302,6 @@ public class RateLimitTests
 
         warnings.Count.ShouldBe(Once);
     }
-
-    /// <summary>A host that remembers one caller, so the second one arrives past the cap.</summary>
-    private static WebApplicationFactory<KairosDbContext> RememberingOneCaller(KairosApp app) =>
-        ShippingLimitHost(app).WithWebHostBuilder(
-            builder => builder.UseSetting(MaxPartitionsKey, Text(RememberOne)));
 
     /// <summary>
     /// A host at the shipping limits rather than the ones the harness raises, whose connections

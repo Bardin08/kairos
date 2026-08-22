@@ -278,8 +278,8 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseRateLimiter();
-app.UseRateLimitHeaders();
+// After routing, because the endpoint's own metadata is what says whether it carries a budget.
+app.UseRateLimiting();
 
 // The two routes that make a session and end one, and the only two that are anonymous by
 // necessity rather than by choice: a challenge is a browser navigation to another origin, so

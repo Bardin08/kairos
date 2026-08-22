@@ -1,7 +1,6 @@
 using Kairos.Api.Security;
 
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 using NodaTime;
 
@@ -10,188 +9,141 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The bookkeeping behind the <c>RateLimit-*</c> headers, at the edges of its cap.
+/// The count itself, at the edges the HTTP tests reach awkwardly or not at all: the boundary
+/// between the last permitted request and the first refused one, the clamp under it, and the roll
+/// from one window to the next.
 /// </summary>
-/// <remarks>
-/// Exercised here rather than over HTTP for two reasons. The only condition that frees an entry is
-/// the framework disposing an idle partition's limiter, which it does on its own timer some
-/// seconds after a partition goes quiet — not something to wait out in a suite, and not something
-/// an endpoint can be asked to do on cue. And the sweep is gated on elapsed time, so pinning
-/// "at most one per window" needs a clock a test can move rather than one it has to outlast.
-/// </remarks>
 public class RateLimitBudgetTests
 {
-    private const int RememberOne = 1;
+    private const int Permits = 3;
 
-    private const int Permits = RateLimitOptions.DefaultWritePermits;
+    private const int NoneLeft = 0;
+
+    private const int OneSpent = 1;
+
+    /// <summary>How many windows to wait out before the old one is certainly gone.</summary>
+    private const int WindowsToOutlast = 3;
 
     /// <summary>
     /// Opaque on purpose. The type never parses a partition key, so imitating the
-    /// <c>policy:address</c> shape the policies happen to build would advertise a coupling that
+    /// <c>class:address</c> shape the middleware happens to build would advertise a coupling that
     /// does not exist.
     /// </summary>
     private const string First = "first";
 
     private const string Second = "second";
-    private const string Third = "third";
-    private const string Fourth = "fourth";
 
-    /// <summary>How many windows to age a partition by, to be unambiguously past one.</summary>
-    private const int WindowsToAge = 2;
-
-    private static readonly TimeSpan Window = RateLimitOptions.DefaultWindow;
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// The Unix epoch. Where a clock reads zero ticks, which is the reading that made reclamation
-    /// silently dead: with no sentinel to tell "never swept" apart from "swept at tick zero", the
-    /// gate read an untouched field as a sweep that had just happened and never opened again.
+    /// Short enough to outlast in a test. It has to be real time: the entry expires on the cache's
+    /// own clock, so a stub that only moved NodaTime forward would roll the count in this
+    /// application's arithmetic while the cache went on holding the old entry.
     /// </summary>
-    private static readonly Instant Epoch = Instant.FromUnixTimeSeconds(0);
+    private static readonly TimeSpan BriefWindow = TimeSpan.FromMilliseconds(200);
 
-    /// <summary>An ordinary wall-clock reading, for the cases that are about elapsed time.</summary>
-    private static readonly Instant Midmorning = Instant.FromUtc(2026, 9, 7, 9, 0, 0);
-
-    /// <summary>
-    /// A partition the framework has dropped stops occupying a slot, so the cap bounds how many
-    /// callers are remembered at once rather than how many a process may ever serve. Without the
-    /// sweep, the first callers to arrive would own the headers until a restart.
-    /// </summary>
-    /// <remarks>
-    /// Run against a clock at the epoch deliberately: this is the first sweep, so it is also what
-    /// proves the gate opens on the sentinel rather than on how far the clock sits from 1970.
-    /// </remarks>
     [Fact]
-    public void Limiter_WhenAFullBudgetHoldsADroppedPartition_ReclaimsItsSlot()
+    public void Spend_UpToThePermitCount_AllowsEachAndCountsTheRemainderDown()
     {
-        var budget = NewBudget(new StubClock(Epoch));
+        var budget = NewBudget();
 
-        var first = budget.Limiter(First, Permits, Window);
-        budget.Read(First).ShouldNotBeNull();
+        for (var spent = 1; spent <= Permits; spent++)
+        {
+            var reading = budget.Spend(First, Permits, Window);
 
-        // Exactly what the framework does to a partition it has decided is idle, and the only
-        // signal the sweep acts on.
-        first.Dispose();
-
-        using var second = budget.Limiter(Second, Permits, Window);
-
-        // Remembered despite a cap of one, which can only be true if the dropped entry was swept.
-        budget.Read(Second).ShouldNotBeNull();
+            reading.Allowed.ShouldBeTrue();
+            reading.Limit.ShouldBe(Permits);
+            reading.Remaining.ShouldBe(Permits - spent);
+        }
     }
 
     /// <summary>
-    /// A partition the framework still holds is never evicted to make room for a newcomer. It
-    /// belongs to a caller still being scored, and the factory behind it only runs again on a miss
-    /// in the framework's own table — so evicting it here would take that caller's headers away
-    /// for the rest of its session with nothing left to restore them.
+    /// The request after the last permitted one is refused, and the two are adjacent on purpose:
+    /// an off-by-one here is an extra booking mail per window per caller, which is exactly the
+    /// thing being rationed.
     /// </summary>
     [Fact]
-    public void Limiter_WhenAFullBudgetHoldsOnlyLivePartitions_KeepsThemAndForgetsTheNewcomer()
+    public void Spend_PastThePermitCount_RefusesAndHoldsTheRemainderAtZero()
     {
-        var budget = NewBudget(new StubClock(Midmorning));
+        var budget = NewBudget();
 
-        using var first = budget.Limiter(First, Permits, Window);
-        using var second = budget.Limiter(Second, Permits, Window);
+        for (var spent = 0; spent < Permits; spent++)
+        {
+            budget.Spend(First, Permits, Window).Allowed.ShouldBeTrue();
+        }
 
-        budget.Read(First).ShouldNotBeNull();
-        budget.Read(Second).ShouldBeNull();
+        var refused = budget.Spend(First, Permits, Window);
+
+        refused.Allowed.ShouldBeFalse();
+        refused.Remaining.ShouldBe(NoneLeft);
+
+        // And it stays at zero rather than going negative, however long the caller keeps trying.
+        budget.Spend(First, Permits, Window).Remaining.ShouldBe(NoneLeft);
     }
 
     /// <summary>
-    /// The same, for the one shape an eviction rule written on our own bookkeeping would get
-    /// wrong: a partition whose budget is untouched and whose window has long since turned over.
-    /// That reads as idle by every measure except the only one that counts — the framework still
-    /// holds it, so a caller is still being scored against it.
+    /// The window ends, and the allowance comes back with the next one. Without an expiry on the
+    /// entry the first caller to exhaust a budget would be refused for the life of the process.
     /// </summary>
-    /// <remarks>
-    /// This is the case that stayed green through a whole review round. Both tests above run at a
-    /// single instant, so an eviction rule reading "full permits and a window elapsed" never fired
-    /// in them and could be reinstated unnoticed. Ageing the clock is what makes it fire.
-    /// </remarks>
     [Fact]
-    public void Limiter_WhenAFullBudgetHoldsAnUntouchedPartitionPastItsWindow_StillKeepsIt()
+    public async Task Spend_AfterTheWindowHasPassed_StartsANewOne()
     {
-        var clock = new StubClock(Midmorning);
-        var budget = NewBudget(clock);
+        var budget = NewBudget();
 
-        using var first = budget.Limiter(First, Permits, Window);
+        for (var spent = 0; spent < Permits; spent++)
+        {
+            budget.Spend(First, Permits, BriefWindow);
+        }
 
-        clock.Now += Duration.FromTimeSpan(Window * WindowsToAge);
+        budget.Spend(First, Permits, BriefWindow).Allowed.ShouldBeFalse();
 
-        using var second = budget.Limiter(Second, Permits, Window);
+        await Task.Delay(BriefWindow * WindowsToOutlast, TestContext.Current.CancellationToken);
 
-        budget.Read(First).ShouldNotBeNull();
-        budget.Read(Second).ShouldBeNull();
+        var afterwards = budget.Spend(First, Permits, BriefWindow);
+
+        afterwards.Allowed.ShouldBeTrue();
+        afterwards.Remaining.ShouldBe(Permits - OneSpent);
     }
 
     /// <summary>
-    /// The sweep is rationed to one per window. It walks the whole dictionary, which is what makes
-    /// it complete, and that is only affordable because a flood of new partitions — every one of
-    /// them arriving over capacity — cannot make it run per request.
+    /// One caller's window is not another's. The partition is the whole of what keeps a flood from
+    /// throttling the people it is flooding past.
     /// </summary>
     [Fact]
-    public void Limiter_MeetingASecondNewPartitionInsideOneWindow_DoesNotSweepAgain()
+    public void Spend_OnASecondPartition_CountsItSeparately()
     {
-        var clock = new StubClock(Midmorning);
-        var budget = NewBudget(clock);
+        var budget = NewBudget();
 
-        budget.Limiter(First, Permits, Window).Dispose();
+        for (var spent = 0; spent < Permits; spent++)
+        {
+            budget.Spend(First, Permits, Window);
+        }
 
-        // Due, because none has run yet: the dropped entry goes and this one takes the slot.
-        var second = budget.Limiter(Second, Permits, Window);
-        budget.Read(Second).ShouldNotBeNull();
+        budget.Spend(First, Permits, Window).Allowed.ShouldBeFalse();
 
-        // Dropped in its turn, so there is something for a second sweep to find if one runs.
-        second.Dispose();
+        var other = budget.Spend(Second, Permits, Window);
 
-        // Not due — the same window — so the slot the entry above is holding stays held, however
-        // reclaimable that entry now is.
-        using var third = budget.Limiter(Third, Permits, Window);
-        budget.Read(Third).ShouldBeNull();
-
-        clock.Now += Duration.FromTimeSpan(Window);
-
-        // Due again, and the wait is the only thing that changed.
-        using var fourth = budget.Limiter(Fourth, Permits, Window);
-        budget.Read(Fourth).ShouldNotBeNull();
+        other.Allowed.ShouldBeTrue();
+        other.Remaining.ShouldBe(Permits - OneSpent);
     }
 
     /// <summary>
-    /// A clock stepped backwards still sweeps. NTP correcting a drifting Raspberry Pi leaves the
-    /// last-swept stamp in the future, and read as a plain interval that is a large negative
-    /// number — indistinguishable from "swept a moment ago", which would hold the gate shut until
-    /// real time climbed back past the old stamp. On a minute-long window that is a minute of no
-    /// reclamation; on a clock corrected by an hour it is an hour.
+    /// The reset is what the caller is told to wait, so it has to describe the window it is in —
+    /// counting down within it rather than restarting at every request.
     /// </summary>
     [Fact]
-    public void Limiter_AfterTheClockStepsBackwards_SweepsRatherThanWaitingForTimeToCatchUp()
+    public void Spend_TwiceInOneWindow_ReportsAResetThatIsRunningDown()
     {
-        var clock = new StubClock(Midmorning);
-        var budget = NewBudget(clock);
+        var budget = NewBudget();
 
-        budget.Limiter(First, Permits, Window).Dispose();
+        var first = budget.Spend(First, Permits, Window);
+        var second = budget.Spend(First, Permits, Window);
 
-        // The first sweep, which stamps the reading this test is about to invalidate.
-        var second = budget.Limiter(Second, Permits, Window);
-        budget.Read(Second).ShouldNotBeNull();
-        second.Dispose();
-
-        clock.Now -= Duration.FromTimeSpan(Window * WindowsToAge);
-
-        using var third = budget.Limiter(Third, Permits, Window);
-
-        budget.Read(Third).ShouldNotBeNull();
+        first.Reset.ShouldBeLessThanOrEqualTo(Window);
+        second.Reset.ShouldBeGreaterThan(TimeSpan.Zero);
+        second.Reset.ShouldBeLessThanOrEqualTo(first.Reset);
     }
 
-    private static RateLimitBudget NewBudget(IClock clock) => new(
-        Options.Create(new RateLimitOptions { MaxPartitions = RememberOne }),
-        clock,
-        NullLogger<RateLimitBudget>.Instance);
-
-    /// <summary>A clock the test moves by hand, so "a window has passed" is a statement, not a wait.</summary>
-    private sealed class StubClock(Instant now) : IClock
-    {
-        public Instant Now { get; set; } = now;
-
-        public Instant GetCurrentInstant() => Now;
-    }
+    private static RateLimitBudget NewBudget() =>
+        new(SystemClock.Instance, NullLogger<RateLimitBudget>.Instance);
 }

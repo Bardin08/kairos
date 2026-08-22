@@ -126,13 +126,13 @@ public static class BookingsEndpoints
         // caller chose from the organizer's relay — so the budget is stated at the mapping site
         // rather than left to a global default nobody reads.
         group.MapPost("/bookings", CreateAsync).WithName("CreateBooking")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
+            .RateLimited(RateLimitClass.AnonymousWrite);
         group.MapGet("/bookings/{token}", GetAsync).WithName("GetBooking")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousRead);
+            .RateLimited(RateLimitClass.AnonymousRead);
         group.MapPost("/bookings/{token}/cancel", CancelAsync).WithName("CancelBooking")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
+            .RateLimited(RateLimitClass.AnonymousWrite);
         group.MapPost("/bookings/{token}/reschedule", RescheduleAsync).WithName("RescheduleBooking")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
+            .RateLimited(RateLimitClass.AnonymousWrite);
         return group;
     }
 

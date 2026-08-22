@@ -32,7 +32,7 @@ public static class LinksEndpoints
     public static RouteGroupBuilder MapLinks(this RouteGroupBuilder group)
     {
         group.MapGet("/links/{slug}", GetAsync).WithName("GetLink")
-            .RequireRateLimiting(RateLimitPolicies.AnonymousRead);
+            .RateLimited(RateLimitClass.AnonymousRead);
         return group;
     }
 
