@@ -699,3 +699,20 @@ test('Save this date is inert while a write is in flight', async () => {
     ).toBeNull(),
   )
 })
+
+/**
+ * Finding 11. The effect returned early when the last link stopped standing on
+ * the pattern, leaving `links` holding whatever it held — so the picker went on
+ * offering a link that had moved, and `chosen` went on resolving, so every month
+ * change fetched that link's slots.
+ */
+test('the times picker goes when the last link standing on the pattern does', async () => {
+  const { rerender } = render(<PatternPreview pattern={usedByMentorship()} />)
+
+  await waitFor(() => expect(screen.getByLabelText('Show')).toBeTruthy())
+
+  rerender(<PatternPreview pattern={{ ...weekdays, usedBy: [] }} />)
+
+  await waitFor(() => expect(screen.queryByLabelText('Show')).toBeNull())
+  expect(vi.mocked(getSlots).mock.calls.length).toBe(0)
+})
