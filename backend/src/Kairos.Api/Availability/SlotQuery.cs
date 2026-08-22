@@ -63,7 +63,11 @@ public sealed class SlotQuery(
         var link = await context.Links.AsNoTracking()
             .Include(candidate => candidate.Durations)
             .FirstOrDefaultAsync(candidate => candidate.Slug == slug && candidate.Active, cancellationToken)
-            ?? throw DomainException.NotFound($"Link '{slug}'");
+            // Not "Link '{slug}'": the caller's value is never reflected into a response body, the
+            // rule LinksEndpoints states and SlotsEndpoints.ParseDate keeps. It also made one
+            // condition answer two different sentences depending on which of the two link routes
+            // an anonymous caller happened to send an unknown slug to.
+            ?? throw DomainException.NotFound("Link");
 
         // SortOrder, not ascending length: it is the order the operator chose for the booking
         // page's tabs, it comes back out in SlotResults, and it is what decides which duration a
@@ -72,7 +76,7 @@ public sealed class SlotQuery(
             .OrderBy(duration => duration.SortOrder)
             .Select(duration => duration.Minutes)
             .ToList();
-        var minutes = Resolve(slug, offered, durationMinutes);
+        var minutes = Resolve(offered, durationMinutes);
 
         var settings = await context.Settings.AsNoTracking()
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
@@ -115,11 +119,17 @@ public sealed class SlotQuery(
     /// <c>durations[0]</c>, so without this the public page dies on an
     /// <see cref="ArgumentOutOfRangeException"/> that names "index" and nothing else.
     /// </summary>
-    private static int Resolve(string slug, IReadOnlyList<int> offered, int? requested)
+    /// <remarks>
+    /// No slug reaches these three messages, and the query no longer takes one to build them with.
+    /// The rule is <see cref="Features.Links.LinksEndpoints"/>'s: the caller's value is never
+    /// reflected into a response body, and it costs the sentence nothing here — the slug is in the
+    /// URL the caller just sent.
+    /// </remarks>
+    private static int Resolve(IReadOnlyList<int> offered, int? requested)
     {
         if (offered.Count == 0)
         {
-            throw DomainException.Invalid(NoDurationsCode, $"Link '{slug}' offers no durations.");
+            throw DomainException.Invalid(NoDurationsCode, "That link offers no durations.");
         }
 
         if (requested is not { } minutes)
@@ -127,7 +137,7 @@ public sealed class SlotQuery(
             if (!offered.IsSingle)
             {
                 throw DomainException.Invalid(
-                    DurationRequiredCode, $"Link '{slug}' offers {offered.Count} durations; pick one.");
+                    DurationRequiredCode, $"That link offers {offered.Count} durations; pick one.");
             }
 
             return offered.Default;
@@ -136,7 +146,7 @@ public sealed class SlotQuery(
         if (!offered.Offers(minutes))
         {
             throw DomainException.Invalid(
-                DurationNotOfferedCode, $"Link '{slug}' does not offer {minutes} minutes.");
+                DurationNotOfferedCode, $"That link does not offer {minutes} minutes.");
         }
 
         return minutes;

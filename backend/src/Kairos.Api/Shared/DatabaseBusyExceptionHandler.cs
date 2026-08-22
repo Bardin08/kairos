@@ -60,7 +60,7 @@ public sealed class DatabaseBusyExceptionHandler(IProblemDetailsService problemD
             {
                 Status = StatusCodes.Status503ServiceUnavailable,
                 Title = "The database was busy. Try again.",
-                Extensions = { ["code"] = DatabaseBusyCode },
+                Extensions = { [ProblemCode.Key] = DatabaseBusyCode },
             },
         });
     }
