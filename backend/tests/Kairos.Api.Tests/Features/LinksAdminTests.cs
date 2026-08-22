@@ -28,6 +28,9 @@ public class LinksAdminTests
     private const string SeededName = "Mentorship";
     private const int DurationMinutes = 30;
 
+    /// <summary>One past the bound, every value distinct and in range, so only the count is wrong.</summary>
+    private const int DurationsPastTheCap = SaveLinkRequest.MaxDurations + 1;
+
     private static readonly Guid PatternId = Guid.CreateVersion7();
 
     /// <summary>Never seeded, so every route that takes an id has to refuse it.</summary>
@@ -114,6 +117,42 @@ public class LinksAdminTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         problem!.Code.ShouldBe(LinksAdminEndpoints.DurationsInvalidCode);
+        app.Read(context => context.Links.AsNoTracking().Any()).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The same unbounded-collection defect the pattern windows carried, one endpoint over: with
+    /// no bound the whole array is bound and Distinct() walks it, so a body up to Kestrel's 30 MB
+    /// cap was allocated and scanned before any of the three duration rules could refuse it. The
+    /// refusal is the attribute's, so it names the field and carries no code — the coded rules
+    /// below it have nothing to say about a list that is merely long, and every value here passes
+    /// all three of them.
+    /// </summary>
+    [Fact]
+    public async Task Create_WithMoreDurationsThanALinkMayOffer_IsRefusedByTheAttribute()
+    {
+        using var app = new KairosApp();
+        app.Seed(context => context.Patterns.Add(new Pattern { Id = PatternId, Name = PatternName }));
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PostAsJsonAsync(
+            AdminPath,
+            new
+            {
+                slug = SeededSlug,
+                name = SeededName,
+                description = string.Empty,
+                patternId = PatternId,
+                durations = Enumerable.Range(
+                    SaveLinkRequest.MinDurationMinutes, DurationsPastTheCap),
+            },
+            TestContext.Current.CancellationToken);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemWithCode>(
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        problem!.Code.ShouldBeNull();
         app.Read(context => context.Links.AsNoTracking().Any()).ShouldBeFalse();
     }
 

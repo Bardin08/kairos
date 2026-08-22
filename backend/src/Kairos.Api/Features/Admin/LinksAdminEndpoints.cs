@@ -94,10 +94,20 @@ public sealed record SaveLinkRequest
     /// order of the booking page's tabs. Not sorted here: ascending length is a different list.
     /// </summary>
     [Required]
+    [MaxLength(MaxDurations)]
     public required IReadOnlyList<int> Durations { get; init; }
 
     public const int MinDurationMinutes = 1;
     public const int MaxDurationMinutes = 1440;
+
+    /// <summary>
+    /// The allocation guard on the list, and generous on purpose: a link offers a handful of
+    /// lengths — the booking page draws one tab per duration — so two dozen is far past any real
+    /// one. Unbounded, the whole array is bound and run through Distinct() before the three
+    /// checks below it get to say anything, and duplicates are refused only after that, so the
+    /// 1,440 minutes a duration may be is no bound on how long the list can be.
+    /// </summary>
+    public const int MaxDurations = 24;
 
     private const int MaxSlugLength = 80;
     private const int MaxNameLength = 200;
