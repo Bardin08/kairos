@@ -2,18 +2,29 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Integrations;
 using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.Net.Http.Headers;
 
 using Shouldly;
+
+// Aliased because Microsoft.Net.Http.Headers — here for HeaderNames — carries a SameSiteMode of its
+// own, and the one CookieBuilder.SameSite is typed on is the Http namespace's.
+using SameSiteMode = Microsoft.AspNetCore.Http.SameSiteMode;
 
 namespace Kairos.Api.Tests.Features;
 
@@ -37,6 +48,12 @@ public class AdminBoundaryTests
 
     /// <summary>The claim type an OIDC provider might spell with a capital, and often does.</summary>
     private const string CapitalisedGroupClaimType = "Groups";
+
+    /// <summary>The Set-Cookie attribute that holds a cookie back from a plaintext request.</summary>
+    private const string SecureAttribute = "secure";
+
+    /// <summary>Where the pinned provider configuration sends a challenge. Never fetched.</summary>
+    private const string AuthorizationEndpoint = $"{KairosApp.Authority}/authorize";
 
     /// <summary>
     /// Every shape of the group claim that has to be decided one way rather than the other, with
@@ -327,5 +344,66 @@ public class AdminBoundaryTests
             .CreateClient());
 
         thrown.GetBaseException().Message.ShouldContain(AdminAuthorization.SubjectsPath);
+    }
+
+    /// <summary>
+    /// Finding 6: with no explicit policy the session cookie inherits SameAsRequest, so behind a
+    /// TLS-terminating proxy forwarding plain HTTP the admin session is issued without Secure and
+    /// any plaintext request to the same host carries it.
+    /// </summary>
+    [Fact]
+    public void TheSessionCookie_IsAlwaysSecure_AndNotReadableFromScript()
+    {
+        using var app = new KairosApp();
+
+        var options = app.Services
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+
+        options.Cookie.SecurePolicy.ShouldBe(CookieSecurePolicy.Always);
+        options.Cookie.HttpOnly.ShouldBeTrue();
+        options.Cookie.SameSite.ShouldBe(SameSiteMode.Lax);
+    }
+
+    /// <summary>
+    /// The correlation and nonce cookies are the handler's own and default to SameSite=None, which
+    /// a browser only accepts alongside Secure. They are written during the challenge, before any
+    /// session exists, so they are the pair a plaintext hop meets first.
+    /// </summary>
+    /// <remarks>
+    /// The handler's configuration is pinned rather than discovered: unpinned it goes to the
+    /// harness's authority for a metadata document, which is a DNS lookup that fails and a 500 in
+    /// place of the redirect. Only the authorization endpoint is needed to reach the point where
+    /// the two cookies are written, and nothing about them depends on where it points.
+    /// <para>
+    /// This one is a guard rather than a regression caught: the handler already defaults both to
+    /// Secure on .NET 10, so it is green with or without <c>Program.cs</c> saying so, and what it
+    /// stops is that default moving under a self-hosted deployment.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task TheChallengeCookies_AreSecure()
+    {
+        using var app = new KairosApp();
+        using var client = app
+            .WithWebHostBuilder(builder => builder.ConfigureServices(services => services
+                .Configure<OpenIdConnectOptions>(
+                    OpenIdConnectDefaults.AuthenticationScheme,
+                    options => options.Configuration = new OpenIdConnectConfiguration
+                    {
+                        Issuer = KairosApp.Authority,
+                        AuthorizationEndpoint = AuthorizationEndpoint,
+                    })))
+            .CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false,
+            });
+
+        var response = await client.GetAsync(
+            SignInEndpoints.DefaultUrl, TestContext.Current.CancellationToken);
+
+        var cookies = response.Headers.GetValues(HeaderNames.SetCookie).ToList();
+        cookies.ShouldNotBeEmpty();
+        cookies.ShouldAllBe(cookie => cookie.Contains(SecureAttribute, StringComparison.OrdinalIgnoreCase));
     }
 }
