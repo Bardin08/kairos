@@ -1199,8 +1199,12 @@
   }
   .input::placeholder, .textarea::placeholder { color: var(--text-tertiary); }
   .input:hover, .textarea:hover, .select:hover { border-color: var(--border-strong); }
-  .input:focus, .textarea:focus, .select:focus {
-    outline: none;
+  /* :focus-visible, not :focus — the ring is for a keyboard, and a pointer
+     already knows where it clicked. The outline is NOT removed: DESIGN.md says
+     it is never removed, only inset where a container would clip it, and the
+     accent border and wash below are the control's own treatment sitting inside
+     it rather than a replacement for it. */
+  .input:focus-visible, .textarea:focus-visible, .select:focus-visible {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);
   }
@@ -1467,8 +1471,10 @@
     cursor: pointer;
   }
   .chip-add:hover { border-color: var(--border-strong); color: var(--text-primary); }
+  /* A <select> wearing a chip's shape, so it takes the form control's focus
+     treatment and keeps its ring for the same reason .input does: the border
+     and wash sit inside the outline, they do not stand in for it. */
   .chip-add:focus-visible {
-    outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);
   }
