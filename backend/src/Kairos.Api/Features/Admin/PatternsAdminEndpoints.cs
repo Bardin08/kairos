@@ -48,6 +48,7 @@ public sealed record SaveRuleRequest
 public sealed record ReplaceRulesRequest
 {
     [Required]
+    [MaxLength(PatternsAdminEndpoints.MaxWindowsPerWeek)]
     public required IReadOnlyList<SaveRuleRequest> Rules { get; init; }
 }
 
@@ -74,6 +75,7 @@ public sealed record OverrideWindowRequest
 public sealed record SaveOverrideRequest
 {
     [Required]
+    [MaxLength(PatternsAdminEndpoints.MaxWindowsPerWeek)]
     public required IReadOnlyList<OverrideWindowRequest> Windows { get; init; }
 }
 
@@ -160,6 +162,34 @@ public static class PatternsAdminEndpoints
     /// </summary>
     public const string DateInvalidCode = "date_invalid";
 
+    /// <summary>
+    /// More windows on one day than a day may hold. Coded rather than left to the bound on the
+    /// request, so the same mistake answers the same way whether it arrives as a weekday's rules
+    /// or as one date's: an attribute counts a whole body and cannot tell one day's share from
+    /// another's, and a client branching on <c>code</c> would otherwise see two different answers.
+    /// </summary>
+    public const string TooManyWindowsCode = "too_many_windows";
+
+    /// <summary>
+    /// More windows on one day than a day is ever shaped like. Six is past a morning, an
+    /// afternoon and an evening with room to spare, while the overlap check on its own tolerates
+    /// 1,439 — one-minute windows end to end, across a day whose last storable minute is 1,439.
+    /// </summary>
+    public const int MaxWindowsPerDate = 6;
+
+    /// <summary>ISO days, Monday through Sunday.</summary>
+    public const int DaysInWeek = 7;
+
+    /// <summary>
+    /// Derived, never typed twice: a full week of full days, and so the most windows any body on
+    /// this surface could legitimately carry. It is the allocation guard on both write bodies —
+    /// an array the size of Kestrel's 30 MB cap is refused as soon as it is bound, rather than
+    /// after it has been projected and sorted — and deliberately not the domain rule, which
+    /// <see cref="ValidateDay"/> owns: a bound on a whole body cannot tell one day's share from
+    /// another's, so a date carrying a seventh window is refused there and answers a code.
+    /// </summary>
+    public const int MaxWindowsPerWeek = MaxWindowsPerDate * DaysInWeek;
+
     private const string PatternName = "Pattern";
     private const string OverrideName = "Date override";
 
@@ -175,6 +205,14 @@ public static class PatternsAdminEndpoints
     private const string RuleOverlaps =
         "Another window on that day already covers part of those hours. Overlapping windows offer "
         + "the same time twice.";
+
+    /// <summary>
+    /// Interpolated at type load rather than written as a literal, so the number in the message
+    /// cannot drift from the number that is enforced. A const string cannot carry a const int
+    /// placeholder, which is why this is static readonly.
+    /// </summary>
+    private static readonly string TooManyWindows =
+        $"A day can offer at most {MaxWindowsPerDate} windows.";
 
     public static RouteGroupBuilder MapPatternsAdmin(this RouteGroupBuilder group)
     {
@@ -472,6 +510,14 @@ public static class PatternsAdminEndpoints
         // one ends. Written this way so two that merely touch at noon are a split day rather than
         // a refusal.
         var windows = day.OrderBy(window => window.Start).ToList();
+
+        // Counted here rather than on the request, because the attribute bounds a whole body and
+        // this bounds one day of it — the rule the operator actually has, and the one they get a
+        // code for. Runs before anything is written, so the set is refused entire or stored entire.
+        if (windows.Count > MaxWindowsPerDate)
+        {
+            throw DomainException.Invalid(TooManyWindowsCode, TooManyWindows);
+        }
 
         foreach (var (start, end) in windows)
         {
