@@ -366,6 +366,31 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
+    /// The same two cookies read as the handler will read them, rather than as one challenge
+    /// happened to write them.
+    /// </summary>
+    /// <remarks>
+    /// This asserts a framework default on purpose, and that is the whole of its value: nothing in
+    /// <c>Program.cs</c> sets either policy, because an assignment that restates the default is a
+    /// line no test can tell from its absence. Inverted into an assertion it costs nothing today
+    /// and fails the day the default moves — which is the day the challenge would otherwise start
+    /// writing these two without Secure, silently, on every deployment behind a plaintext hop. Do
+    /// not delete it as redundant; the two assignments are what it stands in for.
+    /// </remarks>
+    [Fact]
+    public void TheChallengeCookieOptions_AreAlwaysSecure_WithNothingInThisApplicationSettingThem()
+    {
+        using var app = new KairosApp();
+
+        var options = app.Services
+            .GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(OpenIdConnectDefaults.AuthenticationScheme);
+
+        options.CorrelationCookie.SecurePolicy.ShouldBe(CookieSecurePolicy.Always);
+        options.NonceCookie.SecurePolicy.ShouldBe(CookieSecurePolicy.Always);
+    }
+
+    /// <summary>
     /// The correlation and nonce cookies are the handler's own and default to SameSite=None, which
     /// a browser only accepts alongside Secure. They are written during the challenge, before any
     /// session exists, so they are the pair a plaintext hop meets first.

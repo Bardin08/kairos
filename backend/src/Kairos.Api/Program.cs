@@ -153,13 +153,6 @@ builder.Services
         // account fails the policy below with nothing in the logs to say why.
         options.Scope.Add(AdminAuthorization.GroupScope);
 
-        // The handler's own two, which are SameSite=None — a combination browsers accept only
-        // alongside Secure. Always is already the handler's default here; written out so the
-        // policy of every cookie this application issues is readable in one file, and so a
-        // framework default changing under it is a failing test rather than a silent downgrade.
-        options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
-        options.NonceCookie.SecurePolicy = CookieSecurePolicy.Always;
-
         // Development only, and gated so that production cannot reach it however the
         // configuration is written. The local provider in compose.dev.yaml serves discovery and
         // its JWKS over plain HTTP on loopback, and the handler refuses to fetch either without
