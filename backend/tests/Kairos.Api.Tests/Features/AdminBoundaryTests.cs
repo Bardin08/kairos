@@ -132,7 +132,7 @@ public class AdminBoundaryTests
         // which of the two happened.
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>(
             TestContext.Current.CancellationToken);
-        problem.GetProperty("code").GetString().ShouldBe(AdminAuthorization.NotAnOperatorCode);
+        problem.GetProperty(ProblemCode.Key).GetString().ShouldBe(AdminAuthorization.NotAnOperatorCode);
     }
 
     /// <summary>
@@ -172,12 +172,37 @@ public class AdminBoundaryTests
     /// The second gate, for the deployment whose provider hands the group out more widely than
     /// Kairos should trust. Written, it decides on top of the group rather than instead of it.
     /// </summary>
+    /// <remarks>
+    /// The session spells its subject the way a real one does — the OIDC handler maps inbound
+    /// claims by default, so <c>sub</c> reaches the principal as the ClaimTypes URI. This is the
+    /// spelling every deployment produces, and the fallback arm of the read is what serves it.
+    /// </remarks>
     [Fact]
     public async Task ListIntegrations_WithTheGroupAndAListedSubject_IsAnswered()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient(
-            configuration: builder => builder.UseSetting(FirstSubjectPath, OperatorSession.Subject));
+        using var client = app
+            .WithWebHostBuilder(builder => builder.UseSetting(FirstSubjectPath, OperatorSession.Subject))
+            .CreateOperatorClient();
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The other spelling, from a provider configured not to map its claims, where the subject
+    /// arrives as the <c>sub</c> the token wrote. Pinned separately because the two spellings are
+    /// two arms of one read, and a deployment reaches only ever one of them.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithAListedSubjectSpelledAsTheTokenWroteIt_IsAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = app
+            .WithWebHostBuilder(builder => builder.UseSetting(FirstSubjectPath, OperatorSession.Subject))
+            .CreateOperatorClient(subjectClaimType: AdminAuthorization.SubjectClaimType);
 
         var response = await client.GetAsync(
             $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
@@ -193,8 +218,9 @@ public class AdminBoundaryTests
     public async Task ListIntegrations_WithTheGroupAndAnUnlistedSubject_IsForbidden()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient(
-            configuration: builder => builder.UseSetting(FirstSubjectPath, AnotherSubject));
+        using var client = app
+            .WithWebHostBuilder(builder => builder.UseSetting(FirstSubjectPath, AnotherSubject))
+            .CreateOperatorClient();
 
         var response = await client.GetAsync(
             $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);

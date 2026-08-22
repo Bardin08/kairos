@@ -1,11 +1,10 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 
+using Kairos.Api.Persistence;
 using Kairos.Api.Security;
 
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +26,7 @@ namespace Kairos.Api.Tests.Features;
 /// </remarks>
 public static class OperatorSession
 {
-    /// <summary>Registered last, so it becomes the default scheme and the policy authenticates against it.</summary>
+    /// <summary>The name the substituted provider answers to. Nothing else authenticates.</summary>
     public const string Scheme = "TestOperator";
 
     /// <summary>
@@ -39,8 +38,10 @@ public static class OperatorSession
 
     /// <summary>
     /// A client on its own host, so <paramref name="substitutions"/> can replace a service the
-    /// composition root registered. The database is the factory's, so anything seeded through
-    /// <see cref="KairosApp.Seed"/> is visible here.
+    /// composition root registered. Taken on the factory rather than on <see cref="KairosApp"/>
+    /// so that <c>WithWebHostBuilder(…).CreateOperatorClient()</c> composes — a test that varies
+    /// configuration needs no parameter here to do it. The database is the factory's, so anything
+    /// seeded through <see cref="KairosApp.Seed"/> is visible here.
     /// </summary>
     /// <param name="group">
     /// The group the session carries. The default is the one the application admits; null is a
@@ -49,39 +50,40 @@ public static class OperatorSession
     /// <see cref="AdminBoundaryTests"/> pins.
     /// </param>
     /// <param name="subject">
-    /// The <c>sub</c> the session carries, issued by default because a real provider always sends
+    /// The subject the session carries, issued by default because a real provider always sends
     /// one. It only decides anything where a deployment has written an allowlist.
     /// </param>
-    /// <param name="configuration">
-    /// Settings for this client's own host, for the tests that vary what the boundary is
-    /// configured to admit rather than who is asking.
+    /// <param name="subjectClaimType">
+    /// How that subject is spelled. The default is what a principal really carries: the OIDC
+    /// handler maps inbound claims unless told not to, so <c>sub</c> arrives rewritten to the
+    /// ClaimTypes URI. A provider with mapping turned off is the other spelling, and both are
+    /// live arms of <see cref="AdminAuthorization.IsOperator"/>.
     /// </param>
     public static HttpClient CreateOperatorClient(
-        this KairosApp app,
+        this WebApplicationFactory<KairosDbContext> app,
         Action<IServiceCollection>? substitutions = null,
         string? group = AdminAuthorization.DefaultGroup,
         string? subject = Subject,
-        Action<IWebHostBuilder>? configuration = null) =>
-        app.WithWebHostBuilder(builder =>
+        string subjectClaimType = ClaimTypes.NameIdentifier) =>
+        app.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
-            builder.ConfigureTestServices(services =>
-            {
-                services.AddAuthentication(Scheme)
-                    .AddScheme<SignedInOptions, SignedInHandler>(Scheme, options =>
-                    {
-                        options.Group = group;
-                        options.Subject = subject;
+            services.AddAuthentication()
+                .AddScheme<SignedInOptions, SignedInHandler>(Scheme, options =>
+                {
+                    options.Group = group;
+                    options.Subject = subject;
+                    options.SubjectClaimType = subjectClaimType;
+                });
 
-                        // Registering this scheme makes it the default for forbidding too, and
-                        // the body on a refusal is written by the application's cookie handler.
-                        // Substituting the identity provider must not quietly substitute what a
-                        // refused operator is told, so forbidding is handed back.
-                        options.ForwardForbid = CookieAuthenticationDefaults.AuthenticationScheme;
-                    });
-                substitutions?.Invoke(services);
-            });
-            configuration?.Invoke(builder);
-        }).CreateClient();
+            // Only authenticating is substituted, and deliberately not by AddAuthentication(Scheme):
+            // that sets the default for challenging, forbidding and signing in as well, and the
+            // body a refused operator is handed is written by the application's own cookie
+            // handler. Substituting the identity provider must not substitute the refusal.
+            services.Configure<AuthenticationOptions>(
+                options => options.DefaultAuthenticateScheme = Scheme);
+
+            substitutions?.Invoke(services);
+        })).CreateClient();
 
     /// <summary>What the substituted provider puts in the ticket, and the only thing it varies.</summary>
     private sealed class SignedInOptions : AuthenticationSchemeOptions
@@ -89,6 +91,8 @@ public static class OperatorSession
         public string? Group { get; set; }
 
         public string? Subject { get; set; }
+
+        public string SubjectClaimType { get; set; } = ClaimTypes.NameIdentifier;
     }
 
     private sealed class SignedInHandler(
@@ -97,8 +101,6 @@ public static class OperatorSession
         UrlEncoder encoder) : AuthenticationHandler<SignedInOptions>(options, logger, encoder)
     {
         private const string Operator = "operator";
-
-        private const string SubjectClaimType = "sub";
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
@@ -110,7 +112,7 @@ public static class OperatorSession
 
             if (Options.Subject is { } subject)
             {
-                claims.Add(new Claim(SubjectClaimType, subject));
+                claims.Add(new Claim(Options.SubjectClaimType, subject));
             }
 
             var identity = new ClaimsIdentity(claims, Scheme.Name);

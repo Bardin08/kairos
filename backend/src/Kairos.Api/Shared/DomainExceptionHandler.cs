@@ -34,7 +34,7 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problemDetails
             {
                 Status = status,
                 Title = domain.Message,
-                Extensions = { ["code"] = domain.Code },
+                Extensions = { [ProblemCode.Key] = domain.Code },
             },
         });
     }

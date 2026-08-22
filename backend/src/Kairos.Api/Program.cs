@@ -91,6 +91,11 @@ builder.Services
         // A body on the refusal, in the shape DomainExceptionHandler writes, because a bodyless
         // 403 leaves the workbench nothing to tell "you are signed in and not an operator" apart
         // from any other refusal — and those two screens have different remedies.
+        //
+        // Naming that refusal HERE is correct only while AdminGroup.Policy is the only policy in
+        // the application, so every forbid this handler sees really is that one. A second policy
+        // would start answering not_an_operator to a refusal that is nothing of the kind, and the
+        // code would have to move to where the policy that produced it is known.
         options.Events.OnRedirectToAccessDenied = async context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -104,7 +109,7 @@ builder.Services
                     {
                         Status = StatusCodes.Status403Forbidden,
                         Title = AdminAuthorization.NotAnOperatorTitle,
-                        Extensions = { ["code"] = AdminAuthorization.NotAnOperatorCode },
+                        Extensions = { [ProblemCode.Key] = AdminAuthorization.NotAnOperatorCode },
                     },
                 });
         };

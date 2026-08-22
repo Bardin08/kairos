@@ -48,10 +48,12 @@ public static class AdminAuthorization
     public const string DefaultGroup = "kairos-users";
 
     /// <summary>
-    /// The subject, whichever spelling reaches the principal: the OIDC handler maps <c>sub</c> to
-    /// the ClaimTypes URI, and a handler that does not is still answered.
+    /// The subject as the token spells it. Rarely what reaches the principal: MapInboundClaims
+    /// defaults to true and the inbound map rewrites <c>sub</c> to the ClaimTypes URI, so
+    /// <see cref="IsOperator"/> reads this one first and falls back to that. Both arms are live —
+    /// this is the arm a provider configured not to map its claims lands on.
     /// </summary>
-    private const string SubjectClaimType = "sub";
+    public const string SubjectClaimType = "sub";
 
     /// <summary>
     /// Read once at startup, and thrown for rather than defaulted when it is present and empty.
