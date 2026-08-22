@@ -8,6 +8,12 @@ namespace Kairos.Api.Tests.Persistence;
 
 public class SchemaTests
 {
+    private const int MinutesPerHour = 60;
+
+    /// <summary>Minutes from local midnight, which is what the column stores.</summary>
+    private const int NineAm = 9 * MinutesPerHour;
+    private const int FivePm = 17 * MinutesPerHour;
+
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
     {
@@ -62,5 +68,46 @@ public class SchemaTests
         });
 
         Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
+    /// The assumption <see cref="Kairos.Api.Shared.ConcurrentWrite"/> stands on: two writers that
+    /// both read a date's rows before either saves, which is two admin tabs on one date. The
+    /// second delete finds nothing to delete and EF raises rather than writing a merged set. If a
+    /// provider change ever made this silent, the 409 above would become a lie and nothing else
+    /// would notice.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WhenAnotherWriterAlreadyReplacedTheDate_RaisesConcurrency()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+        var date = new DateOnly(2026, 9, 14);
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.PatternOverrides.Add(new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = date,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            });
+            seed.SaveChanges();
+        }
+
+        // Both read before either writes, which is the whole of the race.
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var firstRows = first.PatternOverrides.Where(row => row.Date == date).ToList();
+        var secondRows = second.PatternOverrides.Where(row => row.Date == date).ToList();
+
+        first.PatternOverrides.RemoveRange(firstRows);
+        first.SaveChanges();
+
+        second.PatternOverrides.RemoveRange(secondRows);
+        Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
     }
 }
