@@ -6,10 +6,10 @@
 // before the rejection reaches the page that made the call. AdminShell
 // subscribes and replaces itself with the screen for that refusal, so a refused
 // read never leaves a page rendering its own chrome around nothing — which is
-// the bug this file exists for. `/admin/availability` used to draw its heading, its name field, its New
-// pattern button and "No patterns yet" over a request that was refused
-// permission to ask, and an operator with fifty patterns read that as fifty
-// patterns gone.
+// the bug this file exists for. `/admin/availability` used to draw its heading,
+// its name field, its New pattern button and "No patterns yet" over a request
+// that was refused permission to ask, and an operator with fifty patterns read
+// that as fifty patterns gone.
 //
 // Here rather than in lib/api.ts for the same measured reason as its siblings:
 // lib/api.ts is in the invitee's entry chunk, this is imported only from behind
