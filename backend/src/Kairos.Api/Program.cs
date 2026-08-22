@@ -103,6 +103,10 @@ builder.Services
         // secret at all is an argument against. Code flow, with the PKCE the handler adds to it.
         options.ResponseType = OpenIdConnectResponseType.Code;
 
+        // Without this the provider has no reason to put the group in the token, and every
+        // account fails the policy above with nothing in the logs to say why.
+        options.Scope.Add(AdminAuthorization.GroupScope);
+
         // Development only, and gated so that production cannot reach it however the
         // configuration is written. The local provider in compose.dev.yaml serves discovery and
         // its JWKS over plain HTTP on loopback, and the handler refuses to fetch either without
@@ -116,8 +120,16 @@ builder.Services
         }
     });
 
+// Read here rather than inside the assertion, so a blanked group stops the process at startup
+// instead of failing every request in the same way an unauthorized caller does.
+var adminGroup = AdminAuthorization.RequiredGroup(builder.Configuration);
+var adminSubjects = AdminAuthorization.AllowedSubjects(builder.Configuration);
+
 builder.Services.AddAuthorization(options =>
-    options.AddPolicy(AdminGroup.Policy, policy => policy.RequireAuthenticatedUser()));
+    options.AddPolicy(AdminGroup.Policy, policy => policy
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context =>
+            AdminAuthorization.IsOperator(context.User, adminGroup, adminSubjects))));
 
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
 

@@ -1,6 +1,7 @@
 using System.Net;
 
 using Kairos.Api.Features.Integrations;
+using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Authorization;
@@ -98,5 +99,56 @@ public class AdminBoundaryTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.Found);
         response.Headers.Location!.OriginalString.ShouldContain(IntegrationEndpoints.StateInvalidCode);
+    }
+
+    /// <summary>
+    /// The finding this task exists for: the policy was RequireAuthenticatedUser() and nothing
+    /// else, so every account the identity provider would authenticate was a full operator. An
+    /// OIDC provider is shared across applications by definition, so that is the provider's user
+    /// list, not the operator's.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithASessionCarryingNoGroup_IsForbiddenRatherThanAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient(group: null);
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// The other half, and the one that would pass by accident if the policy refused everybody:
+    /// the configured group is admitted.
+    /// </summary>
+    [Fact]
+    public async Task ListIntegrations_WithASessionCarryingTheConfiguredGroup_IsAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/admin/integrations", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// A blanked group is a deployment that fumbled its configuration, and it stops the process
+    /// rather than answering 403 on every admin route. Asserted on the exception because there is
+    /// no request to make against a host that did not build; the base exception is read rather
+    /// than the outer one, since the factory surfaces a startup failure wrapped.
+    /// </summary>
+    [Fact]
+    public void CreatingTheHost_WithABlankedAdminGroup_FailsAtStartupAndNamesTheSetting()
+    {
+        using var app = new KairosApp(
+            settings: [new KeyValuePair<string, string>(AdminAuthorization.GroupPath, " ")]);
+
+        var thrown = Should.Throw<Exception>(() => app.CreateClient());
+
+        thrown.GetBaseException().Message.ShouldContain(AdminAuthorization.GroupPath);
     }
 }

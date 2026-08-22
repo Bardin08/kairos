@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 
+using Kairos.Api.Security;
+
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -31,26 +33,45 @@ public static class OperatorSession
     /// composition root registered. The database is the factory's, so anything seeded through
     /// <see cref="KairosApp.Seed"/> is visible here.
     /// </summary>
+    /// <param name="group">
+    /// The group the session carries. The default is the one the application admits; null is a
+    /// principal the identity provider authenticated and Kairos does not trust, which is the case
+    /// <see cref="AdminBoundaryTests"/> pins.
+    /// </param>
     public static HttpClient CreateOperatorClient(
         this KairosApp app,
+        string? group = AdminAuthorization.DefaultGroup,
         Action<IServiceCollection>? substitutions = null) =>
         app.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
             services.AddAuthentication(Scheme)
-                .AddScheme<AuthenticationSchemeOptions, SignedInHandler>(Scheme, _ => { });
+                .AddScheme<SignedInOptions, SignedInHandler>(
+                    Scheme, options => options.Group = group);
             substitutions?.Invoke(services);
         })).CreateClient();
 
+    /// <summary>What the substituted provider puts in the ticket, and the only thing it varies.</summary>
+    public sealed class SignedInOptions : AuthenticationSchemeOptions
+    {
+        public string? Group { get; set; }
+    }
+
     private sealed class SignedInHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        IOptionsMonitor<SignedInOptions> options,
         ILoggerFactory logger,
-        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+        UrlEncoder encoder) : AuthenticationHandler<SignedInOptions>(options, logger, encoder)
     {
         private const string Operator = "operator";
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
-            var identity = new ClaimsIdentity([new Claim(ClaimTypes.Name, Operator)], Scheme.Name);
+            List<Claim> claims = [new Claim(ClaimTypes.Name, Operator)];
+            if (Options.Group is { } group)
+            {
+                claims.Add(new Claim(AdminAuthorization.GroupClaimType, group));
+            }
+
+            var identity = new ClaimsIdentity(claims, Scheme.Name);
             return Task.FromResult(AuthenticateResult.Success(
                 new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
         }

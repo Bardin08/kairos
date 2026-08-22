@@ -8,7 +8,9 @@ cd frontend && npm ci && npm run build && cd ..
 cd backend && ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Kairos.Api --no-launch-profile
 ```
 
-Then open <http://localhost:5000/admin>, which answers 401 and redirects nowhere until you sign in. Go to <http://localhost:5000/admin/login>, type any name into the mock provider's form — `vlad`, or anything else — and press Sign-in. You land back on `/admin/links` with a session, and the workbench is yours.
+Then open <http://localhost:5000/admin>, which answers 401 and redirects nowhere until you sign in. Go to <http://localhost:5000/admin/login>, type any name into the mock provider's form — `vlad`, or anything else — and paste `{"groups": ["kairos-users"]}` into the **Optional claims JSON** box beside it. Press Sign-in and you land back on `/admin/links` with a session, and the workbench is yours.
+
+The claims box is not optional here, whatever the label says. A session is not an operator: the admin policy admits accounts carrying the group `kairos-users`, so a sign-in with only a username lands fine and then every admin route answers 403. That is the boundary working rather than a broken local setup — an OIDC provider is shared across applications, so its user list is not this application's operator list. Nothing about it is relaxed for Development, because a boundary that is off on a laptop is a boundary nobody tests. A deployment names its own group with `Authorization__AdminGroup` and, where the provider hands that group out more widely than Kairos should trust, narrows it further with `Authorization__AdminSubjects__0`.
 
 No `Security__SecretKey` on the command line: `appsettings.Development.json` carries a committed, deliberately public one so a local run is reproducible and so rows encrypted before a restart can still be read after it. It is labelled in that file and must never be set anywhere but Development. Every other environment still fails fast with no key, as it always did.
 
@@ -22,7 +24,7 @@ The one production-shaped concession is `Authentication:RequireHttpsMetadata`, w
 
 ## Two things worth knowing
 
-**The mock sends no `name` claim**, so `signedInAs` comes back null and the rail draws no identity block — the same as a real provider configured not to release a name. To see the block, paste `{"name": "Vlad Bardin"}` into the **Optional claims JSON** box on the provider's sign-in form.
+**The mock sends no `name` claim**, so `signedInAs` comes back null and the rail draws no identity block — the same as a real provider configured not to release a name. To see the block, put a name in the same claims box as the group: `{"name": "Vlad Bardin", "groups": ["kairos-users"]}`.
 
 **Port 5000 is contested on macOS.** AirPlay Receiver listens there. If Kestrel cannot bind, either turn it off in System Settings → General → AirDrop & Handoff, or run with `ASPNETCORE_URLS=http://localhost:5147` and use that port throughout.
 
