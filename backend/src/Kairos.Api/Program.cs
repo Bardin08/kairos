@@ -222,12 +222,18 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 
-builder.Services.AddKairosRateLimiter(builder.Configuration);
+builder.Services.AddRateLimitPolicies();
 
-// Which addresses may speak for a caller. Left at the framework's default — loopback only — so a
-// deployment that is NOT behind a proxy cannot be told a false client address by a header. A
-// deployment that is behind one names it, and clearing these lists to accept X-Forwarded-For from
-// anybody would hand every caller a free identity and with it every other caller's rate limit.
+// Which addresses may speak for a caller, and which scheme the request really arrived on. Both
+// matter today: the address is what the rate limiter partitions on, and without the scheme a
+// TLS-terminating proxy leaves this application believing every request is plain HTTP — the OIDC
+// handler then builds an http:// redirect_uri the provider refuses, and the cookie policy's
+// SameAsRequest leaves Secure off the session cookie.
+//
+// Left at the framework's default — loopback only — so a deployment that is NOT behind a proxy
+// cannot be told a false client address by a header. A deployment that is behind one names it, and
+// clearing these lists to accept X-Forwarded-For from anybody would hand every caller a free
+// identity and with it every other caller's rate limit.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
