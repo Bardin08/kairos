@@ -6,6 +6,7 @@ using Kairos.Api.Integrations.Email;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -121,10 +122,17 @@ public static class BookingsEndpoints
 
     public static RouteGroupBuilder MapBookings(this RouteGroupBuilder group)
     {
-        group.MapPost("/bookings", CreateAsync).WithName("CreateBooking");
-        group.MapGet("/bookings/{token}", GetAsync).WithName("GetBooking");
-        group.MapPost("/bookings/{token}/cancel", CancelAsync).WithName("CancelBooking");
-        group.MapPost("/bookings/{token}/reschedule", RescheduleAsync).WithName("RescheduleBooking");
+        // Every route here is anonymous, three of the four write, and create mails an address the
+        // caller chose from the organizer's relay — so the budget is stated at the mapping site
+        // rather than left to a global default nobody reads.
+        group.MapPost("/bookings", CreateAsync).WithName("CreateBooking")
+            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
+        group.MapGet("/bookings/{token}", GetAsync).WithName("GetBooking")
+            .RequireRateLimiting(RateLimitPolicies.AnonymousRead);
+        group.MapPost("/bookings/{token}/cancel", CancelAsync).WithName("CancelBooking")
+            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
+        group.MapPost("/bookings/{token}/reschedule", RescheduleAsync).WithName("RescheduleBooking")
+            .RequireRateLimiting(RateLimitPolicies.AnonymousWrite);
         return group;
     }
 

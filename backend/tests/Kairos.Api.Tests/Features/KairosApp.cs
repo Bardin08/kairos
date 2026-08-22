@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 
 using Kairos.Api.Persistence;
@@ -30,6 +31,9 @@ namespace Kairos.Api.Tests.Features;
 /// </param>
 public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
 {
+    /// <summary>Far above anything one test does, and finite so a runaway loop still stops.</summary>
+    private const int TestPermits = 100_000;
+
     private readonly string _path =
         Path.Combine(Path.GetTempPath(), $"kairos-api-{Guid.CreateVersion7():N}.db");
 
@@ -96,6 +100,16 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
         builder.UseSetting("Authentication:Authority", "https://id.kairos.test");
         builder.UseSetting("Authentication:ClientId", "kairos-tests");
         builder.UseSetting("Authentication:ClientSecret", "kairos-tests");
+
+        // Every other suite makes far more than ten requests through one partition — the test
+        // host has no remote address, so they all share one — and none of them is about
+        // throttling. The suite that IS about throttling sets the shipping numbers back.
+        builder.UseSetting(
+            $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.WritePermits)}",
+            TestPermits.ToString(CultureInfo.InvariantCulture));
+        builder.UseSetting(
+            $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.ReadPermits)}",
+            TestPermits.ToString(CultureInfo.InvariantCulture));
 
         builder.ConfigureServices(services =>
         {

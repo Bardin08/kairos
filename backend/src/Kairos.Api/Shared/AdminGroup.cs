@@ -25,6 +25,14 @@ public static class AdminGroup
     /// refused: behind the gate it would 401 at exactly the reader it exists for, and it carries
     /// one string that is safe to hand anybody. See <see cref="Features.Admin.SignInEndpoints"/>.
     /// Everything else that an operator can reach is under this prefix.
+    /// <para>
+    /// Nothing here carries a rate limit, and that is a decision rather than an omission. Every
+    /// route behind this policy is reachable only with a session that a member of the operator's
+    /// group can hold, and the workbench works in bursts — a pattern editor saves a week a row at
+    /// a time. A limit here would throttle the operator to defend against the operator. The
+    /// anonymous routes are the ones with budgets, declared at their mapping sites; see
+    /// <see cref="Security.RateLimitPolicies"/>.
+    /// </para>
     /// </remarks>
     public static RouteGroupBuilder MapAdmin(this WebApplication app) =>
         app.MapGroup($"{ApiVersions.V1}/admin").RequireAuthorization(Policy);

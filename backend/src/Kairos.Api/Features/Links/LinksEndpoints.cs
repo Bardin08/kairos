@@ -1,5 +1,6 @@
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
@@ -30,7 +31,8 @@ public static class LinksEndpoints
 {
     public static RouteGroupBuilder MapLinks(this RouteGroupBuilder group)
     {
-        group.MapGet("/links/{slug}", GetAsync).WithName("GetLink");
+        group.MapGet("/links/{slug}", GetAsync).WithName("GetLink")
+            .RequireRateLimiting(RateLimitPolicies.AnonymousRead);
         return group;
     }
 
