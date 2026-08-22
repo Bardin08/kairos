@@ -104,7 +104,7 @@ builder.Services
         options.ResponseType = OpenIdConnectResponseType.Code;
 
         // Without this the provider has no reason to put the group in the token, and every
-        // account fails the policy above with nothing in the logs to say why.
+        // account fails the policy below with nothing in the logs to say why.
         options.Scope.Add(AdminAuthorization.GroupScope);
 
         // Development only, and gated so that production cannot reach it however the
@@ -257,6 +257,17 @@ app.MapAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()
     .MapIntegrationsAdmin();
+
+// Said out loud, once, because the middleware cannot say it. A RequireAssertion has no logger and
+// AuthorizationMiddleware reports only "requirements were not met: AssertionRequirement", so the
+// likeliest way this boundary goes wrong in production — a provider that releases no groups claim
+// — reaches an operator as a 403 with nothing anywhere to read. This is what was expected.
+app.Logger.LogInformation(
+    "The admin surface admits accounts whose {ClaimType} claim carries {Group}, narrowed to "
+    + "{SubjectCount} allowed subjects — zero meaning the group alone decides.",
+    AdminAuthorization.GroupClaimType,
+    adminGroup,
+    adminSubjects.Count);
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the
