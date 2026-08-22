@@ -39,15 +39,13 @@ public static class RateLimitPolicies
     /// named pipe — nginx in front of Kestrel over a UDS is an ordinary self-hosted shape. There
     /// every caller falls into this single partition, so the whole site shares one budget, and
     /// <c>UseForwardedHeaders</c> declines to read <c>X-Forwarded-For</c> as well, because a peer
-    /// that does not exist is in nobody's <c>KnownProxies</c>. Hence <see cref="WarnOnce"/>: the
-    /// failure is total and otherwise completely silent.
+    /// that does not exist is in nobody's <c>KnownProxies</c>. Hence
+    /// <see cref="RateLimitBudget.WarnAboutMissingPeerOnce"/>: the failure is total, and otherwise
+    /// completely silent.
     /// </summary>
     private const string UnknownCaller = "unknown";
 
     private const string PartitionItemKey = "kairos.rate-limit.partition";
-
-    /// <summary>Zero until the first addressless request; set once, so the warning is said once.</summary>
-    private static int _warnedAboutMissingPeer;
 
     public static IServiceCollection AddRateLimitPolicies(this IServiceCollection services)
     {
@@ -139,7 +137,7 @@ public static class RateLimitPolicies
         var address = context.Connection.RemoteIpAddress;
         if (address is null)
         {
-            WarnOnce(context);
+            budget.WarnAboutMissingPeerOnce();
         }
 
         var partition = $"{policy}:{address?.ToString() ?? UnknownCaller}";
@@ -178,27 +176,6 @@ public static class RateLimitPolicies
             context.Response.Headers[ResetHeader] = Text(Seconds(budget.Reset));
             return Task.CompletedTask;
         });
-    }
-
-    /// <summary>
-    /// Said once for the life of the process, not once per request: a listener with no peer is a
-    /// deployment shape rather than an event, and a line per request would be a second denial of
-    /// service on a host already being flooded.
-    /// </summary>
-    private static void WarnOnce(HttpContext context)
-    {
-        if (Interlocked.Exchange(ref _warnedAboutMissingPeer, 1) != 0)
-        {
-            return;
-        }
-
-        context.RequestServices.GetRequiredService<ILoggerFactory>()
-            .CreateLogger(typeof(RateLimitPolicies))
-            .LogWarning(
-                "A rate-limited request arrived with no remote address, so every caller shares one "
-                + "budget and X-Forwarded-For cannot be trusted either. This is what a listener on "
-                + "a Unix domain socket or a named pipe looks like: have Kestrel listen on a TCP "
-                + "port and name the proxy under Proxy:KnownProxies to get callers limited apart.");
     }
 
     /// <summary>

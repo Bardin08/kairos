@@ -39,12 +39,26 @@ namespace Kairos.Api.Security;
 /// headers are the only thing that degrades.
 /// </para>
 /// </remarks>
-public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock clock)
+public sealed class RateLimitBudget(
+    IOptions<RateLimitOptions> options,
+    IClock clock,
+    ILogger<RateLimitBudget> logger)
 {
+    /// <summary>
+    /// The value of <see cref="_lastSweep"/> before any sweep has run, and a sentinel rather than
+    /// an instant: the field holds ticks since the Unix epoch, so "zero" is a real reading a clock
+    /// can return, and leaving the first sweep to fall out of the arithmetic would make
+    /// reclamation depend on how far the wall clock happens to sit from 1970.
+    /// </summary>
+    private const long NeverSwept = 0;
+
     private readonly ConcurrentDictionary<string, Window> _windows = new(StringComparer.Ordinal);
 
-    /// <summary>When a sweep last started, as Unix ticks. Zero means never, so the first one runs.</summary>
-    private long _lastSweep;
+    /// <summary>When a sweep last started, as Unix ticks, or <see cref="NeverSwept"/> before one has.</summary>
+    private long _lastSweep = NeverSwept;
+
+    /// <summary>Set once, the first time a request arrives from a connection with no peer.</summary>
+    private int _warnedAboutMissingPeer;
 
     /// <summary>
     /// Called by the partitioner when a partition is met for the first time, and again if the
@@ -119,9 +133,35 @@ public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock c
     }
 
     /// <summary>
-    /// At most one sweep per window, and at most one thread's.
+    /// Said once for the life of this application, not once per request: a listener with no peer is
+    /// a deployment shape rather than an event, and a line per request would be a second denial of
+    /// service on a host already being flooded.
     /// </summary>
     /// <remarks>
+    /// Here rather than beside the partitioner that calls it, because this object is one per
+    /// application while that code is static. A static flag would be tripped by whichever
+    /// application in the process met the case first and leave every other one silent — which in a
+    /// test run means the assertion lands on whichever suite happened to go first.
+    /// </remarks>
+    public void WarnAboutMissingPeerOnce()
+    {
+        if (Interlocked.Exchange(ref _warnedAboutMissingPeer, 1) != 0)
+        {
+            return;
+        }
+
+        logger.LogWarning(
+            "A rate-limited request arrived with no remote address, so every caller shares one "
+            + "budget and X-Forwarded-For cannot be trusted either. This is what a listener on a "
+            + "Unix domain socket or a named pipe looks like: have Kestrel listen on a TCP port "
+            + "and name the proxy under Proxy:KnownProxies to get callers limited apart.");
+    }
+
+    /// <summary>
+    /// At most one sweep <em>started</em> per window, and at most one thread's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// Bounded by time rather than by how many entries it looks at, which is what makes it
     /// complete. A sweep that stopped after a fixed number of candidates would examine the same
     /// ones every time — a <see cref="ConcurrentDictionary{TKey, TValue}"/> enumerates in bucket
@@ -131,13 +171,29 @@ public sealed class RateLimitBudget(IOptions<RateLimitOptions> options, IClock c
     /// exists for every request arrives over capacity, so an ungated sweep would have every thread
     /// in the process walking the whole dictionary at once. Losing the exchange means another
     /// thread already has it, and this one has nothing to do.
+    /// </para>
+    /// <para>
+    /// Started, and not finished: the stamp is taken before the scan, so a scan lasting longer
+    /// than a window lets the next one begin beside it. That is deliberate rather than overlooked
+    /// — the alternative is holding the gate across the scan, which turns a slow sweep into a
+    /// stalled reclaim — and it is harmless, because removing an entry twice is
+    /// <see cref="ConcurrentDictionary{TKey, TValue}.TryRemove(TKey, out TValue)"/> returning
+    /// false the second time.
+    /// </para>
     /// </remarks>
     private void SweepIfDue(TimeSpan length)
     {
         var now = clock.GetCurrentInstant().ToUnixTimeTicks();
         var last = Interlocked.Read(ref _lastSweep);
+        var since = now - last;
 
-        if (now - last < length.Ticks
+        // Three ways to be due, and only the middle one is the ordinary case. Before the first
+        // sweep the stamp is a sentinel rather than an instant, so it is compared and not
+        // subtracted. And a clock stepped backwards — NTP correcting a drifting Pi — leaves a
+        // stamp in the future, which unhandled would read as "swept moments ago" and close this
+        // gate until real time caught back up with it; a negative interval is treated as due, and
+        // the exchange below restamps to the corrected reading.
+        if ((last != NeverSwept && since >= 0 && since < length.Ticks)
             || Interlocked.CompareExchange(ref _lastSweep, now, last) != last)
         {
             return;

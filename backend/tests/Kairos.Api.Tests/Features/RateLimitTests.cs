@@ -12,6 +12,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 using Shouldly;
@@ -78,6 +80,9 @@ public class RateLimitTests
     /// <summary>The smallest honest Retry-After, and what a truncating cast answers as zero.</summary>
     private const int WholeSecond = 1;
 
+    /// <summary>How many times a warning about a deployment shape is worth saying.</summary>
+    private const int Once = 1;
+
     /// <summary>
     /// One second, so every refusal against it falls inside the window's last second — the case
     /// where rounding the remainder down and rounding it up give different answers.
@@ -142,6 +147,15 @@ public class RateLimitTests
     /// back, which is the storm the limit exists to stop. Against a one-second window every
     /// refusal is that case, so this pins the rounding rather than hoping to catch it.
     /// </summary>
+    /// <remarks>
+    /// If this ever flakes, the cause is the two requests below straddling a window boundary
+    /// rather than the rounding: past the boundary the permit is replenished and the second
+    /// request is admitted, so the failure looks like "expected 429". The warm-up covers host
+    /// startup, not that. Widen the window and keep the assertion — the exact
+    /// <c>Retry-After</c> equal to one whole window is the only thing here that dies when the
+    /// ceiling is turned back into a truncating cast, and loosening it removes the test's reason
+    /// to exist.
+    /// </remarks>
     [Fact]
     public async Task CreateBooking_RefusedInsideTheWindowsLastSecond_RoundsRetryAfterUpNotToZero()
     {
@@ -179,6 +193,15 @@ public class RateLimitTests
     /// Its budget is the larger one — a booking page really does load a link and then a month of
     /// slots — so this also pins that the two classes are two numbers and not one.
     /// </summary>
+    /// <remarks>
+    /// The one test here whose correctness depends on how long it takes to run. Sixty-one requests
+    /// have to complete inside the default one-minute window; past it the fixed window replenishes
+    /// and the last request is admitted, failing as "expected 429, got 404". That needs about a
+    /// second per in-memory request, which only a badly oversubscribed machine would produce — but
+    /// it is the mechanism to check first if this is ever seen red, ahead of anything about the
+    /// limiter itself. The fix would be to give this test its own small read budget and assert
+    /// <c>RateLimit-Limit</c> against it, which shortens the loop without weakening what it pins.
+    /// </remarks>
     [Fact]
     public async Task GetSlots_PastTheWindowsPermits_IsRefusedWith429()
     {
@@ -279,6 +302,34 @@ public class RateLimitTests
         Should.Throw<OptionsValidationException>(() => host.CreateClient());
     }
 
+    /// <summary>
+    /// A listener with no peer collapses every caller into one partition and makes
+    /// <c>X-Forwarded-For</c> untrustworthy at the same time, so the whole site shares one budget.
+    /// Nothing in any response says so — which is why it is said in the log, and said once: a line
+    /// per request would be a second denial of service on a host already being flooded.
+    /// </summary>
+    /// <remarks>
+    /// The bare harness host is the one shape that reproduces this, because TestServer opens no
+    /// socket — so this test deliberately does not go through
+    /// <see cref="ShippingLimitHost"/>, whose whole job is to lend the connection a peer.
+    /// </remarks>
+    [Fact]
+    public async Task CreateBooking_FromAConnectionWithNoPeer_WarnsOnceAndNotOnEveryRequest()
+    {
+        using var app = new KairosApp();
+        var warnings = new WarningCounter();
+
+        using var client = app
+            .WithWebHostBuilder(builder => builder.ConfigureServices(
+                services => services.AddSingleton<ILoggerProvider>(warnings)))
+            .CreateClient();
+
+        await AttemptAsync(client);
+        await AttemptAsync(client);
+
+        warnings.Count.ShouldBe(Once);
+    }
+
     /// <summary>A host that remembers one caller, so the second one arrives past the cap.</summary>
     private static WebApplicationFactory<KairosDbContext> RememberingOneCaller(KairosApp app) =>
         ShippingLimitHost(app).WithWebHostBuilder(
@@ -353,6 +404,43 @@ public class RateLimitTests
     /// <c>UseForwardedHeaders</c> — which is the first line of the application's own pipeline, and
     /// nothing registered through <c>Configure</c> can get in front of it.
     /// </remarks>
+    /// <summary>
+    /// Counts warnings from one category. Filtered, because the harness's own startup says things
+    /// — an unconfigured mail relay, for one — and counting those would pass whatever the code
+    /// under test did.
+    /// </summary>
+    private sealed class WarningCounter : ILoggerProvider, ILogger
+    {
+        private int _count;
+
+        public int Count => _count;
+
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == typeof(RateLimitBudget).FullName ? this : NullLogger.Instance;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private sealed class LoopbackPeer : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
