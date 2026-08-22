@@ -1,5 +1,6 @@
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
@@ -30,31 +31,9 @@ public static class LinksEndpoints
 {
     public static RouteGroupBuilder MapLinks(this RouteGroupBuilder group)
     {
-        group.MapGet("/links", ListAsync).WithName("ListLinks");
-        group.MapGet("/links/{slug}", GetAsync).WithName("GetLink");
+        group.MapGet("/links/{slug}", GetAsync).WithName("GetLink")
+            .RateLimited(RateLimitClass.AnonymousRead);
         return group;
-    }
-
-    private static async Task<IReadOnlyList<LinkResponse>> ListAsync(
-        KairosDbContext context,
-        CancellationToken cancellationToken)
-    {
-        var timeZone = await GetTimeZoneAsync(context, cancellationToken);
-        var links = await Active(context)
-            .OrderBy(link => link.Name)
-            .Select(link => new
-            {
-                link.Slug,
-                link.Name,
-                link.Description,
-                Durations = link.Durations.OrderBy(duration => duration.SortOrder)
-                    .Select(duration => duration.Minutes)
-                    .ToList(),
-            })
-            .ToListAsync(cancellationToken);
-
-        return [.. links.Select(link =>
-            new LinkResponse(link.Slug, link.Name, link.Description, link.Durations, timeZone))];
     }
 
     private static async Task<LinkResponse> GetAsync(

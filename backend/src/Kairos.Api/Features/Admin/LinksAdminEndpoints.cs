@@ -94,10 +94,20 @@ public sealed record SaveLinkRequest
     /// order of the booking page's tabs. Not sorted here: ascending length is a different list.
     /// </summary>
     [Required]
+    [MaxLength(MaxDurations)]
     public required IReadOnlyList<int> Durations { get; init; }
 
     public const int MinDurationMinutes = 1;
     public const int MaxDurationMinutes = 1440;
+
+    /// <summary>
+    /// The allocation guard on the list, and generous on purpose: a link offers a handful of
+    /// lengths — the booking page draws one tab per duration — so two dozen is far past any real
+    /// one. Unbounded, the whole array is bound and run through Distinct() before the three
+    /// checks below it get to say anything, and duplicates are refused only after that, so the
+    /// 1,440 minutes a duration may be is no bound on how long the list can be.
+    /// </summary>
+    public const int MaxDurations = 24;
 
     private const int MaxSlugLength = 80;
     private const int MaxNameLength = 200;
@@ -238,10 +248,12 @@ public static class LinksAdminEndpoints
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
-        RequireDurations(request.Durations);
-        await RequirePatternAsync(context, request.PatternId, cancellationToken);
-        await RequireSlugFreeAsync(context, request.Slug, id, cancellationToken);
-
+        // Before the three checks below, and that order is the whole of what this route promises:
+        // the link is the resource, so a body validated against a link that is not there answers
+        // 409 or 400 about a resource that does not exist. The other three {id:guid} routes resolve
+        // first and 404, and an operator on a stale page has to be told to reload rather than sent
+        // hunting for a collision to resolve.
+        //
         // Tracked, and with the durations loaded: replacing the set relies on EF seeing the rows
         // that are going away. Loaded without them, Clear() removes nothing and the link ends up
         // offering the union of every list it has ever had.
@@ -249,6 +261,10 @@ public static class LinksAdminEndpoints
             .Include(candidate => candidate.Durations)
             .FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken)
             ?? throw DomainException.NotFound("Link");
+
+        RequireDurations(request.Durations);
+        await RequirePatternAsync(context, request.PatternId, cancellationToken);
+        await RequireSlugFreeAsync(context, request.Slug, link.Id, cancellationToken);
 
         link.Slug = request.Slug;
         link.Name = request.Name;
@@ -258,7 +274,7 @@ public static class LinksAdminEndpoints
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return await ReadLinkAsync(context, id, cancellationToken);
+        return await ReadLinkAsync(context, link.Id, cancellationToken);
     }
 
     /// <summary>

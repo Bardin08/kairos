@@ -36,7 +36,8 @@ const CORRUPT_AVAILABILITY = 'pattern_invalid'
 
 // Both link routes answer this for a slug that resolves to nothing — including
 // a slug no link could ever have. Keyed on the code and never on the title:
-// the two routes word that sentence differently.
+// the title is prose the server may reword at any release, the code is the
+// contract it keeps.
 const NO_SUCH_LINK = 'not_found'
 
 const NEXT_MONTH = 1

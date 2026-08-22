@@ -47,8 +47,25 @@ public class PatternsAdminTests
     private const int FourPm = 16 * MinutesPerHour;
     private const int FivePm = 17 * MinutesPerHour;
 
+    /// <summary>One past what a day may hold, which is the boundary both refusals turn on.</summary>
+    private const int WindowsPastTheDayCap = PatternsAdminEndpoints.MaxWindowsPerDate + 1;
+
+    private const int RulesPastTheWeekCap = PatternsAdminEndpoints.MaxWindowsPerWeek + 1;
+
     /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
     private const int WellAhead = 30;
+
+    /// <summary>
+    /// The 30th of February: date-shaped and not a date, which is why the parse decides and a
+    /// route constraint could not. Both override routes take it, so both have to refuse it alike.
+    /// </summary>
+    private const string DateThatIsNotADate = "2026-02-30";
+
+    /// <summary>
+    /// A year the ISO pattern reads and the stored type cannot hold, which fails a step later than
+    /// the 30th of February and so is the case that catches a guard looking only at the parse.
+    /// </summary>
+    private const string DateBeforeTheFirstYearStorable = "0000-01-01";
 
     private static readonly Guid PatternId = Guid.CreateVersion7();
     private static readonly Guid LinkId = Guid.CreateVersion7();
@@ -166,6 +183,47 @@ public class PatternsAdminTests
     }
 
     /// <summary>
+    /// The case the collection cap alone lets through: a weekly body well inside its overall
+    /// bound of six windows times seven days, with all of one day's share and one more on Monday.
+    /// The per-day rule is the real rule; the collection cap only stops the allocation.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceRules_WithMoreWindowsOnOneDayThanItMayHold_IsRefusedWithACode()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await ReplaceRulesAsync(client, pattern, MondayRulesPastTheDayCap());
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.TooManyWindowsCode);
+    }
+
+    /// <summary>
+    /// Finding 2 on the weekly half: Rules carried no length bound either, so a body up to
+    /// Kestrel's 30 MB cap was deserialized, grouped and sorted a day at a time before anything
+    /// refused it. Every body past the weekly bound also puts a seventh window on some day, so
+    /// what tells the collection cap apart from the per-day one is which of them answers: this
+    /// refusal names the field and carries no code, which only the attribute does.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceRules_WithMoreWindowsInTheWeekThanItMayHold_IsRefusedByTheAttribute()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await ReplaceRulesAsync(client, pattern, WeeklyRulesPastTheWeekCap());
+        var problem = await ReadJsonAsync(response);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        problem.TryGetProperty("errors", out var errors).ShouldBeTrue();
+        errors.TryGetProperty(nameof(ReplaceRulesRequest.Rules), out _).ShouldBeTrue();
+        problem.TryGetProperty("code", out _).ShouldBeFalse();
+    }
+
+    /// <summary>
     /// The refusal that has to name names. A cascade here would delete the pattern and leave the
     /// link resolvable, active and offering nothing — an outage the operator did not ask for and
     /// cannot see the cause of. Which links, not how many: the operator has to go and repoint
@@ -277,6 +335,108 @@ public class PatternsAdminTests
     }
 
     /// <summary>
+    /// Finding 2 of the review: Windows carried [Required] and no length bound, so a body up to
+    /// Kestrel's 30 MB cap was deserialized, projected into a tuple sequence and sorted before
+    /// anything refused it. Seven is one past what a day can carry, which is the boundary worth
+    /// pinning — six is already a morning, an afternoon and four more the operator meant. The
+    /// code is what is asserted, because a date's seventh window is the same operator mistake as
+    /// a Monday's and a client branches on <c>code</c>: a bound on the body tight enough to
+    /// refuse this first would answer the two routes differently.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithMoreWindowsThanADayMayHold_IsRefusedWithACode()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await SaveOverrideAsync(client, Day(), OverrideWindows(WindowsPastTheDayCap));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.TooManyWindowsCode);
+    }
+
+    /// <summary>
+    /// The allocation guard on this route, which the coded refusal above cannot stand in for: it
+    /// runs inside the handler, on a list already bound. Refused before that, so the field is
+    /// named and no code comes back — and without the bound the count above would answer instead,
+    /// which is what these assertions rule out.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithMoreWindowsThanAnyBodyMayCarry_IsRefusedByTheAttribute()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await SaveOverrideAsync(client, Day(), OverrideWindowsPastTheWeekCap());
+        var problem = await ReadJsonAsync(response);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        problem.TryGetProperty("errors", out var errors).ShouldBeTrue();
+        errors.TryGetProperty(nameof(SaveOverrideRequest.Windows), out _).ShouldBeTrue();
+        problem.TryGetProperty("code", out _).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The other side of the boundary, without which a cap written one off would refuse a day the
+    /// operator is allowed to have and nothing here would notice.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithExactlyAsManyWindowsAsADayMayHold_IsStored()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+
+        var response = await SaveOverrideAsync(
+            client, day, OverrideWindows(PatternsAdminEndpoints.MaxWindowsPerDate));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await PatternOfAsync(response)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows.Count.ShouldBe(PatternsAdminEndpoints.MaxWindowsPerDate);
+    }
+
+    /// <summary>
+    /// Left to the minimal-API binder this was a <c>BadHttpRequestException</c> from inside
+    /// RequestDelegateFactory: a 500 under the test host and a bodiless 400 in production, on a
+    /// surface where every other malformed input carries a code the workbench can act on.
+    /// </summary>
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task SaveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PutAsJsonAsync(
+            $"{PatternUrl}/overrides/{date}",
+            new { windows = Array.Empty<object>() },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.DateInvalidCode);
+    }
+
+    /// <summary>The other half of the same pair of routes, which binds the same segment.</summary>
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task RemoveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.DeleteAsync(
+            $"{PatternUrl}/overrides/{date}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.DateInvalidCode);
+    }
+
+    /// <summary>
     /// The seam the whole tab exists to move: a pattern built here, through the admin API, and
     /// then read by an anonymous browser as times it can book. Nothing in between is stubbed —
     /// the link is repointed the way it would be from the links editor, and the last read is the
@@ -358,6 +518,49 @@ public class PatternsAdminTests
             $"{PatternUrl}/overrides/{Formatted(day)}",
             new { windows },
             TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// Consecutive hour-long windows from 09:00, none inverted and none overlapping, so the only
+    /// rule a set of them can break is the count and no cap test passes for another reason.
+    /// </summary>
+    private static object[] OverrideWindows(int count) =>
+        [.. Enumerable.Range(0, count).Select(hour => new
+        {
+            startMinute = NineAm + (hour * MinutesPerHour),
+            endMinute = NineAm + ((hour + 1) * MinutesPerHour),
+        })];
+
+    /// <summary>
+    /// A week's worth of windows and one more, all on one date. One minute each and end to end,
+    /// which is legal — windows that merely touch are a split day — so the only rule the set
+    /// breaks is the bound, and 43 of them still land well inside the day.
+    /// </summary>
+    private static object[] OverrideWindowsPastTheWeekCap() =>
+        [.. Enumerable.Range(0, RulesPastTheWeekCap).Select(minute => new
+        {
+            startMinute = minute,
+            endMinute = minute + 1,
+        })];
+
+    private static object[] MondayRulesPastTheDayCap() =>
+        [.. Enumerable.Range(0, WindowsPastTheDayCap).Select(hour => new
+        {
+            isoDayOfWeek = Monday,
+            startMinute = NineAm + (hour * MinutesPerHour),
+            endMinute = NineAm + ((hour + 1) * MinutesPerHour),
+        })];
+
+    /// <summary>
+    /// One past the weekly bound, dealt round the week so every day gets six of them and Monday
+    /// the odd one — the fullest legal week plus a window, which is the only way past that bound.
+    /// </summary>
+    private static object[] WeeklyRulesPastTheWeekCap() =>
+        [.. Enumerable.Range(0, RulesPastTheWeekCap).Select(rule => new
+        {
+            isoDayOfWeek = Monday + (rule % PatternsAdminEndpoints.DaysInWeek),
+            startMinute = NineAm + ((rule / PatternsAdminEndpoints.DaysInWeek) * MinutesPerHour),
+            endMinute = NineAm + (((rule / PatternsAdminEndpoints.DaysInWeek) + 1) * MinutesPerHour),
+        })];
 
     /// <summary>The seeded pattern read back through the list, for what a refused write left.</summary>
     private static async Task<PatternResponse> SeededPatternAsync(HttpClient client)

@@ -40,8 +40,12 @@ public sealed class TestDatabase : IDisposable
     public void Dispose()
     {
         // The pool keeps handles to the file open, so clearing it first is what makes the delete
-        // succeed rather than leave a temp file behind on every run.
-        SqliteConnection.ClearAllPools();
+        // succeed rather than leave a temp file behind on every run. This pool and not every pool:
+        // ClearAllPools is process-global, and xUnit runs collections in parallel, so one test
+        // finishing would dispose the pooled connections of every other test still running — the
+        // next one to open a handle gets "Cannot access a disposed object: SQLitePCL.sqlite3" from
+        // somewhere unrelated to whatever it was testing.
+        SqliteConnection.ClearPool(new SqliteConnection(ConnectionString));
 
         string[] files = [_path, $"{_path}-wal", $"{_path}-shm"];
         foreach (var file in files)

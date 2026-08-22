@@ -8,6 +8,8 @@ using Kairos.Api.Shared;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
+using NodaTime.Text;
+
 namespace Kairos.Api.Features.Admin;
 
 /// <summary>The name, and nothing else. Create and rename are the same one-field form.</summary>
@@ -46,6 +48,7 @@ public sealed record SaveRuleRequest
 public sealed record ReplaceRulesRequest
 {
     [Required]
+    [MaxLength(PatternsAdminEndpoints.MaxWindowsPerWeek)]
     public required IReadOnlyList<SaveRuleRequest> Rules { get; init; }
 }
 
@@ -72,6 +75,7 @@ public sealed record OverrideWindowRequest
 public sealed record SaveOverrideRequest
 {
     [Required]
+    [MaxLength(PatternsAdminEndpoints.MaxWindowsPerWeek)]
     public required IReadOnlyList<OverrideWindowRequest> Windows { get; init; }
 }
 
@@ -148,8 +152,51 @@ public static class PatternsAdminEndpoints
     /// <summary>End is not after start. Shared by rules and overrides — one meaning, one code.</summary>
     public const string WindowInvertedCode = "window_inverted";
 
+    /// <summary>
+    /// The <c>{date}</c> segment of an override route is not an ISO calendar date. Thrown from the
+    /// handler rather than declared as a route constraint because no regular expression rejects
+    /// 2026-02-30: the parse has to run either way, and left to the binder the failure was a
+    /// <c>BadHttpRequestException</c> — a 500 in Development, where ThrowOnBadRequest defaults on,
+    /// and a 400 with an empty body everywhere else. Every other malformed input on this API
+    /// answers a coded 400.
+    /// </summary>
+    public const string DateInvalidCode = "date_invalid";
+
+    /// <summary>
+    /// More windows on one day than a day may hold. Coded rather than left to the bound on the
+    /// request, so the same mistake answers the same way whether it arrives as a weekday's rules
+    /// or as one date's: an attribute counts a whole body and cannot tell one day's share from
+    /// another's, and a client branching on <c>code</c> would otherwise see two different answers.
+    /// </summary>
+    public const string TooManyWindowsCode = "too_many_windows";
+
+    /// <summary>
+    /// More windows on one day than a day is ever shaped like. Six is past a morning, an
+    /// afternoon and an evening with room to spare, while the overlap check on its own tolerates
+    /// 1,439 — one-minute windows end to end, across a day whose last storable minute is 1,439.
+    /// </summary>
+    public const int MaxWindowsPerDate = 6;
+
+    /// <summary>ISO days, Monday through Sunday.</summary>
+    public const int DaysInWeek = 7;
+
+    /// <summary>
+    /// Derived, never typed twice: a full week of full days, and so the most windows any body on
+    /// this surface could legitimately carry. It is the allocation guard on both write bodies —
+    /// an array the size of Kestrel's 30 MB cap is refused as soon as it is bound, rather than
+    /// after it has been projected and sorted — and deliberately not the domain rule, which
+    /// <see cref="ValidateDay"/> owns: a bound on a whole body cannot tell one day's share from
+    /// another's, so a date carrying a seventh window is refused there and answers a code.
+    /// </summary>
+    public const int MaxWindowsPerWeek = MaxWindowsPerDate * DaysInWeek;
+
     private const string PatternName = "Pattern";
     private const string OverrideName = "Date override";
+
+    private const string DateParameter = "date";
+
+    /// <summary>DateOnly holds no year before this; NodaTime's ISO pattern reaches back past it.</summary>
+    private const int FirstYearDateOnlyHolds = 1;
 
     private const string NameTaken = "Another pattern already has that name.";
 
@@ -158,6 +205,14 @@ public static class PatternsAdminEndpoints
     private const string RuleOverlaps =
         "Another window on that day already covers part of those hours. Overlapping windows offer "
         + "the same time twice.";
+
+    /// <summary>
+    /// Interpolated at type load rather than written as a literal, so the number in the message
+    /// cannot drift from the number that is enforced. A const string cannot carry a const int
+    /// placeholder, which is why this is static readonly.
+    /// </summary>
+    private static readonly string TooManyWindows =
+        $"A day can offer at most {MaxWindowsPerDate} windows.";
 
     public static RouteGroupBuilder MapPatternsAdmin(this RouteGroupBuilder group)
     {
@@ -310,11 +365,15 @@ public static class PatternsAdminEndpoints
 
     private static async Task<PatternResponse> SaveOverrideAsync(
         Guid patternId,
-        DateOnly date,
+        string date,
         SaveOverrideRequest request,
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
+        // Parsed once, here, and everything below works in DateOnly as it always did — threading
+        // the raw segment further down would put the same parse in front of every use of it.
+        var day = ParseDate(date);
+
         var pattern = await context.Patterns
             .Include(candidate => candidate.Overrides)
             .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
@@ -324,14 +383,14 @@ public static class PatternsAdminEndpoints
 
         // Materialized before anything is added, so the removal is not walking the collection the
         // additions are growing.
-        var replaced = pattern.Overrides.Where(row => row.Date == date).ToList();
+        var replaced = pattern.Overrides.Where(row => row.Date == day).ToList();
         context.PatternOverrides.RemoveRange(replaced);
 
         if (request.Windows.Count == 0)
         {
             // One row with no times, rather than no rows at all: no rows is the date back on the
             // weekly rules, which is what DELETE on this route means and not what was asked for.
-            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = date });
+            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = day });
         }
 
         foreach (var window in request.Windows)
@@ -339,7 +398,7 @@ public static class PatternsAdminEndpoints
             pattern.Overrides.Add(new PatternOverride
             {
                 PatternId = pattern.Id,
-                Date = date,
+                Date = day,
                 StartMinute = window.StartMinute,
                 EndMinute = window.EndMinute,
             });
@@ -352,12 +411,14 @@ public static class PatternsAdminEndpoints
 
     private static async Task<PatternResponse> RemoveOverrideAsync(
         Guid patternId,
-        DateOnly date,
+        string date,
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
+        var day = ParseDate(date);
+
         var deleted = await context.PatternOverrides
-            .Where(row => row.PatternId == patternId && row.Date == date)
+            .Where(row => row.PatternId == patternId && row.Date == day)
             .ExecuteDeleteAsync(cancellationToken);
 
         if (deleted == 0)
@@ -415,6 +476,31 @@ public static class PatternsAdminEndpoints
     }
 
     /// <summary>
+    /// The <c>{date}</c> segment, in the entity's own type. Read through NodaTime's ISO pattern
+    /// rather than by the binder, so the route accepts the one spelling the rest of this API
+    /// speaks — the same pattern <see cref="Slots.SlotsEndpoints"/> and
+    /// <see cref="MeetingsAdminEndpoints"/> read their dates with. The caller's value is not
+    /// echoed back into the message, for the reason those two state.
+    /// </summary>
+    /// <remarks>
+    /// A successful parse is not enough to convert: the pattern reads years the stored type cannot
+    /// hold, and a year below it converted into an <c>ArgumentOutOfRangeException</c> that the
+    /// handler leaves alone, so the refusal had to happen here to stay a coded 400. Nothing guards
+    /// the far end because the pattern's four-digit year already refuses anything past 9999.
+    /// </remarks>
+    private static DateOnly ParseDate(string value)
+    {
+        var parsed = LocalDatePattern.Iso.Parse(value);
+        if (!parsed.Success || parsed.Value.Year < FirstYearDateOnlyHolds)
+        {
+            throw DomainException.Invalid(
+                DateInvalidCode, $"'{DateParameter}' must be an ISO calendar date, such as 2026-09-07.");
+        }
+
+        return parsed.Value.ToDateOnly();
+    }
+
+    /// <summary>
     /// One day's windows — a weekday's or one date's — checked before anything is written, so the
     /// set is refused entire or stored entire.
     /// </summary>
@@ -424,6 +510,14 @@ public static class PatternsAdminEndpoints
         // one ends. Written this way so two that merely touch at noon are a split day rather than
         // a refusal.
         var windows = day.OrderBy(window => window.Start).ToList();
+
+        // Counted here rather than on the request, because the attribute bounds a whole body and
+        // this bounds one day of it — the rule the operator actually has, and the one they get a
+        // code for. Runs before anything is written, so the set is refused entire or stored entire.
+        if (windows.Count > MaxWindowsPerDate)
+        {
+            throw DomainException.Invalid(TooManyWindowsCode, TooManyWindows);
+        }
 
         foreach (var (start, end) in windows)
         {

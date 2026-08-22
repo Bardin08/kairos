@@ -83,19 +83,22 @@ public class SlotQueryTests
     }
 
     [Fact]
-    public async Task GetSlotsAsync_LinkOffersNoDurations_ThrowsNamingTheLink()
+    public async Task GetSlotsAsync_LinkOffersNoDurations_ThrowsTheNamedCodeWithoutEchoingTheSlug()
     {
         using var database = new TestDatabase();
         await using var context = database.CreateContext();
         Seed(context, durations: []);
 
         // Durations.Default is durations[0]. Unguarded this is an ArgumentOutOfRangeException
-        // naming "index", on a customer-facing page, with nothing pointing at the link.
+        // naming "index", on a customer-facing page, with nothing saying what went wrong.
         var thrown = await Should.ThrowAsync<DomainException>(() => Query(context)
             .GetSlotsAsync(ConsultingSlug, null, Monday, Monday, WellBefore, TestContext.Current.CancellationToken));
 
         thrown.Code.ShouldBe(SlotQuery.NoDurationsCode);
-        thrown.Message.ShouldContain(ConsultingSlug);
+
+        // The code is what a client keys on, and it is the whole of what this message may carry:
+        // the slug arrived from an anonymous caller, and the rule is that it never comes back.
+        thrown.Message.ShouldNotContain(ConsultingSlug);
     }
 
     [Fact]
