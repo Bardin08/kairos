@@ -77,6 +77,7 @@ public static class IntegrationEndpoints
     /// <summary>The exchange failed. The reason is in the log; there is nothing safe to put here.</summary>
     public const string ConnectFailedCode = "connect_failed";
 
+    private const string ProviderName = "Integration provider";
     private const string ConnectedParameter = "connected";
     private const string ErrorParameter = "error";
     private const char StateSeparator = ':';
@@ -187,8 +188,20 @@ public static class IntegrationEndpoints
         ILoggerFactory loggers,
         CancellationToken cancellationToken)
     {
-        var connector = Require(connectors, provider);
         var logger = loggers.CreateLogger(typeof(IntegrationEndpoints));
+
+        // Resolved inside the redirecting part of the handler rather than by the throwing helper
+        // the two operator routes use. Those are fetched and can be told about a 404; this one is
+        // a page navigation, and ProblemDetails in the address bar is a dead end with nothing on
+        // it to press. The code is the same not_found the helper would have thrown — the page
+        // renders a sentence for a code it does not recognise, which is what makes that safe.
+        var connector = Find(connectors, provider);
+        if (connector is null)
+        {
+            logger.LogWarning("Discarded a callback for a provider this build has no connector for.");
+            return RedirectToPage(ErrorParameter, DomainException.NotFoundCode);
+        }
+
         var known = connector.Provider;
 
         if (!string.IsNullOrEmpty(error))
@@ -229,21 +242,29 @@ public static class IntegrationEndpoints
     }
 
     /// <summary>
-    /// The route segment is matched against the connectors rather than parsed into
-    /// <see cref="IntegrationProvider"/> by the binder, for two reasons found by running it:
-    /// the binder's enum parse is case-sensitive, so <c>/integrations/google/connect</c> — the
-    /// only casing a URL should have — did not bind at all; and a binder rejection is an empty
-    /// 400, where an unimplemented provider is supposed to be the 404 with <c>not_found</c> that
-    /// the page's Connect button deserves. Matching the connectors also means the numeric
-    /// spelling of the enum, which <c>Enum.TryParse</c> accepts, is not a second name for a
-    /// route.
+    /// For the routes a fetch calls, where "no such provider" is a 404 with <c>not_found</c> on it
+    /// that the page's Connect button can act on. The callback resolves through
+    /// <see cref="Find"/> instead, because a browser arrives there by navigation.
     /// </summary>
     private static IIntegrationConnector Require(
         IEnumerable<IIntegrationConnector> connectors,
         string provider) =>
+        Find(connectors, provider) ?? throw DomainException.NotFound(ProviderName);
+
+    /// <summary>
+    /// The route segment is matched against the connectors rather than parsed into
+    /// <see cref="IntegrationProvider"/> by the binder, for two reasons found by running it:
+    /// the binder's enum parse is case-sensitive, so <c>/integrations/google/connect</c> — the
+    /// only casing a URL should have — did not bind at all; and a binder rejection is an empty
+    /// 400, where an unimplemented provider is supposed to be a named answer. Matching the
+    /// connectors also means the numeric spelling of the enum, which <c>Enum.TryParse</c>
+    /// accepts, is not a second name for a route.
+    /// </summary>
+    private static IIntegrationConnector? Find(
+        IEnumerable<IIntegrationConnector> connectors,
+        string provider) =>
         connectors.FirstOrDefault(connector =>
-            Name(connector.Provider).Equals(provider, StringComparison.OrdinalIgnoreCase))
-        ?? throw DomainException.NotFound("Integration provider");
+            Name(connector.Provider).Equals(provider, StringComparison.OrdinalIgnoreCase));
 
     private static string MintState(SecretProtector protector, IntegrationProvider provider, IClock clock)
     {

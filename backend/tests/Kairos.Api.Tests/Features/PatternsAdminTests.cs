@@ -50,6 +50,18 @@ public class PatternsAdminTests
     /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
     private const int WellAhead = 30;
 
+    /// <summary>
+    /// The 30th of February: date-shaped and not a date, which is why the parse decides and a
+    /// route constraint could not. Both override routes take it, so both have to refuse it alike.
+    /// </summary>
+    private const string DateThatIsNotADate = "2026-02-30";
+
+    /// <summary>
+    /// A year the ISO pattern reads and the stored type cannot hold, which fails a step later than
+    /// the 30th of February and so is the case that catches a guard looking only at the parse.
+    /// </summary>
+    private const string DateBeforeTheFirstYearStorable = "0000-01-01";
+
     private static readonly Guid PatternId = Guid.CreateVersion7();
     private static readonly Guid LinkId = Guid.CreateVersion7();
 
@@ -274,6 +286,46 @@ public class PatternsAdminTests
         (await SeededPatternAsync(client)).Overrides
             .Single(replacement => replacement.Date == day.ToDateOnly())
             .Windows.ShouldBe([new OverrideWindowResponse(NineAm, Noon)]);
+    }
+
+    /// <summary>
+    /// Left to the minimal-API binder this was a <c>BadHttpRequestException</c> from inside
+    /// RequestDelegateFactory: a 500 under the test host and a bodiless 400 in production, on a
+    /// surface where every other malformed input carries a code the workbench can act on.
+    /// </summary>
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task SaveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PutAsJsonAsync(
+            $"{PatternUrl}/overrides/{date}",
+            new { windows = Array.Empty<object>() },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.DateInvalidCode);
+    }
+
+    /// <summary>The other half of the same pair of routes, which binds the same segment.</summary>
+    [Theory]
+    [InlineData(DateThatIsNotADate)]
+    [InlineData(DateBeforeTheFirstYearStorable)]
+    public async Task RemoveOverride_OnADateSegmentItCannotStore_IsABadRequestNamingTheCode(
+        string date)
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.DeleteAsync(
+            $"{PatternUrl}/overrides/{date}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.DateInvalidCode);
     }
 
     /// <summary>

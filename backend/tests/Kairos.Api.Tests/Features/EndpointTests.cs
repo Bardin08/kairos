@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Kairos.Api.Availability;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Persistence;
@@ -9,8 +10,10 @@ using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 using NodaTime;
 using NodaTime.Text;
@@ -31,6 +34,12 @@ public class EndpointTests
 
     /// <summary>A slug no link can have, so both link routes must answer the same way.</summary>
     private const string UnusableSlug = "ABC_%21";
+
+    /// <summary>
+    /// Well-formed and unseeded, so both link routes reach their resolver and refuse it there.
+    /// Distinctive enough that finding it anywhere in a response body means it was reflected.
+    /// </summary>
+    private const string UnknownSlug = "quenelle-of-nothing";
 
     private const int DurationMinutes = 25;
     private const int LongDurationMinutes = 50;
@@ -205,6 +214,47 @@ public class EndpointTests
     }
 
     /// <summary>
+    /// One window and no other: the invitee's connection dropping between the release the
+    /// reschedule commits and the restore that puts the row back. This is not a general test of
+    /// what an aborted request answers — the request here fails, and it is supposed to. What it
+    /// pins is that the compensating write outlives the request that triggered it, because
+    /// everything that would withdraw the calendar event and announce the cancellation lives in
+    /// the cancel endpoint and never runs on this path: a row left cancelled here is a meeting
+    /// still sitting in the organizer's calendar on a slot that is now free for somebody else.
+    /// </summary>
+    /// <remarks>
+    /// The abort is fired from a busy source, which is the last thing the re-check touches before
+    /// it reads the database again. That puts the dead token exactly at the restore and nowhere
+    /// earlier — an abort raised from the client's side on a timer would land wherever the machine
+    /// happened to be, which is a different test on every run.
+    /// </remarks>
+    [Fact]
+    public async Task RescheduleBooking_ConnectionDropsDuringTheReCheck_StillPutsTheRowBackConfirmed()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        using var dropped = new CancellationTokenSource();
+        using var client = app.WithWebHostBuilder(builder => builder.ConfigureTestServices(
+                services => services.AddScoped<IBusySource>(_ => new DroppingBusySource(dropped))))
+            .CreateClient();
+
+        await Should.ThrowAsync<OperationCanceledException>(async () => await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + ThirdSlotTime },
+            dropped.Token));
+
+        var row = app.Read(context => context.Bookings.AsNoTracking().Single());
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(row.StartUtc))
+            .ShouldBe(day + FirstSlotTime);
+    }
+
+    /// <summary>
     /// The second of the two 400 shapes, and the only thing that would notice AddValidation
     /// quietly ceasing to run: nothing below this layer looks at an address, so an unvalidated
     /// one is written to the database and answered 201.
@@ -299,6 +349,35 @@ public class EndpointTests
         slots.StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await CodeOfAsync(detail)).ShouldBe(DomainException.NotFoundCode);
         (await CodeOfAsync(slots)).ShouldBe(DomainException.NotFoundCode);
+    }
+
+    /// <summary>
+    /// One condition, one body. A slug nothing answers to is the same fact on both routes, so the
+    /// sentence a client renders from it has to be the same sentence — and it may not be built out
+    /// of what the caller sent. The slots read reflected it and the link read did not, which made
+    /// an anonymous caller's arbitrary string a round trip into whatever a page does with a
+    /// ProblemDetails title.
+    /// </summary>
+    [Fact]
+    public async Task UnknownSlug_IsNotFoundOnBothLinkRoutes_WithOneTitleAndNoEchoOfTheSlug()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var detail = await app.Client.GetAsync(
+            $"{ApiVersions.V1}/links/{UnknownSlug}", TestContext.Current.CancellationToken);
+        var slots = await app.Client.GetAsync(
+            $"{ApiVersions.V1}/links/{UnknownSlug}/slots?from={day}&to={day}&duration={DurationMinutes}",
+            TestContext.Current.CancellationToken);
+
+        detail.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        slots.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await TitleOfAsync(slots)).ShouldBe(await TitleOfAsync(detail));
+
+        // The whole body, not just the title: a slug that reached any other field would be the
+        // same reflection wearing a different key.
+        (await BodyOfAsync(detail)).ShouldNotContain(UnknownSlug);
+        (await BodyOfAsync(slots)).ShouldNotContain(UnknownSlug);
     }
 
     /// <summary>
@@ -566,6 +645,23 @@ public class EndpointTests
         (await ReadJsonAsync(again)).GetProperty("sequence").GetInt32().ShouldBe(1);
     }
 
+    /// <summary>
+    /// A busy source that reports nothing and hangs up on the way out. It is registered for one
+    /// client only, so every other request in this file meets exactly the sources the composition
+    /// root registers.
+    /// </summary>
+    /// <remarks>Qualified: NodaTime has an Interval too, and both namespaces are in scope here.</remarks>
+    private sealed class DroppingBusySource(CancellationTokenSource dropped) : IBusySource
+    {
+        public Task<IReadOnlyList<BusyBlock>> GetBusyAsync(
+            Kairos.Api.Scheduling.Interval window,
+            CancellationToken cancellationToken)
+        {
+            dropped.Cancel();
+            return Task.FromResult<IReadOnlyList<BusyBlock>>([]);
+        }
+    }
+
     /// <summary>Oldest first, which is also the order the dispatcher delivers them in.</summary>
     private static List<OutboxMessageType> QueuedTypes(KairosApp app) =>
         app.Read(context => context.OutboxMessages
@@ -669,6 +765,12 @@ public class EndpointTests
 
     private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
         (await ReadJsonAsync(response)).GetProperty("code").GetString();
+
+    private static async Task<string?> TitleOfAsync(HttpResponseMessage response) =>
+        (await ReadJsonAsync(response)).GetProperty("title").GetString();
+
+    private static Task<string> BodyOfAsync(HttpResponseMessage response) =>
+        response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);

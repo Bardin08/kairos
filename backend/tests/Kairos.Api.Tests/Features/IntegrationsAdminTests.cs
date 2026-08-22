@@ -8,6 +8,7 @@ using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Security;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
 using Shouldly;
@@ -35,6 +36,9 @@ public class IntegrationsAdminTests
 
     private const string Google = "google";
     private const string AccountLabel = "operator@example.com";
+
+    /// <summary>A provider no build of this application has a connector for.</summary>
+    private const string UnknownProvider = "bogus";
 
     /// <summary>2026-08-14T22:29:14Z. Any instant; nothing here reads a clock.</summary>
     private const long ConnectedAt = 1_786_832_954;
@@ -119,6 +123,33 @@ public class IntegrationsAdminTests
 
         failure.Code.ShouldBe(IntegrationCredentialStore.CredentialUnreadableCode);
         failure.Message.ShouldContain("Security:SecretKey");
+    }
+
+    /// <summary>
+    /// The callback lands on the page whatever happened, because a human is holding this browser
+    /// and the flow has to end where it started. An unknown provider was the one exit that threw
+    /// instead, so a page navigation was answered with ProblemDetails — raw JSON in the address
+    /// bar and nothing to press. Redirecting is safe because the page turns codes into copy and
+    /// keeps a fallback sentence for a code it does not recognise.
+    /// </summary>
+    [Fact]
+    public async Task CompleteIntegration_ForAProviderThatDoesNotExist_LandsOnTheReturnPageRatherThanAnsweringJson()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+        });
+
+        var response = await client.GetAsync(
+            $"{ApiVersions.V1}/integrations/{UnknownProvider}/callback",
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Found);
+
+        var landing = response.Headers.Location!.OriginalString;
+        landing.ShouldStartWith(IntegrationEndpoints.ReturnPath);
+        landing.ShouldContain(DomainException.NotFoundCode);
     }
 
     /// <summary>Shape-compatible with what a provider stores; only the key differs.</summary>

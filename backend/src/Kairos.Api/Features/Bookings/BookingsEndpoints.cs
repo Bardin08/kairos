@@ -312,7 +312,8 @@ public static class BookingsEndpoints
 
         // A confirmed booking blocks its own calendar, so it is released before the re-check —
         // otherwise moving a meeting half an hour later is refused by the meeting being moved.
-        // Every path out of here puts the row back confirmed, including the failing ones.
+        // Every path out of here puts the row back confirmed, including the failing ones and the
+        // ones whose caller has already hung up — which is what ConfirmAsync refusing a token is for.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = now.ToUnixTimeSeconds();
         await context.SaveChangesAsync(cancellationToken);
@@ -330,7 +331,7 @@ public static class BookingsEndpoints
         }
         catch
         {
-            await ConfirmAsync(context, booking, cancellationToken);
+            await ConfirmAsync(context, booking);
             throw;
         }
 
@@ -341,7 +342,7 @@ public static class BookingsEndpoints
         // the meeting, not to the slot. Sequence is how Part B's .ics tells a calendar client
         // that this is the same event at a new time instead of a second invitation.
         booking.Sequence++;
-        await ConfirmAsync(context, booking, cancellationToken);
+        await ConfirmAsync(context, booking);
 
         // Here, at the end, and never in the release phase above. That release is bookkeeping —
         // the booking is set cancelled and put back confirmed on every path out of this method,
@@ -386,14 +387,20 @@ public static class BookingsEndpoints
         return offered;
     }
 
-    private static Task ConfirmAsync(
-        KairosDbContext context,
-        Booking booking,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Deliberately uncancellable, and the reason the release above is safe to commit at all. It
+    /// is the compensation for a write this request has already made, so it has to outlive the
+    /// request the same way <see cref="Integrations.Google.GoogleClientFactory"/>'s
+    /// reconnect flag does: an invitee whose connection drops in the window between the release
+    /// and this would otherwise leave the booking cancelled forever — reads reporting a meeting
+    /// that is off, reschedule refusing it, and nothing having withdrawn the calendar event or
+    /// announced anything, because both of those live in the cancel endpoint and never ran.
+    /// </summary>
+    private static Task ConfirmAsync(KairosDbContext context, Booking booking)
     {
         booking.Status = BookingStatus.Confirmed;
         booking.CancelledAt = null;
-        return context.SaveChangesAsync(cancellationToken);
+        return context.SaveChangesAsync(CancellationToken.None);
     }
 
     /// <summary>
