@@ -1,3 +1,5 @@
+using System.Net;
+
 using Kairos.Api.Availability;
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
@@ -16,12 +18,17 @@ using Kairos.Api.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 using NodaTime;
+
+// Aliased because HttpOverrides carries a deprecated IPNetwork of its own, while KnownIPNetworks —
+// the property that replaced the deprecated KnownNetworks — takes the BCL one.
+using IPNetwork = System.Net.IPNetwork;
 
 // Aliased because ASP.NET Core's authentication namespace brings its own SystemClock, and the one
 // this application means is the one every instant in it is read from.
@@ -42,6 +49,8 @@ builder.Services.AddDbContext<KairosDbContext>(options =>
 builder.Services.AddSingleton<IClock>(SystemClock.Instance);
 
 const string secretKeyPath = "Security:SecretKey";
+const string knownProxiesPath = "Proxy:KnownProxies";
+const string knownNetworksPath = "Proxy:KnownNetworks";
 
 // Constructed here rather than resolved lazily, so an absent, non-base64 or wrong-length key
 // stops the process at startup. An app that boots without its key and finds out at the first
@@ -213,6 +222,34 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 
+builder.Services.AddRateLimitPolicies();
+
+// Which addresses may speak for a caller, and which scheme the request really arrived on. Both
+// matter today: the address is what the rate limiter partitions on, and without the scheme a
+// TLS-terminating proxy leaves this application believing every request is plain HTTP — the OIDC
+// handler then builds an http:// redirect_uri the provider refuses, and the cookie policy's
+// SameAsRequest leaves Secure off the session cookie.
+//
+// Left at the framework's default — loopback only — so a deployment that is NOT behind a proxy
+// cannot be told a false client address by a header. A deployment that is behind one names it, and
+// clearing these lists to accept X-Forwarded-For from anybody would hand every caller a free
+// identity and with it every other caller's rate limit.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+    foreach (var proxy in builder.Configuration.GetSection(knownProxiesPath).Get<string[]>() ?? [])
+    {
+        options.KnownProxies.Add(IPAddress.Parse(proxy));
+    }
+
+    foreach (var network in builder.Configuration.GetSection(knownNetworksPath).Get<string[]>() ?? [])
+    {
+        // CIDR as written in a config file: "10.0.0.0/8".
+        options.KnownIPNetworks.Add(IPNetwork.Parse(network));
+    }
+});
+
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();
 
@@ -228,6 +265,10 @@ using (var scope = app.Services.CreateScope())
     scope.ServiceProvider.GetRequiredService<KairosDbContext>().Database.Migrate();
 }
 
+// Before everything, because every line below it that reads a scheme or an address — the rate
+// limiter's partition, and the cookie policy the proxy task adds — reads the wrong one otherwise.
+app.UseForwardedHeaders();
+
 app.UseExceptionHandler();
 app.UseStaticFiles();
 
@@ -236,6 +277,9 @@ app.UseStaticFiles();
 // framework convention to answer.
 app.UseAuthentication();
 app.UseAuthorization();
+
+// After routing, because the endpoint's own metadata is what says whether it carries a budget.
+app.UseRateLimiting();
 
 // The two routes that make a session and end one, and the only two that are anonymous by
 // necessity rather than by choice: a challenge is a browser navigation to another origin, so
