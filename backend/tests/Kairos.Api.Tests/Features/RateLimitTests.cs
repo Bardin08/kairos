@@ -368,19 +368,6 @@ public class RateLimitTests
     private static string Text(int value) => value.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// The peer the in-memory host does not have. TestServer opens no socket, so
-    /// <c>Connection.RemoteIpAddress</c> is null, and <c>UseForwardedHeaders</c> will not take a
-    /// header's word for who is calling unless the connection itself came from an address it
-    /// trusts — with nothing to check, it does nothing, and every client shares one partition.
-    /// Loopback is what the framework trusts by default, so lending the connection that address is
-    /// the whole substitution: the shipping middleware then resolves the caller for real.
-    /// </summary>
-    /// <remarks>
-    /// An <see cref="IStartupFilter"/> rather than test middleware, because this has to run before
-    /// <c>UseForwardedHeaders</c> — which is the first line of the application's own pipeline, and
-    /// nothing registered through <c>Configure</c> can get in front of it.
-    /// </remarks>
-    /// <summary>
     /// Counts warnings from one category. Filtered, because the harness's own startup says things
     /// — an unconfigured mail relay, for one — and counting those would pass whatever the code
     /// under test did.
@@ -417,6 +404,19 @@ public class RateLimitTests
         }
     }
 
+    /// <summary>
+    /// The peer the in-memory host does not have. TestServer opens no socket, so
+    /// <c>Connection.RemoteIpAddress</c> is null, and <c>UseForwardedHeaders</c> will not take a
+    /// header's word for who is calling unless the connection itself came from an address it
+    /// trusts — with nothing to check, it does nothing, and every client shares one partition.
+    /// Loopback is what the framework trusts by default, so lending the connection that address is
+    /// the whole substitution: the shipping middleware then resolves the caller for real.
+    /// </summary>
+    /// <remarks>
+    /// An <see cref="IStartupFilter"/> rather than test middleware, because this has to run before
+    /// <c>UseForwardedHeaders</c> — which is the first line of the application's own pipeline, and
+    /// nothing registered through <c>Configure</c> can get in front of it.
+    /// </remarks>
     private sealed class LoopbackPeer : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>

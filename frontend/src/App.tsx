@@ -22,10 +22,12 @@ export default function App() {
           all, and the token is the capability anyway: it is minted once, stored
           only as a SHA-256 hash, and never handed back after the 201 that
           created the booking. A `/manage/:id?token=` shape would need a second
-          identifier the server has no use for, and would leak the token into
-          Referer headers and server logs as a query string. This is the URL the
-          booking page shows after a booking; the two have to agree or nothing
-          is manageable. */}
+          identifier the server has no use for, and it would leak no less: a
+          Referer carries the whole URL, path included, so the query string is
+          not what makes the difference. What keeps the token out of a referrer
+          is the `no-referrer` policy the API sends on every response. This is
+          the URL the booking page shows after a booking; the two have to agree
+          or nothing is manageable. */}
       <Route path="/manage/:token" component={Manage} />
       {/* Fixed, and not a preference: IntegrationEndpoints.ReturnPath is this
           string, and every OAuth callback redirects to it carrying

@@ -49,6 +49,11 @@ builder.Services.AddDbContext<KairosDbContext>(options =>
 builder.Services.AddSingleton<IClock>(SystemClock.Instance);
 
 const string secretKeyPath = "Security:SecretKey";
+const string hstsMaxAgeDaysPath = "Security:HstsMaxAgeDays";
+
+// Long enough to be worth sending and short enough that a deployment which loses its certificate
+// is not locked out of its own domain for a year.
+const int defaultHstsMaxAgeDays = 30;
 
 // Constructed here rather than resolved lazily, so an absent, non-base64 or wrong-length key
 // stops the process at startup. An app that boots without its key and finds out at the first
@@ -293,6 +298,19 @@ static T Parsed<T>(string value, string path, Func<string, T> parse)
     }
 }
 
+// Both flags off, written out rather than left implicit, because they are a decision. Kairos is
+// deployed on somebody else's domain: IncludeSubDomains would pin every sibling subdomain of a
+// host this application does not own to HTTPS, and the preload list is close to irreversible and
+// belongs to whoever owns the apex. An operator who wants either says so at their proxy, where
+// the certificate already lives.
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(
+        builder.Configuration.GetValue<int?>(hstsMaxAgeDaysPath) ?? defaultHstsMaxAgeDays);
+    options.IncludeSubDomains = false;
+    options.Preload = false;
+});
+
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();
 
@@ -311,6 +329,20 @@ using (var scope = app.Services.CreateScope())
 // Before everything, because every line below it that reads a scheme or an address — the rate
 // limiter's partition, and the redirect_uri a challenge builds — reads the wrong one otherwise.
 app.UseForwardedHeaders();
+
+// Ahead of everything that writes a response, so nothing can answer without them — the exception
+// handler's re-execution and the static files middleware's short circuit both included.
+app.UseSecurityHeaders();
+
+// Behind UseForwardedHeaders because it reads the scheme that line resolves: HSTS is sent on an
+// HTTPS request and withheld from a plaintext one, and behind a TLS-terminating proxy the only
+// thing that knows the difference is X-Forwarded-Proto.
+//
+// There is deliberately no UseHttpsRedirection beside it. Kestrel holds no certificate here — the
+// proxy terminates TLS and every request reaches this process over plaintext by design — so the
+// middleware would either do nothing or redirect every request to itself. The edge holds the
+// certificate, so the edge redirects.
+app.UseHsts();
 
 app.UseExceptionHandler();
 app.UseStaticFiles();
