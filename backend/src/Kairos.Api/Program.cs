@@ -16,6 +16,7 @@ using Kairos.Api.Shared;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -87,10 +88,30 @@ builder.Services
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
         };
-        options.Events.OnRedirectToAccessDenied = context =>
+        // A body on the refusal, in the shape DomainExceptionHandler writes, because a bodyless
+        // 403 leaves the workbench nothing to tell "you are signed in and not an operator" apart
+        // from any other refusal — and those two screens have different remedies.
+        //
+        // Naming that refusal HERE is correct only while AdminGroup.Policy is the only policy in
+        // the application, so every forbid this handler sees really is that one. A second policy
+        // would start answering not_an_operator to a refusal that is nothing of the kind, and the
+        // code would have to move to where the policy that produced it is known.
+        options.Events.OnRedirectToAccessDenied = async context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            return Task.CompletedTask;
+
+            await context.HttpContext.RequestServices
+                .GetRequiredService<IProblemDetailsService>()
+                .TryWriteAsync(new ProblemDetailsContext
+                {
+                    HttpContext = context.HttpContext,
+                    ProblemDetails = new ProblemDetails
+                    {
+                        Status = StatusCodes.Status403Forbidden,
+                        Title = AdminAuthorization.NotAnOperatorTitle,
+                        Extensions = { [ProblemCode.Key] = AdminAuthorization.NotAnOperatorCode },
+                    },
+                });
         };
     })
     .AddOpenIdConnect(options =>
@@ -102,6 +123,10 @@ builder.Services
         // The handler still defaults to the implicit id_token flow, which is what having a client
         // secret at all is an argument against. Code flow, with the PKCE the handler adds to it.
         options.ResponseType = OpenIdConnectResponseType.Code;
+
+        // Without this the provider has no reason to put the group in the token, and every
+        // account fails the policy below with nothing in the logs to say why.
+        options.Scope.Add(AdminAuthorization.GroupScope);
 
         // Development only, and gated so that production cannot reach it however the
         // configuration is written. The local provider in compose.dev.yaml serves discovery and
@@ -116,8 +141,16 @@ builder.Services
         }
     });
 
+// Read here rather than inside the assertion, so a blanked group stops the process at startup
+// instead of failing every request in the same way an unauthorized caller does.
+var adminGroup = AdminAuthorization.RequiredGroup(builder.Configuration);
+var adminSubjects = AdminAuthorization.AllowedSubjects(builder.Configuration);
+
 builder.Services.AddAuthorization(options =>
-    options.AddPolicy(AdminGroup.Policy, policy => policy.RequireAuthenticatedUser()));
+    options.AddPolicy(AdminGroup.Policy, policy => policy
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context =>
+            AdminAuthorization.IsOperator(context.User, adminGroup, adminSubjects))));
 
 builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(GoogleOptions.SectionName));
 
@@ -245,6 +278,17 @@ app.MapAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()
     .MapIntegrationsAdmin();
+
+// Said out loud, once, because the middleware cannot say it. A RequireAssertion has no logger and
+// AuthorizationMiddleware reports only "requirements were not met: AssertionRequirement", so the
+// likeliest way this boundary goes wrong in production — a provider that releases no groups claim
+// — reaches an operator as a 403 with nothing anywhere to read. This is what was expected.
+app.Logger.LogInformation(
+    "The admin surface admits accounts whose {ClaimType} claim carries {Group}, narrowed to "
+    + "{SubjectCount} allowed subjects — zero meaning the group alone decides.",
+    AdminAuthorization.GroupClaimType,
+    adminGroup,
+    adminSubjects.Count);
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the
