@@ -55,6 +55,13 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
     /// </summary>
     public string ConnectionString => $"Data Source={_path}";
 
+    /// <summary>
+    /// The file that connection string points at, for the one test that takes the database away
+    /// from a running application. Exposed rather than re-derived, since a test deleting a path it
+    /// computed itself would pass over a database nothing was using.
+    /// </summary>
+    public string DatabasePath => _path;
+
     /// <summary>Writes through the application's own context, so the schema is the migrated one.</summary>
     public void Seed(Action<KairosDbContext> seed)
     {
