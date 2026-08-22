@@ -335,6 +335,33 @@ public class PatternsAdminTests
     }
 
     /// <summary>
+    /// The review claimed nothing stopped a date holding the same window twice. One request
+    /// cannot: two identical windows are the strongest overlap there is — the second starts
+    /// exactly where the first does — so the rule that refuses 09:00-17:00 beside 10:00-16:00
+    /// refuses this too. Pinned because the claim will be read again by whoever revisits the
+    /// finding, and the answer should be a test rather than an argument.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_WithTheSameWindowTwice_IsRefusedAsAnOverlap()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+
+        var response = await SaveOverrideAsync(
+            client,
+            day,
+            [
+                new { startMinute = NineAm, endMinute = Noon },
+                new { startMinute = NineAm, endMinute = Noon },
+            ]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.RuleOverlapsCode);
+        (await SeededPatternAsync(client)).Overrides.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// Finding 2 of the review: Windows carried [Required] and no length bound, so a body up to
     /// Kestrel's 30 MB cap was deserialized, projected into a tuple sequence and sorted before
     /// anything refused it. Seven is one past what a day can carry, which is the boundary worth
