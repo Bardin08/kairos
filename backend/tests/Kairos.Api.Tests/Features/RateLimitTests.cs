@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 using Shouldly;
 
@@ -36,6 +37,12 @@ public class RateLimitTests
     private const string ReadPermitsKey =
         $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.ReadPermits)}";
 
+    private const string MaxPartitionsKey =
+        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.MaxPartitions)}";
+
+    private const string WindowKey =
+        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.Window)}";
+
     private const string UnknownSlug = "no-such-link";
 
     /// <summary>Parsed rather than formatted, so nothing about the instant depends on the clock.</summary>
@@ -48,13 +55,7 @@ public class RateLimitTests
     private const string BookerEmail = "vlad@example.com";
     private const string BookerZone = "Europe/Warsaw";
 
-    private const string MaxPartitionsKey =
-        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.MaxPartitions)}";
-
-    private const string WindowKey =
-        $"{RateLimitOptions.SectionName}:{nameof(RateLimitOptions.Window)}";
-
-    /// <summary>Three callers arriving through the same proxy, from the documentation ranges.</summary>
+    /// <summary>Two callers arriving through the same proxy, from the documentation ranges.</summary>
     private const string FirstCaller = "203.0.113.9";
 
     private const string SecondCaller = "198.51.100.4";
@@ -62,8 +63,29 @@ public class RateLimitTests
     /// <summary>Room for one caller, so the next one is the one past the cap.</summary>
     private const int RememberOne = 1;
 
+    /// <summary>A budget of one, so the request after the first is refused with the window running.</summary>
+    private const int SinglePermit = 1;
+
+    /// <summary>What a refused caller has left.</summary>
+    private const int NoneLeft = 0;
+
+    /// <summary>
+    /// Zero, written as configuration is written. Every one of the three settings is unusable at
+    /// this value, which is what the startup validation exists to say out loud.
+    /// </summary>
+    private const string Unusable = "0";
+
+    /// <summary>The smallest honest Retry-After, and what a truncating cast answers as zero.</summary>
+    private const int WholeSecond = 1;
+
+    /// <summary>
+    /// One second, so every refusal against it falls inside the window's last second — the case
+    /// where rounding the remainder down and rounding it up give different answers.
+    /// </summary>
+    private static readonly TimeSpan BriefWindow = TimeSpan.FromSeconds(WholeSecond);
+
     [Fact]
-    public async Task CreateBooking_PastTheWindowsPermits_IsRefusedWith429AndRetryAfter()
+    public async Task CreateBooking_PastTheWindowsPermits_IsRefusedWith429RetryAfterAndHeaders()
     {
         using var app = new KairosApp();
         using var client = ShippingLimit(app);
@@ -78,6 +100,11 @@ public class RateLimitTests
 
         refused.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
         refused.Headers.RetryAfter.ShouldNotBeNull();
+
+        // The refusal states the budget as well, and OnRejected is the only place that can: the
+        // middleware publishing them on the accepted path never runs for a request turned away.
+        HeaderOf(refused, RateLimitPolicies.LimitHeader).ShouldBe(WritePermits);
+        HeaderOf(refused, RateLimitPolicies.RemainingHeader).ShouldBe(NoneLeft);
 
         var body = await refused.Content.ReadFromJsonAsync<JsonElement>(
             TestContext.Current.CancellationToken);
@@ -100,12 +127,50 @@ public class RateLimitTests
         // Somewhere inside the window that has just started, which is the only claim a caller can
         // act on and the one a dropped header would quietly stop making.
         HeaderOf(first, RateLimitPolicies.ResetHeader)
-            .ShouldBeInRange(1, (int)RateLimitOptions.DefaultWindow.TotalSeconds);
+            .ShouldBeInRange(WholeSecond, (int)RateLimitOptions.DefaultWindow.TotalSeconds);
 
         var second = await AttemptAsync(client);
         spent++;
 
         HeaderOf(second, RateLimitPolicies.RemainingHeader).ShouldBe(WritePermits - spent);
+    }
+
+    /// <summary>
+    /// A refusal inside the window's last second still asks for a whole one. The metadata is the
+    /// remainder of the window, so truncating it answers <c>Retry-After: 0</c> to precisely the
+    /// caller the limiter has just decided is asking too often — an instruction to come straight
+    /// back, which is the storm the limit exists to stop. Against a one-second window every
+    /// refusal is that case, so this pins the rounding rather than hoping to catch it.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_RefusedInsideTheWindowsLastSecond_RoundsRetryAfterUpNotToZero()
+    {
+        using var app = new KairosApp();
+        var host = ShippingLimitHost(app).WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting(WritePermitsKey, Text(SinglePermit));
+            builder.UseSetting(WindowKey, BriefWindow.ToString());
+        });
+
+        // Warmed up on another caller's partition, so that host startup sits outside the pair of
+        // requests below — they have to land within one second of each other to prove anything.
+        using var warmUp = ForwardedClient(host, FirstCaller);
+        await AttemptAsync(warmUp);
+
+        using var client = ForwardedClient(host, SecondCaller);
+        await AttemptAsync(client);
+
+        var refused = await AttemptAsync(client);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+
+        // Asserted apart rather than through a null-conditional, which would quietly skip the
+        // comparison on the absent header this is here to notice.
+        var retryAfter = refused.Headers.RetryAfter;
+        retryAfter.ShouldNotBeNull();
+        retryAfter.Delta.ShouldBe(BriefWindow);
+
+        HeaderOf(refused, RateLimitPolicies.ResetHeader).ShouldBe(WholeSecond);
     }
 
     /// <summary>
@@ -144,9 +209,7 @@ public class RateLimitTests
 
         // One host, two clients: the limiter they are throttled by has to be the same one, or
         // this passes for the wrong reason.
-        var host = ShippingLimitHost(app).WithWebHostBuilder(builder => builder.ConfigureServices(
-            services => services.AddSingleton<IStartupFilter, LoopbackPeer>()));
-
+        var host = ShippingLimitHost(app);
         using var exhausted = ForwardedClient(host, FirstCaller);
         using var arriving = ForwardedClient(host, SecondCaller);
 
@@ -157,11 +220,13 @@ public class RateLimitTests
 
         (await AttemptAsync(exhausted)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
 
+        var spent = 0;
         var first = await AttemptAsync(arriving);
+        spent++;
 
         // Admitted, and against a budget nothing has spent from but this one request.
         first.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        HeaderOf(first, RateLimitPolicies.RemainingHeader).ShouldBe(WritePermits - 1);
+        HeaderOf(first, RateLimitPolicies.RemainingHeader).ShouldBe(WritePermits - spent);
     }
 
     /// <summary>
@@ -174,7 +239,7 @@ public class RateLimitTests
     public async Task CreateBooking_FromACallerPastTheRememberedPartitions_IsLimitedWithoutHeaders()
     {
         using var app = new KairosApp();
-        var host = RememberingOneCaller(app, RateLimitOptions.DefaultWindow);
+        var host = RememberingOneCaller(app);
 
         using var remembered = ForwardedClient(host, FirstCaller);
         using var forgotten = ForwardedClient(host, SecondCaller);
@@ -193,24 +258,44 @@ public class RateLimitTests
         (await AttemptAsync(forgotten)).StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
     }
 
-    /// <summary>A host that remembers one caller, over a window of the given length.</summary>
-    private static WebApplicationFactory<KairosDbContext> RememberingOneCaller(
-        KairosApp app,
-        TimeSpan window) =>
-        ShippingLimitHost(app).WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting(MaxPartitionsKey, Text(RememberOne));
-            builder.UseSetting(WindowKey, window.ToString());
-            builder.ConfigureServices(
-                services => services.AddSingleton<IStartupFilter, LoopbackPeer>());
-        });
+    /// <summary>
+    /// A limit that cannot work stops the process instead of being discovered later. Zero permits
+    /// or a zero window throw from the limiter's own constructor, which without this is a 500 on
+    /// every anonymous request for as long as the deployment lasts; zero remembered partitions
+    /// throws nothing at all and merely turns every <c>RateLimit-*</c> header off in silence. The
+    /// third is why this is validated rather than left to fail loudly on its own.
+    /// </summary>
+    [Theory]
+    [InlineData(WritePermitsKey)]
+    [InlineData(ReadPermitsKey)]
+    [InlineData(WindowKey)]
+    [InlineData(MaxPartitionsKey)]
+    public void CreateClient_WithAnUnusableRateLimitSetting_FailsAtStartup(string key)
+    {
+        using var app = new KairosApp();
+        var host = ShippingLimitHost(app).WithWebHostBuilder(
+            builder => builder.UseSetting(key, Unusable));
 
-    /// <summary>A host at the shipping limits rather than the ones the harness raises.</summary>
+        Should.Throw<OptionsValidationException>(() => host.CreateClient());
+    }
+
+    /// <summary>A host that remembers one caller, so the second one arrives past the cap.</summary>
+    private static WebApplicationFactory<KairosDbContext> RememberingOneCaller(KairosApp app) =>
+        ShippingLimitHost(app).WithWebHostBuilder(
+            builder => builder.UseSetting(MaxPartitionsKey, Text(RememberOne)));
+
+    /// <summary>
+    /// A host at the shipping limits rather than the ones the harness raises, whose connections
+    /// carry the peer <see cref="LoopbackPeer"/> lends them. Every test here runs on one, so there
+    /// is a single place that knows how this harness stands in for a proxy.
+    /// </summary>
     private static WebApplicationFactory<KairosDbContext> ShippingLimitHost(KairosApp app) =>
         app.WithWebHostBuilder(builder =>
         {
             builder.UseSetting(WritePermitsKey, Text(WritePermits));
             builder.UseSetting(ReadPermitsKey, Text(ReadPermits));
+            builder.ConfigureServices(
+                services => services.AddSingleton<IStartupFilter, LoopbackPeer>());
         });
 
     private static HttpClient ShippingLimit(KairosApp app) => ShippingLimitHost(app).CreateClient();
