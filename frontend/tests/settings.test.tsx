@@ -32,7 +32,7 @@ const UTC = 'UTC'
 const INVALID_ATTRIBUTE_SELECTOR = '[data-invalid="true"]'
 
 const SEEDED_HOLD_HOURS = 48
-const TWELVE_HOURS = 12
+const NEW_HOLD_HOURS = 12
 
 /** Not a shorter hold. A proposal that lapsed before it was sent holds nothing. */
 const NO_HOLD = '0'
@@ -108,13 +108,13 @@ test('the proposal hold is set in hours and sent with the rest', async () => {
   render(<Settings />)
 
   fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
-    target: { value: String(TWELVE_HOURS) },
+    target: { value: String(NEW_HOLD_HOURS) },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   await waitFor(() =>
     expect(vi.mocked(saveSettings)).toHaveBeenCalledWith(
-      expect.objectContaining({ proposalHoldHours: TWELVE_HOURS }),
+      expect.objectContaining({ proposalHoldHours: NEW_HOLD_HOURS }),
     ),
   )
 })

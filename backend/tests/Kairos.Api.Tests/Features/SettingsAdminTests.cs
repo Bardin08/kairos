@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Persistence.Entities;
@@ -13,7 +14,7 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The organizer's zone and the four globals, and the one promise the screen makes out loud:
+/// The organizer's zone, every global the screen writes, and the one promise it makes out loud:
 /// changing the zone moves the wall clock availability is described in and moves no booking.
 /// </summary>
 public class SettingsAdminTests
@@ -91,8 +92,12 @@ public class SettingsAdminTests
         settings.Overrides.StartIncrementMinutes.ShouldBe(0);
     }
 
+    /// <summary>
+    /// Every value the operator sets, written and read back in one round trip — the four limits
+    /// and the proposal hold, which the same response carries and the override counts do not.
+    /// </summary>
     [Fact]
-    public async Task SaveSettings_WritesAllFourGlobals_AndTheyComeBackOnTheRead()
+    public async Task SaveSettings_WritesEverySetting_AndTheyComeBackOnTheRead()
     {
         using var app = new KairosApp();
         using var client = app.CreateOperatorClient();
@@ -100,11 +105,18 @@ public class SettingsAdminTests
         await client.PutAsJsonAsync(SettingsPath, Body(Warsaw), TestContext.Current.CancellationToken);
 
         var settings = await ReadAsync(client);
+        var payload = await client.GetFromJsonAsync<JsonElement>(
+            SettingsPath, TestContext.Current.CancellationToken);
 
         settings.MarginMinutes.ShouldBe(NewMargin);
         settings.MinNoticeMinutes.ShouldBe(NewMinNotice);
         settings.DailyCap.ShouldBe(NewDailyCap);
         settings.StartIncrementMinutes.ShouldBe(NewStartIncrement);
+        settings.ProposalHoldHours.ShouldBe(NewProposalHold);
+        // The hold is a global like the four above it and not a limit a link may override, so it
+        // rides on this response with no count beside it. A fifth entry here would mean the link
+        // editor had grown a control for something the schema does not model.
+        payload.GetProperty("overrides").TryGetProperty("proposalHoldHours", out _).ShouldBeFalse();
     }
 
     /// <summary>
@@ -146,24 +158,6 @@ public class SettingsAdminTests
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await ReadAsync(client)).StartIncrementMinutes
             .ShouldBe(SchedulingDefaults.StartIncrementMinutes);
-    }
-
-    /// <summary>
-    /// The fifth value, saved and read back. It is not one of the four a link may override — a
-    /// hold belongs to the proposal mechanism rather than to a link's own limits — so it rides on
-    /// this response with no entry in the override counts.
-    /// </summary>
-    [Fact]
-    public async Task SaveSettings_AProposalHold_IsStoredAndReadBack()
-    {
-        using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
-
-        var saved = await client.PutAsJsonAsync(
-            SettingsPath, Body(Utc), TestContext.Current.CancellationToken);
-
-        saved.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await ReadAsync(client)).ProposalHoldHours.ShouldBe(NewProposalHold);
     }
 
     /// <summary>

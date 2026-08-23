@@ -34,9 +34,9 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
 ]
 
 /**
- * Not a `LimitKey`, and the difference is the point: no link overrides a hold,
- * so it has no override count and no row in the link editor. It is drawn with
- * the four because it is the same control, not the same kind of setting.
+ * A global default like the four, and deliberately not a `LimitKey`: those are
+ * the limits a link may override, and a hold is not one of them. So it saves
+ * on this screen, has no override count, and gets no row in the link editor.
  */
 const PROPOSAL_HOLD = 'proposalHoldHours'
 
@@ -96,8 +96,8 @@ function draftOf(settings: OperatorSettings): Draft {
 }
 
 /**
- * The organizer's zone, the four global defaults, the theme, and the way to
- * Part B's integrations.
+ * The organizer's zone, the global defaults, the theme, and the way to Part
+ * B's integrations.
  *
  * Everything here is visited about twice a year, which is why it is one screen
  * behind one secondary destination rather than four tabs.
@@ -136,7 +136,7 @@ export default function Settings() {
 
     // Its own request, and its own failure: the picker's options are every zone
     // there is, and the page is still usable without them — the current zone
-    // stays selected and the four defaults still save.
+    // stays selected and the defaults still save.
     listTimeZones(controller.signal)
       .then(setZones)
       .catch(() => {
@@ -269,26 +269,25 @@ export default function Settings() {
           <div className="card card-pad">
             <div className="rowgroup">
               {FIELD_KEYS.map((key) => {
-                const limit = FIELD_COPY[key]
+                const copy = FIELD_COPY[key]
                 const value = draft[key]
-                const invalid = whole(value, limit.floor) === null
-                // Nothing overrides a hold, so there is no count beside it.
+                const invalid = whole(value, copy.floor) === null
                 const note = key === PROPOSAL_HOLD ? null : overrideNote(settings.overrides[key])
 
                 return (
                   <div className="field-row" data-invalid={invalid ? 'true' : undefined} key={key}>
                     <div className="field-row-label">
-                      <label htmlFor={`${zoneId}-${key}`}>{limit.label}</label>
+                      <label htmlFor={`${zoneId}-${key}`}>{copy.label}</label>
                       <p className="fine">
-                        {limit.help}
+                        {copy.help}
                         {note === null ? '' : ` ${note}`}
                       </p>
                       {invalid && (
                         <p className="field-error" role="alert">
                           <AlertIcon />
-                          {limit.floor === ZERO_FLOOR
-                            ? `A whole number of ${limit.unit}, and never below zero.`
-                            : `A whole number of ${limit.unit}, and at least ${limit.floor}.`}
+                          {copy.floor === ZERO_FLOOR
+                            ? `A whole number of ${copy.unit}, and never below zero.`
+                            : `A whole number of ${copy.unit}, and at least ${copy.floor}.`}
                         </p>
                       )}
                     </div>
@@ -299,12 +298,12 @@ export default function Settings() {
                           id={`${zoneId}-${key}`}
                           type="number"
                           inputMode="numeric"
-                          min={limit.floor}
+                          min={copy.floor}
                           value={value}
                           onChange={(event) => change(key, event.target.value)}
                         />
                         <span className="affix-unit" aria-hidden="true">
-                          {limit.short}
+                          {copy.short}
                         </span>
                       </span>
                     </div>

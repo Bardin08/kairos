@@ -16,7 +16,6 @@ vi.mock('../src/routes/admin/adminSettings', async (importOriginal) => ({
 }))
 
 const OPERATOR = 'Vlad Bardin'
-const HOLD_HOURS = 48
 
 const settings: Settings = {
   timeZone: 'UTC',
@@ -25,7 +24,7 @@ const settings: Settings = {
   minNoticeMinutes: 120,
   dailyCap: 4,
   startIncrementMinutes: 30,
-  proposalHoldHours: HOLD_HOURS,
+  proposalHoldHours: 48,
   overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
 }
 

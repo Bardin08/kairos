@@ -35,7 +35,6 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 
 const PATTERN_ID = 'b0a5f0e2-0000-7000-8000-000000000001'
 const UNAVAILABLE = 503
-const HOLD_HOURS = 48
 
 // Minutes from local midnight, which is what a rule and an override hold.
 const MINUTES_PER_HOUR = 60
@@ -134,7 +133,7 @@ beforeEach(() => {
     minNoticeMinutes: 0,
     dailyCap: 0,
     startIncrementMinutes: 30,
-    proposalHoldHours: HOLD_HOURS,
+    proposalHoldHours: 48,
     overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
   })
 })
