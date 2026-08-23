@@ -6,26 +6,21 @@ using Microsoft.AspNetCore.Routing;
 namespace Kairos.Api.Shared;
 
 /// <summary>
-/// The two questions an orchestrator asks — is this process alive, and can it serve — on two paths
-/// that answer them differently. Both are anonymous, because a kubelet holds no session.
+/// The two questions an orchestrator asks — alive, and able to serve — on two paths that answer
+/// differently. Both anonymous, because a kubelet holds no session.
 /// </summary>
 /// <remarks>
-/// Outside <see cref="ApiVersions.V1"/> deliberately. A probe path is written into a deployment
-/// manifest that is edited by hand and rarely re-read, so a version bump must not be able to move
-/// it out from under a running cluster.
+/// Outside <see cref="ApiVersions.V1"/> deliberately: a probe path lives in a hand-edited
+/// deployment manifest, so a version bump must not move it out from under a running cluster.
 /// </remarks>
 public static class HealthEndpoints
 {
-    /// <summary>Is the process alive.</summary>
     public const string LivenessPath = "/healthz";
 
-    /// <summary>Can the process serve.</summary>
     public const string ReadinessPath = "/readyz";
 
-    /// <summary>What a check has to be tagged with to be part of the readiness answer.</summary>
     public const string ReadinessTag = "ready";
 
-    /// <summary>The name the database check reports under.</summary>
     public const string DatabaseCheckName = "database";
 
     /// <summary>
@@ -47,10 +42,10 @@ public static class HealthEndpoints
     public static void MapHealth(this IEndpointRouteBuilder app)
     {
         // The predicate is the whole of liveness: it selects no check, so this route runs nothing
-        // and answers 200 because the process answered at all. That is the question a kubelet is
-        // asking, and the only one a restart can fix. A liveness probe that consulted the database
-        // would restart a healthy pod over a lock held for a second, turning a stall into an
-        // outage — and it would do it hardest under exactly the load that caused the lock.
+        // and answers 200 because the process answered at all. That is the only question a restart
+        // can fix. A liveness probe that consulted the database would restart a healthy pod over a
+        // lock held for a second, turning a stall into an outage — hardest under exactly the load
+        // that caused the lock.
         app.MapHealthChecks(LivenessPath, new HealthCheckOptions { Predicate = _ => false })
             .WithMetadata(new HttpMethodMetadata(ProbeMethods));
 

@@ -1,13 +1,13 @@
 namespace Kairos.Api.Shared;
 
 /// <summary>
-/// One publisher on the operator's alert channel. Registered into the container; the route
-/// collects every one of them and knows what none of them are.
+/// One publisher on the operator's alert channel. The route collects every one registered in the
+/// container and knows none of them by name.
 /// </summary>
 /// <remarks>
-/// Collect, never throw. A source that cannot answer returns nothing, because one broken publisher
-/// must not blank a panel that another has something true to say on — the same lesson the
-/// Integrations listing learned when a single unreadable credential took the whole screen with it.
+/// Collect, never throw: a source that cannot answer returns nothing, so one broken publisher does
+/// not blank a panel another has something true to say on — the lesson of a single unreadable
+/// credential taking the whole Integrations listing with it.
 /// </remarks>
 public interface IOperatorAlertSource
 {

@@ -11,8 +11,6 @@ public sealed class CalendarEntryConfiguration : IEntityTypeConfiguration<Calend
     {
         builder.HasKey(entry => entry.Id);
 
-        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
-        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
         builder.Property(entry => entry.Id)
             .HasValueGenerator<Uuid7ValueGenerator>();
 

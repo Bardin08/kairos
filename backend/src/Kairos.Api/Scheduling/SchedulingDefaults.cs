@@ -1,9 +1,9 @@
 namespace Kairos.Api.Scheduling;
 
 /// <summary>
-/// The seeded global limits. Referenced by the Settings seed and by every test that needs to
-/// know what "the global" is, so the numbers exist once rather than as literals scattered
-/// across fixtures.
+/// The seeded global limits, referenced by the Settings seed and by every test that needs to know
+/// what "the global" is, so the numbers exist once rather than as literals scattered across
+/// fixtures.
 /// </summary>
 public static class SchedulingDefaults
 {

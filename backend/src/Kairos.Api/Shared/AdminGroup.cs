@@ -1,53 +1,38 @@
 namespace Kairos.Api.Shared;
 
-/// <summary>
-/// The authorization policy and the route prefix that stand between an anonymous caller and the
-/// operator's workbench.
-/// </summary>
 public static class AdminGroup
 {
     public const string Policy = "admin";
 
     /// <summary>
-    /// Every admin API route hangs off this and nothing else does. One place to read when asking
-    /// "what is public?", which is the question that gets answered wrongly when the answer is
-    /// scattered across twenty MapGet calls.
+    /// Every admin API route hangs off this prefix and nothing else does, so one file answers "what
+    /// is public?".
     /// </summary>
     /// <remarks>
-    /// Six routes are outside it, none of them by oversight, and they are named here so this file
-    /// stays the whole answer. <c>GET /admin/login</c> and <c>GET /admin/logout</c> are the
-    /// challenge and the sign-out: nothing behind the gate could start either, since a challenge
-    /// is a browser navigation to another origin.
-    /// <c>GET /api/v1/integrations/{provider}/callback</c> is the OAuth return leg — its path is
-    /// registered byte-for-byte with the provider, and the caller is a browser holding that
-    /// provider's redirect rather than a session of ours, so it is guarded by <c>state</c>. And
-    /// <c>GET /api/v1/sign-in</c> answers where to sign in, for a browser that has just been
-    /// refused: behind the gate it would 401 at exactly the reader it exists for, and it carries
-    /// one string that is safe to hand anybody. See <see cref="Features.Admin.SignInEndpoints"/>.
-    /// <c>/healthz</c> and <c>/readyz</c> are the liveness and readiness probes, answering GET and
-    /// HEAD and refusing every other verb: anonymous because a kubelet holds no session, and
-    /// outside the version prefix as well as outside this one because their paths are written into
-    /// a deployment manifest that nobody re-reads, so a version bump must not move them. See
-    /// <see cref="HealthEndpoints"/>.
-    /// Everything else that an operator can reach is under this prefix.
+    /// Six routes sit outside it, each deliberately, and each unlimited for its own reason:
+    /// <list type="bullet">
+    /// <item><c>GET /admin/login</c> — the challenge, a browser navigation to another origin that
+    /// nothing behind the gate could start. Issues only a redirect.</item>
+    /// <item><c>GET /admin/logout</c> — the sign-out, a redirect for the same reason.</item>
+    /// <item><c>GET /api/v1/integrations/{provider}/callback</c> — the OAuth return leg, its path
+    /// registered byte-for-byte with the provider and its caller holding that provider's redirect
+    /// rather than our session. Signed <c>state</c> guards it: without one, an HMAC check and a log
+    /// line, never an outbound request.</item>
+    /// <item><c>GET /api/v1/sign-in</c> — where to sign in, for a browser just refused; behind the
+    /// gate it would 401 at the one reader it exists for. One configured string, no database. See
+    /// <see cref="Features.Admin.SignInEndpoints"/>.</item>
+    /// <item><c>/healthz</c> — liveness, GET and HEAD only, running no check at all. Anonymous
+    /// because a kubelet holds no session.</item>
+    /// <item><c>/readyz</c> — readiness, one existence query on a single-row table. Both probes are
+    /// polled on a fixed interval, refusing one restarts a working pod, and both sit outside the
+    /// version prefix, their paths being in a manifest a version bump must not move. See
+    /// <see cref="HealthEndpoints"/>.</item>
+    /// </list>
     /// <para>
-    /// Nothing here carries a rate limit, and that is a decision rather than an omission. Every
-    /// route behind this policy is reachable only with a session that a member of the operator's
-    /// group can hold, and the workbench works in bursts — a pattern editor saves a week a row at
-    /// a time. A limit here would throttle the operator to defend against the operator. The
-    /// anonymous routes are the ones with budgets, declared at their mapping sites; see
-    /// <see cref="Security.RateLimitPolicies"/>.
-    /// </para>
-    /// <para>
-    /// The six routes named above carry no limit either, and each has its own reason: the
-    /// challenge and the sign-out only issue a redirect, <c>GET /api/v1/sign-in</c> answers one
-    /// configured string and touches no database, and the OAuth callback verifies its signed
-    /// <c>state</c> before it will speak to a provider — so a caller without one buys an HMAC check
-    /// and a log line, never an outbound request. The two probes are polled by the orchestrator on
-    /// a fixed interval, and refusing one is how a working pod gets restarted or taken out of
-    /// service; liveness runs no check at all, and readiness costs one existence query against a
-    /// single-row table. This paragraph is the record of that, because six anonymous routes with
-    /// nothing said about them read as an oversight.
+    /// Nothing behind the policy is limited either, by decision: it needs a session only the
+    /// operator's group holds, and the workbench works in bursts — a pattern editor saves a week a
+    /// row at a time — so a limit would throttle the operator against the operator. The budgets are
+    /// on the anonymous routes, at their mapping sites; see <see cref="Security.RateLimitPolicies"/>.
     /// </para>
     /// </remarks>
     public static RouteGroupBuilder MapAdmin(this WebApplication app) =>

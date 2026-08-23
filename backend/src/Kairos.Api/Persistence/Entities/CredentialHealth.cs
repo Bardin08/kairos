@@ -1,15 +1,14 @@
 namespace Kairos.Api.Persistence.Entities;
 
 /// <summary>
-/// Whether a stored credential can still be used, as a property of the credential rather than of
-/// the provider that discovered it. A second provider inherits this by existing.
+/// Whether a stored credential can still be used — a property of the credential rather than of the
+/// provider that discovered it, so a second provider inherits it by existing.
 /// </summary>
 /// <remarks>
-/// Two values, spaced like <see cref="IntegrationProvider"/> so a third can be inserted without a
-/// migration. "Unknown" was considered and dropped: a credential that has been connected and
-/// never used is <see cref="Healthy"/> with a null <see cref="IntegrationCredential.LastSuccessAt"/>,
-/// and that pair already says "connected, never proven" without a third state every reader would
-/// have to decide how to render.
+/// Spaced like <see cref="IntegrationProvider"/> so a third can be inserted without a migration.
+/// "Unknown" was considered and dropped: <see cref="Healthy"/> with a null
+/// <see cref="IntegrationCredential.LastSuccessAt"/> already says "connected, never proven", with no
+/// third state for every reader to decide how to render.
 /// </remarks>
 public enum CredentialHealth
 {

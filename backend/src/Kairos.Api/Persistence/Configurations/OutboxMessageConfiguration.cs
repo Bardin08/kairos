@@ -11,8 +11,6 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
     {
         builder.HasKey(message => message.Id);
 
-        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
-        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
         builder.Property(message => message.Id)
             .HasValueGenerator<Uuid7ValueGenerator>();
 
@@ -24,10 +22,10 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
             .HasForeignKey(message => message.BookingId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // This is why MeetingEndedPoller needs no "have I already enqueued this?" query: it
-        // enqueues, and a duplicate insert violates the constraint and is swallowed. A schema
-        // guarantee beats a check-then-act — the same reasoning that put BEGIN IMMEDIATE in
-        // Part A rather than an application-level lock.
+        // Why MeetingEndedPoller needs no "have I already enqueued this?" query: it enqueues, and
+        // a duplicate insert violates the constraint and is swallowed. A schema guarantee beats a
+        // check-then-act — the same reasoning that put BEGIN IMMEDIATE in the writer rather than an
+        // application-level lock.
         builder.HasIndex(message => new { message.BookingId, message.Type })
             .IsUnique();
 

@@ -20,7 +20,7 @@ public sealed class Booking
 
     public required string ManageTokenHash { get; set; }
 
-    /// <summary>Incremented on reschedule. Part B's .ics SEQUENCE reads this.</summary>
+    /// <summary>Incremented on reschedule. The .ics SEQUENCE reads this.</summary>
     public int Sequence { get; set; }
 
     public long CreatedAt { get; set; }
@@ -30,9 +30,7 @@ public sealed class Booking
     /// <summary>
     /// Why the operator called it off, in their words, and null for every booking the invitee
     /// cancelled themselves. The null is the record of which of the two happened, which is why
-    /// there is no second column saying who. Nothing writes it yet — the admin cancel in the next
-    /// pull request does; the column ships here because all three of this feature's schema changes
-    /// belong in one migration.
+    /// there is no second column saying who.
     /// </summary>
     public string? CancellationReason { get; set; }
 

@@ -8,12 +8,10 @@ using Microsoft.Extensions.Options;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// The rate limit as the wire sees it: which endpoints carry one, what every response tells a
-/// caller about where it stands, and what a refusal looks like. The budget is declared at each
-/// mapping site as endpoint metadata, so "which routes are limited?" is answered by reading the
-/// mapping and not by reading this file. The anonymous routes that declare none are the six
-/// outside the admin prefix, and <see cref="Shared.AdminGroup"/>'s remarks are where that decision
-/// is recorded.
+/// The rate limit as the wire sees it: what a response tells a caller about where it stands, and
+/// what a refusal looks like. Budgets are declared at each mapping site as endpoint metadata, so
+/// "which routes are limited?" is answered by the mapping, not this file. The six anonymous routes
+/// that declare none are outside the admin prefix; <see cref="Shared.AdminGroup"/> records why.
 /// </summary>
 public static class RateLimitPolicies
 {
@@ -28,14 +26,12 @@ public static class RateLimitPolicies
         "Too many requests. Wait for the window named in the headers and try again.";
 
     /// <summary>
-    /// The partition of a caller Kestrel can name no address for. That is every request through
-    /// the in-memory test host, and in production it is a listener on a Unix domain socket or a
-    /// named pipe — nginx in front of Kestrel over a UDS is an ordinary self-hosted shape. There
-    /// every caller falls into this single partition, so the whole site shares one budget, and
-    /// <c>UseForwardedHeaders</c> declines to read <c>X-Forwarded-For</c> as well, because a peer
-    /// that does not exist is in nobody's <c>KnownProxies</c>. Hence
-    /// <see cref="RateLimitBudget.WarnAboutMissingPeerOnce"/>: the failure is total, and otherwise
-    /// completely silent.
+    /// The partition of a caller Kestrel can name no address for: every request through the
+    /// in-memory test host, and in production a Unix domain socket or named pipe — nginx over a UDS
+    /// is an ordinary self-hosted shape. Every caller then falls into this one partition and the
+    /// site shares one budget, and <c>UseForwardedHeaders</c> declines <c>X-Forwarded-For</c> too,
+    /// a nonexistent peer being in nobody's <c>KnownProxies</c>. Hence
+    /// <see cref="RateLimitBudget.WarnAboutMissingPeerOnce"/>: total, and otherwise silent.
     /// </summary>
     private const string UnknownCaller = "unknown";
 
@@ -43,10 +39,9 @@ public static class RateLimitPolicies
 
     public static IServiceCollection AddRateLimitPolicies(this IServiceCollection services)
     {
-        // Validated, and validated at start: every other configuration this application cannot run
-        // without stops the process rather than each request. A permit count or a window at zero
-        // would refuse every anonymous caller forever, which is an outage wearing a limiter's
-        // clothes, and it would do it silently.
+        // Validated at start, like every other configuration this application cannot run without:
+        // a permit count or a window at zero would refuse every anonymous caller forever, silently
+        // — an outage wearing a limiter's clothes.
         services.AddOptions<RateLimitOptions>()
             .BindConfiguration(RateLimitOptions.SectionName)
             .Validate(
@@ -131,11 +126,10 @@ public static class RateLimitPolicies
 
     private static void Publish(HttpContext context, RateLimitReading reading)
     {
-        // Registered on the response rather than written now, and not for the reason it looks
-        // like: UseExceptionHandler clears the response before re-executing the pipeline, and
-        // every DomainException in this application goes through that. Headers written eagerly
-        // would survive an ordinary 200 and vanish from exactly the 404, 409 and 400 that a client
-        // hammering this API most needs them on.
+        // Registered on the response rather than written now: UseExceptionHandler clears the
+        // response before re-executing the pipeline, and every DomainException here goes through
+        // that. Headers written eagerly would survive an ordinary 200 and vanish from exactly the
+        // 404, 409 and 400 a client hammering this API most needs them on.
         context.Response.OnStarting(() =>
         {
             context.Response.Headers[LimitHeader] = Text(reading.Limit);

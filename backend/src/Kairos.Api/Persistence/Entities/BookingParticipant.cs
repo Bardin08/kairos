@@ -1,8 +1,8 @@
 namespace Kairos.Api.Persistence.Entities;
 
 /// <summary>
-/// A person on a booking. Extracted from Booking so that a second participant is a row rather
-/// than a migration. Part A writes exactly one, with the Booker role.
+/// A person on a booking. Extracted from Booking so a second participant is a row rather than a
+/// migration; today exactly one is written, with the Booker role.
 /// </summary>
 public sealed class BookingParticipant
 {
