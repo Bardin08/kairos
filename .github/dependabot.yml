@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # Three separate streams, so a frontend bump can be merged while a backend one
-  # waits. No auto-merge anywhere: every bump is a pull request a human reads,
+  # One stream per ecosystem, so a frontend bump can be merged while a backend
+  # one waits. No auto-merge anywhere: every bump is a pull request a human reads,
   # and CI has to be green before it lands like any other change.
   - package-ecosystem: nuget
     directory: /backend

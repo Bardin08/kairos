@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Assert the booking route's first load fits its gzipped budget.
+# Assert the booking route's first load fits its budgets: gzipped code and raw
+# font, each measured separately.
 #
 # The budget lives here and nowhere else — CI and scripts/verify.sh both call
 # this script rather than carrying their own copy of the number.
@@ -64,11 +65,9 @@ readonly BUDGET_GZIP_BYTES=76800
 # What is charged: only the fonts index.html PRELOADS, because those are what
 # the invitee blocks on. That list is read out of the built index.html rather
 # than kept here, for the same reason the chunk list is read out of the
-# manifest — a copy here would drift silently and the failure would look like a
-# regression rather than a stale list. Everything else in fonts/ is weighed and
-# printed as information: the latin-ext and cyrillic subsets arrive only when a
-# Polish or Ukrainian name is actually on the page, and Source Serif is one
-# heading loading after first paint.
+# manifest. Everything else in fonts/ is weighed and printed as information: the
+# latin-ext and cyrillic subsets arrive only when a Polish or Ukrainian name is
+# actually on the page, and Source Serif is one heading loading after first paint.
 #
 # Measured at 31,000 bytes when the type system landed — Source Sans 3 latin at
 # 28,740 plus the digits-only IBM Plex Mono subset at 2,260. The 1,768 bytes of

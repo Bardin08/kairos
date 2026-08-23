@@ -43,11 +43,8 @@ die() { printf 'ship: %s\n' "$1" >&2; exit 1; }
 #
 # `set -e` alone is not enough here. It dies with a bare git message and no idea
 # which step produced it, and it is suspended inside `if`/`while`/`&&` conditions
-# — which is exactly where a status gets lost. Worse, when a fetch fails the very
-# next commands succeed as no-ops: a rebase onto a stale origin/main reports
-# "up to date" and exits 0, and `git push --force-with-lease` with nothing to
-# push reports "Everything up-to-date" and exits 0. A swallowed fetch therefore
-# looks precisely like a clean rebase.
+# — which is exactly where a status gets lost, and where a swallowed fetch starts
+# looking like a clean rebase.
 git_or_die() {  # git_or_die <what-was-being-done> <git args...>
   local what="$1"; shift
   local output status=0
@@ -218,7 +215,7 @@ rebase_onto_main() {
 
   # Assert the rebase actually took. A rebase onto a stale origin/main exits 0
   # having done nothing, so success is proved by the invariant rather than by
-  # the exit code: after rebasing, origin/main must be an ancestor of HEAD.
+  # the exit code.
   if ! git merge-base --is-ancestor origin/main HEAD; then
     die "rebase of #$PR onto origin/main did not take — origin/main ($(git rev-parse --short origin/main)) is not an ancestor of HEAD ($(git rev-parse --short HEAD)); the working tree may be on a stale base"
   fi
