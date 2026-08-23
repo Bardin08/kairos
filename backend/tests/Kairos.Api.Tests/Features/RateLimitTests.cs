@@ -62,7 +62,6 @@ public class RateLimitTests
     /// <summary>A budget of one, so the request after the first is refused with the window running.</summary>
     private const int SinglePermit = 1;
 
-    /// <summary>What a refused caller has left.</summary>
     private const int NoneLeft = 0;
 
     /// <summary>

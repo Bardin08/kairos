@@ -31,7 +31,6 @@ public class HealthEndpointTests
 
     private const string SharedMemorySuffix = "-shm";
 
-    /// <summary>A check registered by something other than readiness, which is what it stands in for.</summary>
     private const string SomebodyElsesCheck = "somebody-elses-check";
 
     /// <summary>
@@ -230,11 +229,9 @@ public class HealthEndpointTests
     }
 
     /// <summary>
-    /// The status and what the endpoint said, together. The body is half the assertion because the
-    /// status alone does not distinguish a health endpoint from the single page: on a tree where
-    /// the front end has been built, an unmapped probe path is answered 200 by
-    /// <c>MapFallbackToFile</c>, and every OK here would go on passing over a route that no longer
-    /// exists.
+    /// The status and what the endpoint said, together. The body is half the assertion for the
+    /// reason given on the liveness test: a 200 alone is also what the single-page fallback
+    /// answers with, so every OK here would go on passing over a route that no longer exists.
     /// </summary>
     private static async Task ShouldReportAsync(
         HttpResponseMessage response,

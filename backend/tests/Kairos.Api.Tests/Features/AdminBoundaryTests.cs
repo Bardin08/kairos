@@ -35,7 +35,6 @@ namespace Kairos.Api.Tests.Features;
 /// </summary>
 public class AdminBoundaryTests
 {
-    /// <summary>A group the identity provider issues for something that is not this application.</summary>
     private const string ForeignGroup = "some-other-group";
 
     /// <summary>A second one, so a membership list can be a list rather than a pair.</summary>
@@ -105,14 +104,11 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// The old path answers nothing at all.
-    /// </summary>
-    /// <remarks>
     /// Worth pinning because the failure it guards against is quiet: a route left mapped in both
     /// places is a second, ungated way in that no test hits, and the whole reason these two moved
     /// is that <see cref="AdminGroup"/>'s docstring has to be readable as the whole answer to
     /// "what is public?".
-    /// </remarks>
+    /// </summary>
     [Fact]
     public async Task ListIntegrations_AtItsOldPathOutsideThePrefix_IsNotMappedAtAll()
     {

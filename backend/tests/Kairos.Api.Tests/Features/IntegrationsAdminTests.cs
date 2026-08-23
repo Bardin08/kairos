@@ -37,7 +37,6 @@ public class IntegrationsAdminTests
     private const string Google = "google";
     private const string AccountLabel = "operator@example.com";
 
-    /// <summary>A provider no build of this application has a connector for.</summary>
     private const string UnknownProvider = "bogus";
 
     /// <summary>2026-08-14T22:29:14Z. Any instant; nothing here reads a clock.</summary>
