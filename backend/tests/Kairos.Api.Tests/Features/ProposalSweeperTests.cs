@@ -201,6 +201,39 @@ public class ProposalSweeperTests
     }
 
     /// <summary>
+    /// The seam between two pull requests, driven through the real writer rather than by seeding
+    /// the state it leaves behind. The propose route closes a lapsed hold itself so the operator
+    /// can suggest again without waiting for a tick, and leaves the marker null on purpose — the
+    /// notice is handed here rather than swallowed. Nothing else pins that pairing, and it spans
+    /// two files that were written a pull request apart.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_AHoldTheProposeRouteClosedItself_IsStillAnnounced()
+    {
+        using var database = new TestDatabase();
+        var relay = new CountingRelay();
+        await using var provider = NewHost(database, relay);
+        var proposal = SeedProposal(database, LapsedAnHourAgo);
+
+        using (var scope = provider.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
+            var booking = context.BookingProposals.AsNoTracking()
+                .Single(row => row.Id == proposal).BookingId;
+
+            await new ProposalWriter(context, new FixedClock(Now))
+                .ExpireLapsedAsync(booking, Now, TestContext.Current.CancellationToken);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await NewSweeper(provider).SweepAsync(TestContext.Current.CancellationToken);
+
+        using var after = database.CreateContext();
+        after.BookingProposals.Single(row => row.Id == proposal).NotifiedAt.ShouldNotBeNull();
+        relay.Sent.ShouldBe(OneNotice);
+    }
+
+    /// <summary>
     /// Answered is answered, however long ago. A decline leaves the row in place with its expiry
     /// still running out underneath it, so a sweeper that looked only at the clock would reopen a
     /// closed question and tell the operator nobody had replied to a suggestion that was refused.

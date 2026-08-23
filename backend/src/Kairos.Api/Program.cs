@@ -248,11 +248,11 @@ builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 
 // Beside them rather than inside that pair: it runs on the same minute and notices something only
-// a clock can notice, but what it produces is a mail rather than a queued event. Availability does
-// not depend on it running — a hold whose expiry has passed has already stopped holding, in both
-// conflict readers — so a deployment where this never ticks has late mail and a correct calendar.
-// Re-proposing does depend on it today, which the sweeper's own remarks record as a defect on the
-// propose route rather than a job for this one.
+// a clock can notice, but what it produces is a mail rather than a queued event. Nothing depends on
+// it running. Availability never did — a hold whose expiry has passed has already stopped holding,
+// in both conflict readers — and re-proposing no longer does either, because the propose route
+// closes a lapsed hold itself and leaves the notice here. So a deployment where this never ticks
+// has late mail, and a calendar and a workbench that are both correct.
 builder.Services.AddHostedService<ProposalSweeper>();
 
 builder.Services.AddRateLimitPolicies();

@@ -18,12 +18,14 @@ namespace Kairos.Api.Features.Bookings;
 /// makes mail late and never makes availability wrong. What it owns is the part a WHERE clause
 /// cannot do: noticing, so somebody can be told.
 ///
-/// One thing does still wait on it, and it is a defect rather than the design. The propose route
-/// refuses a second suggestion while a row is Open and reads that state without the clock, so a
-/// lapsed hold goes on blocking the next suggestion until a tick closes it or the operator
-/// withdraws it by hand. Availability is right throughout; re-proposing is not. The fix belongs on
-/// that route — treat a lapsed row as not holding, the way every other reader here does — and not
-/// in another job for this one.
+/// Nor does re-proposing wait on it, though for one pull request it did. The filtered unique index
+/// over BookingId WHERE State = Open is a row rather than a predicate, so it is the one reader a
+/// clock cannot be folded into: a lapsed hold left Open goes on occupying the single slot the next
+/// suggestion needs. <see cref="ProposalWriter.ExpireLapsedAsync"/> closes it on the propose route
+/// itself, and deliberately leaves <see cref="BookingProposal.NotifiedAt"/> null — which hands the
+/// notice to this service rather than swallowing it, and is why the query below asks about that
+/// column rather than about the state alone. So nothing waits on this tick: a row it has not
+/// reached yet costs a late mail and nothing else.
 ///
 /// Registered beside <see cref="Integrations.Webhooks.MeetingEndedPoller"/> and ticking on its
 /// minute. It does not copy that service's sweep-at-startup and does not need to: a tick missed

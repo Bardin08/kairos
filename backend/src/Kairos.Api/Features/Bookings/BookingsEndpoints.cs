@@ -539,9 +539,11 @@ public static class BookingsEndpoints
     /// routes goes out as its own conditional UPDATE, so nothing here needs a tracked row and
     /// nothing can accidentally save the booking that rides along in the Include.
     ///
-    /// The participants ride along because <see cref="OperatorMailer"/> names the invitee, and an
-    /// absent collection there is not an error anybody sees: the composer throws inside the
-    /// mailer's own rule-14 swallow, the decline succeeds, and the operator is simply never told.
+    /// The participants ride along for two readers now — <see cref="BookerZoneOf"/>, which every
+    /// response here is rendered in, and <see cref="OperatorMailer"/>, which names the invitee.
+    /// The second is the one that fails quietly: an absent collection makes the composer throw
+    /// inside the mailer's own rule-14 swallow, so the decline still succeeds and the operator is
+    /// simply never told.
     /// </remarks>
     private static async Task<BookingProposal> FindProposalAsync(
         KairosDbContext context,
