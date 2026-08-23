@@ -26,6 +26,23 @@ public sealed class ProposalWriter(KairosDbContext context, IClock clock)
     private const int TokenBytes = 32;
     private const int SecondsPerHour = 60 * 60;
 
+    /// <summary>
+    /// A hold's state as of <paramref name="now"/>: the fold every reader of one has to apply.
+    /// </summary>
+    /// <remarks>
+    /// A hold whose expiry has passed has stopped holding, whether or not the sweeper has been
+    /// round to mark it <see cref="ProposalState.Expired"/> — that service mails the operator
+    /// about a lapse, it does not decide that one happened. Every surface draws
+    /// controls off this answer: the invitee's page puts Accept and Decline over an open one, the
+    /// operator's row puts Withdraw there. Two copies of the fold would drift into one of them
+    /// offering to close a hold the other has already given up on, so there is one, and it is
+    /// static because nothing about it needs the database or a clock of its own.
+    /// </remarks>
+    public static ProposalState StateAt(ProposalState state, long expiresAt, Instant now) =>
+        (state == ProposalState.Open) && (expiresAt <= now.ToUnixTimeSeconds())
+            ? ProposalState.Expired
+            : state;
+
     /// <summary>Adds the proposal and returns it with the plaintext token beside it.</summary>
     public (BookingProposal Proposal, string Token) Add(Booking booking, Instant start, int holdHours)
     {

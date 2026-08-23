@@ -64,6 +64,23 @@ public class MeetingsAdminTests
     private const string ThirdDay = "2030-09-11";
     private const string SeededTime = "T11:00:00Z";
 
+    /// <summary>Where a seeded hold suggests moving to, on the same day the meeting sits on.</summary>
+    private const string ProposedTime = "T14:00:00Z";
+
+    private const int SecondsPerHour = 60 * 60;
+
+    /// <summary>
+    /// How long ago a seeded hold was made. The expiry follows from it — a hold lasts
+    /// <see cref="SchedulingDefaults.ProposalHoldHours"/> from the moment it is minted — so these
+    /// are the only two facts a test has to state, and neither is written against a clock this
+    /// suite does not control.
+    /// </summary>
+    private const int HoursAgoStillOpen = 1;
+    private const int HoursAgoAlreadyLapsed = SchedulingDefaults.ProposalHoldHours + 1;
+
+    /// <summary>Older than either, so "the newest hold" has something to beat.</summary>
+    private const int HoursAgoOlderStill = SchedulingDefaults.ProposalHoldHours * 3;
+
     private static readonly Guid PatternId = Guid.CreateVersion7();
     private static readonly Guid LinkId = Guid.CreateVersion7();
     private static readonly Guid OtherLinkId = Guid.CreateVersion7();
@@ -247,6 +264,111 @@ public class MeetingsAdminTests
     }
 
     /// <summary>
+    /// The two facts the actions column cannot draw itself without.
+    /// </summary>
+    /// <remarks>
+    /// The hold, because a meeting under proposal offers Withdraw where an ordinary one offers
+    /// Propose, and the alternative to putting it on the row is a request per row. The slug,
+    /// because choosing the time to suggest is a read of that link's own slots — <c>GET
+    /// /links/{slug}/slots</c> is keyed on the slug and takes no link id at all, so a row carrying
+    /// only <see cref="MeetingResponse.LinkId"/> cannot ask the question.
+    /// </remarks>
+    [Fact]
+    public async Task ListMeetings_ForAMeetingUnderAnOpenProposal_CarriesTheHoldAndTheLinksSlug()
+    {
+        using var app = NewApp();
+        var booking = Meeting(LinkId, FirstDay);
+        var proposal = Hold(booking.Id, ProposalState.Open, HoursAgoStillOpen);
+        app.Seed(context =>
+        {
+            context.Bookings.Add(booking);
+            context.BookingProposals.Add(proposal);
+        });
+
+        using var client = app.CreateOperatorClient();
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.Slug.ShouldBe(Slug);
+        meeting.Proposal.ShouldNotBeNull();
+        meeting.Proposal.Id.ShouldBe(proposal.Id);
+        meeting.Proposal.Start.ShouldBe(FirstDay + ProposedTime);
+        meeting.Proposal.ExpiresAt.ShouldBe(Format(proposal.ExpiresAt));
+        meeting.Proposal.State.ShouldBe(nameof(ProposalState.Open).ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// A meeting nobody has proposed anything for carries no hold, rather than a hold in some
+    /// resting state. The row draws Propose off exactly this, and a non-null placeholder would put
+    /// Withdraw on every meeting in the list.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_ForAMeetingWithNoProposal_CarriesNoneRatherThanAnEmptyOne()
+    {
+        using var app = NewApp();
+        app.Seed(context => context.Bookings.Add(Meeting(LinkId, FirstDay)));
+
+        using var client = app.CreateOperatorClient();
+
+        (await ReadAsync(client)).Meetings.ShouldHaveSingleItem().Proposal.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The clock is folded in here exactly as <c>GET /bookings/proposals/{token}</c> folds it, and
+    /// for the same reason: a hold whose expiry has passed has stopped holding whether or not the
+    /// sweeper has been round to mark it. Nothing sweeps in this test, which is the point —
+    /// correctness must not wait on a background service, and a row still offering Withdraw over a
+    /// lapsed hold invites the operator to close something that is already closed.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_TheHoldLapsedAndNothingSweptIt_ReadsExpiredRatherThanOpen()
+    {
+        using var app = NewApp();
+        var booking = Meeting(LinkId, FirstDay);
+        app.Seed(context =>
+        {
+            context.Bookings.Add(booking);
+            context.BookingProposals.Add(Hold(booking.Id, ProposalState.Open, HoursAgoAlreadyLapsed));
+        });
+
+        using var client = app.CreateOperatorClient();
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.Proposal.ShouldNotBeNull();
+        meeting.Proposal.State.ShouldBe(nameof(ProposalState.Expired).ToLowerInvariant());
+
+        // Folded in the answer and nowhere else. The row is untouched, so the sweeper still has a
+        // lapse to find and an operator still gets told about it.
+        app.Read(context => context.BookingProposals.AsNoTracking().Single().State)
+            .ShouldBe(ProposalState.Open);
+    }
+
+    /// <summary>
+    /// One row, so one proposal: the newest. An operator who proposes again after a decline is
+    /// asking about the new suggestion, and a row that answered with the old one would draw
+    /// "they declined" over a question still being asked.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_TheOperatorProposedAgainAfterADecline_CarriesTheNewestHold()
+    {
+        using var app = NewApp();
+        var booking = Meeting(LinkId, FirstDay);
+        var declined = Hold(booking.Id, ProposalState.Declined, HoursAgoOlderStill);
+        var reopened = Hold(booking.Id, ProposalState.Open, HoursAgoStillOpen);
+        app.Seed(context =>
+        {
+            context.Bookings.Add(booking);
+            context.BookingProposals.Add(declined);
+            context.BookingProposals.Add(reopened);
+        });
+
+        using var client = app.CreateOperatorClient();
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.Proposal.ShouldNotBeNull();
+        meeting.Proposal.Id.ShouldBe(reopened.Id);
+    }
+
+    /// <summary>
     /// An inverted range would otherwise answer an empty list, which the page renders as "no
     /// meetings match" — a real answer, for a request that is not one.
     /// </summary>
@@ -324,6 +446,43 @@ public class MeetingsAdminTests
             ],
         };
     }
+
+    /// <summary>
+    /// A hold on a seeded meeting, minted <paramref name="hoursAgo"/> ago and lasting the shipped
+    /// hold from that moment.
+    /// </summary>
+    /// <remarks>
+    /// Written straight in rather than proposed through the route, because every test using it is
+    /// about how a hold READS on the row — the route's own behaviour is
+    /// <see cref="ProposalEndpointsTests"/>'s, and going through it would need a configured relay
+    /// to say anything about a projection.
+    ///
+    /// Both instants are taken off the real clock rather than written down, because the endpoint
+    /// compares the expiry against the real clock too: a literal would be a hold that is open
+    /// today and lapsed the year this suite is still running.
+    /// </remarks>
+    private static BookingProposal Hold(Guid bookingId, ProposalState state, int hoursAgo)
+    {
+        var createdAt = SystemClock.Instance.GetCurrentInstant().ToUnixTimeSeconds()
+            - ((long)hoursAgo * SecondsPerHour);
+        var start = InstantPattern.ExtendedIso.Parse(FirstDay + ProposedTime).Value;
+
+        return new BookingProposal
+        {
+            Id = Guid.CreateVersion7(),
+            BookingId = bookingId,
+            StartUtc = start.ToUnixTimeSeconds(),
+            EndUtc = start.Plus(Duration.FromMinutes(DurationMinutes)).ToUnixTimeSeconds(),
+            ExpiresAt = createdAt + ((long)SchedulingDefaults.ProposalHoldHours * SecondsPerHour),
+            CreatedAt = createdAt,
+            State = state,
+            TokenHash = Guid.CreateVersion7().ToString("N"),
+        };
+    }
+
+    /// <summary>An instant as the API prints it, for asserting against a seeded second.</summary>
+    private static string Format(long unixSeconds) =>
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
 
     private static KairosApp NewApp()
     {

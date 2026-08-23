@@ -68,6 +68,24 @@ public sealed record ProposeMeetingRequest
 public sealed record MeetingLinkResponse(Guid Id, string Name);
 
 /// <summary>
+/// The newest proposal on a meeting, whatever became of it, or absent when nobody ever suggested
+/// anything.
+/// </summary>
+/// <remarks>
+/// The newest and only the newest, because the row draws one thing: an open hold is a Withdraw
+/// button, and a closed one is at most a sentence saying what happened. An operator who proposed
+/// again after a decline is asking about the new suggestion, so answering with the old one would
+/// print "they declined" over a question still being asked.
+/// </remarks>
+/// <param name="State">
+/// The lower-cased <see cref="ProposalState"/> as of now, with the clock folded in exactly as
+/// <c>GET /bookings/proposals/{token}</c> folds it — see <see cref="ProposalWriter.StateAt"/>. It
+/// is never <c>accepted</c> on a row the operator is looking at without the row also having moved,
+/// since accepting is what moves it.
+/// </param>
+public sealed record MeetingProposalResponse(Guid Id, string Start, string ExpiresAt, string State);
+
+/// <summary>
 /// One meeting as the operator's list draws it.
 /// </summary>
 /// <remarks>
@@ -82,6 +100,16 @@ public sealed record MeetingLinkResponse(Guid Id, string Name);
 /// The zone the participant read the times in, and never the organizer's. It is on the row
 /// because "what time did they think this was" is the question that gets asked after a no-show.
 /// </param>
+/// <param name="Slug">
+/// The link's slug, beside its id and not instead of it. The row's propose panel reads the times
+/// it may offer from <c>GET /links/{slug}/slots</c>, which is keyed on the slug and takes no id at
+/// all — so without this the operator's picker cannot ask the question, and the alternative is a
+/// second round trip per row to turn an id back into the slug the list already had in hand.
+/// </param>
+/// <param name="Proposal">
+/// The newest hold on this meeting, or null when there has never been one. Null is what the row
+/// draws Propose off, which is why it is absent rather than a proposal in some resting state.
+/// </param>
 public sealed record MeetingResponse(
     Guid Id,
     string Start,
@@ -90,12 +118,14 @@ public sealed record MeetingResponse(
     string Status,
     Guid LinkId,
     string LinkName,
+    string Slug,
     string ParticipantName,
     string ParticipantEmail,
     string ParticipantTimeZone,
     bool CalendarSynced,
     string? CalendarProvider,
-    string? CalendarError);
+    string? CalendarError,
+    MeetingProposalResponse? Proposal);
 
 /// <summary>
 /// Everything one render of the tab needs, in one round trip.
@@ -166,6 +196,7 @@ public static class MeetingsAdminEndpoints
     private static async Task<MeetingsResponse> ListAsync(
         [AsParameters] ListMeetingsRequest request,
         KairosDbContext context,
+        IClock clock,
         CancellationToken cancellationToken)
     {
         var from = ParseDate(request.From, FromParameter);
@@ -189,7 +220,8 @@ public static class MeetingsAdminEndpoints
         return new MeetingsResponse(
             timeZoneId,
             await LinksWithMeetingsAsync(context, cancellationToken),
-            await MeetingsAsync(context, request.LinkId, from, to, zone, cancellationToken));
+            await MeetingsAsync(
+                context, request.LinkId, from, to, zone, clock.GetCurrentInstant(), cancellationToken));
     }
 
     private static async Task<IReadOnlyList<MeetingResponse>> MeetingsAsync(
@@ -198,6 +230,7 @@ public static class MeetingsAdminEndpoints
         LocalDate? from,
         LocalDate? to,
         DateTimeZone zone,
+        Instant now,
         CancellationToken cancellationToken)
     {
         var query = context.Bookings.AsNoTracking();
@@ -234,6 +267,19 @@ public static class MeetingsAdminEndpoints
                 booking.Status,
                 booking.LinkId,
                 LinkName = booking.Link.Name,
+                booking.Link.Slug,
+                // The same correlated shape the calendar read below uses, and for the same reason:
+                // Booking has no navigation to its proposals, and giving it one so a read-only
+                // list could use it would be a schema change made by a page. This lands on the
+                // index over BookingId. Ordered newest first — see MeetingProposalResponse — with
+                // the key breaking a tie, since a proposal minted and withdrawn inside one second
+                // is a double-clicked button rather than a hypothetical.
+                Proposal = context.BookingProposals
+                    .Where(row => row.BookingId == booking.Id)
+                    .OrderByDescending(row => row.CreatedAt)
+                    .ThenByDescending(row => row.Id)
+                    .Select(row => new ProposalFacts(row.Id, row.StartUtc, row.ExpiresAt, row.State))
+                    .FirstOrDefault(),
                 Booker = booking.Participants
                     .Where(participant => participant.Role == ParticipantRole.Booker)
                     .Select(participant => new { participant.Name, participant.Email, participant.TimeZoneId })
@@ -260,12 +306,15 @@ public static class MeetingsAdminEndpoints
                 row.Status,
                 row.LinkId,
                 row.LinkName,
+                row.Slug,
                 row.Booker?.Name ?? string.Empty,
                 row.Booker?.Email ?? string.Empty,
                 row.Booker?.TimeZoneId ?? string.Empty,
                 row.Calendar is null
                     ? null
-                    : new CalendarFacts(row.Calendar.State, row.Calendar.Provider, row.Calendar.LastError))),
+                    : new CalendarFacts(row.Calendar.State, row.Calendar.Provider, row.Calendar.LastError),
+                row.Proposal,
+                now)),
         ];
     }
 
@@ -286,6 +335,7 @@ public static class MeetingsAdminEndpoints
         CancelMeetingRequest request,
         KairosDbContext context,
         BookingCanceller canceller,
+        IClock clock,
         CancellationToken cancellationToken)
     {
         var booking = await context.Bookings
@@ -296,7 +346,7 @@ public static class MeetingsAdminEndpoints
 
         await canceller.CancelAsync(booking, request.Reason, manageToken: null, cancellationToken);
 
-        return await OneAsync(context, booking, cancellationToken);
+        return await OneAsync(context, booking, clock.GetCurrentInstant(), cancellationToken);
     }
 
     /// <summary>
@@ -430,7 +480,7 @@ public static class MeetingsAdminEndpoints
                 "The suggestion could not be sent, so nothing is being held. Try again.");
         }
 
-        return await OneAsync(context, booking, cancellationToken);
+        return await OneAsync(context, booking, now, cancellationToken);
     }
 
     private static Task<bool> HasOpenProposalAsync(
@@ -466,7 +516,8 @@ public static class MeetingsAdminEndpoints
         // invitee answering at the same moment cannot have their answer written over by this. The
         // count is deliberately not checked: withdrawing something already closed is what a
         // double-clicked button asks for, and the honest answer to it is the row as it stands.
-        var decidedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+        var now = clock.GetCurrentInstant();
+        var decidedAt = now.ToUnixTimeSeconds();
         await context.BookingProposals
             .Where(row => (row.Id == proposalId) && (row.State == ProposalState.Open))
             .ExecuteUpdateAsync(
@@ -480,7 +531,7 @@ public static class MeetingsAdminEndpoints
             .Include(row => row.Participants)
             .SingleAsync(row => row.Id == id, cancellationToken);
 
-        return await OneAsync(context, booking, cancellationToken);
+        return await OneAsync(context, booking, now, cancellationToken);
     }
 
     /// <summary>
@@ -492,12 +543,24 @@ public static class MeetingsAdminEndpoints
     private static async Task<MeetingResponse> OneAsync(
         KairosDbContext context,
         Booking booking,
+        Instant now,
         CancellationToken cancellationToken)
     {
         var calendar = await context.CalendarEntries.AsNoTracking()
             .Where(entry => entry.BookingId == booking.Id)
             .OrderByDescending(entry => entry.UpdatedAt)
             .Select(entry => new CalendarFacts(entry.State, entry.Provider, entry.LastError))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Read back rather than taken from the write that just happened: propose has an insert in
+        // hand and withdraw has an id, but cancel has neither and all three answer in one shape.
+        // A route that described the proposal from what it wrote would be the second description
+        // of a meeting this method exists to prevent.
+        var proposal = await context.BookingProposals.AsNoTracking()
+            .Where(row => row.BookingId == booking.Id)
+            .OrderByDescending(row => row.CreatedAt)
+            .ThenByDescending(row => row.Id)
+            .Select(row => new ProposalFacts(row.Id, row.StartUtc, row.ExpiresAt, row.State))
             .FirstOrDefaultAsync(cancellationToken);
 
         var booker = booking.Participants
@@ -510,10 +573,13 @@ public static class MeetingsAdminEndpoints
             booking.Status,
             booking.LinkId,
             booking.Link.Name,
+            booking.Link.Slug,
             booker?.Name ?? string.Empty,
             booker?.Email ?? string.Empty,
             booker?.TimeZoneId ?? string.Empty,
-            calendar);
+            calendar,
+            proposal,
+            now);
     }
 
     /// <summary>One construction of a row, so the list and the cancel cannot describe it differently.</summary>
@@ -524,18 +590,22 @@ public static class MeetingsAdminEndpoints
         BookingStatus status,
         Guid linkId,
         string linkName,
+        string slug,
         string bookerName,
         string bookerEmail,
         string bookerTimeZone,
-        CalendarFacts? calendar) =>
+        CalendarFacts? calendar,
+        ProposalFacts? proposal,
+        Instant now) =>
         new(
             id,
-            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(startUtc)),
-            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(endUtc)),
+            Format(startUtc),
+            Format(endUtc),
             (int)((endUtc - startUtc) / SecondsPerMinute),
             status.ToString().ToLowerInvariant(),
             linkId,
             linkName,
+            slug,
             bookerName,
             bookerEmail,
             bookerTimeZone,
@@ -545,11 +615,29 @@ public static class MeetingsAdminEndpoints
             // the only question the row is asking.
             calendar is not null && calendar.State == CalendarSyncState.Synced,
             calendar is null ? null : calendar.Provider.ToString().ToLowerInvariant(),
-            calendar?.LastError);
+            calendar?.LastError,
+            proposal is null
+                ? null
+                : new MeetingProposalResponse(
+                    proposal.Id,
+                    Format(proposal.StartUtc),
+                    Format(proposal.ExpiresAt),
+                    ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now)
+                        .ToString().ToLowerInvariant()));
+
+    private static string Format(long unixSeconds) =>
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
 
     /// <summary>The calendar half of a row, flattened. One record so the list and the single read
     /// hand <see cref="Describe"/> the same thing.</summary>
     private sealed record CalendarFacts(CalendarSyncState State, IntegrationProvider Provider, string? LastError);
+
+    /// <summary>
+    /// The hold half of a row, as far as the projection reads it. The stored state rather than the
+    /// folded one — the fold needs a clock, and a clock read inside an EF projection is a clock
+    /// read the database is being asked to translate.
+    /// </summary>
+    private sealed record ProposalFacts(Guid Id, long StartUtc, long ExpiresAt, ProposalState State);
 
     private static async Task<IReadOnlyList<MeetingLinkResponse>> LinksWithMeetingsAsync(
         KairosDbContext context,

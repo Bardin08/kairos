@@ -541,15 +541,12 @@ public static class BookingsEndpoints
             StateOf(proposal, now));
 
     /// <summary>
-    /// The state as every other reader computes it: a hold whose expiry has passed has stopped
-    /// holding, whether or not the sweeper has been round to mark it. Answering "open" for one is
-    /// a page that draws Accept and Decline over a suggestion that will refuse either.
+    /// The state as every other reader computes it — <see cref="ProposalWriter.StateAt"/> — as the
+    /// lower-cased word the page branches on. Answering "open" for a hold that has stopped holding
+    /// is a page that draws Accept and Decline over a suggestion that will refuse either.
     /// </summary>
     private static string StateOf(BookingProposal proposal, Instant now) =>
-        ((proposal.State == ProposalState.Open) && (proposal.ExpiresAt <= now.ToUnixTimeSeconds())
-            ? ProposalState.Expired
-            : proposal.State)
-        .ToString().ToLowerInvariant();
+        ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now).ToString().ToLowerInvariant();
 
     private static async Task<string> TimeZoneIdAsync(
         KairosDbContext context,

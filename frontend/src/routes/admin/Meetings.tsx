@@ -254,7 +254,14 @@ export default function Meetings() {
       kind: 'control',
       cell: (meeting) =>
         meeting.status === CONFIRMED ? (
-          <MeetingActions meetingId={meeting.id} onChanged={applyChange} />
+          <MeetingActions
+            meetingId={meeting.id}
+            slug={meeting.slug}
+            durationMinutes={meeting.durationMinutes}
+            zone={zone}
+            proposal={meeting.proposal}
+            onChanged={applyChange}
+          />
         ) : null,
     },
   ]
