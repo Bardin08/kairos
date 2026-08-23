@@ -89,3 +89,99 @@ jobs:
       # so CI and scripts/verify.sh cannot drift apart.
       - if: steps.detect.outputs.present == 'true'
         run: bash scripts/bundle-budget.sh
+
+  # Builds the image on every event and pushes it on none but a push to main.
+  # Those are two different jobs' worth of intent in one job on purpose: a
+  # Dockerfile that is only built after merge is a Dockerfile whose regressions
+  # are found on main, and building it twice — once to check, once to publish —
+  # would double the work to no end. So the build always runs and `push:` below
+  # is what is conditional.
+  #
+  # Safe to require as a status check, unlike the version of this job that ran
+  # only on pushes: it now reports a conclusion on pull requests like the two
+  # above it. Whether it SHOULD be required is a separate question and the answer
+  # is probably no — it is slower than either, and a broken Dockerfile does not
+  # make a source change wrong.
+  publish:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    # Longer than the two jobs above because it does both their work again inside
+    # a container build, for two architectures. Not much longer: the Dockerfile
+    # pins its build stages to $BUILDPLATFORM and cross-publishes, so npm and the
+    # .NET SDK run natively on the runner and only the runtime stage — which has
+    # no RUN in it — is assembled per architecture. The arm64 leg is not optional
+    # whatever it costs: the reference deployment is a Raspberry Pi.
+    timeout-minutes: 30
+    permissions:
+      # Here rather than in the workflow's top-level `permissions`, which stays
+      # contents: read. This is the only job that publishes anything, and a
+      # top-level packages: write would hand a registry token to every step of
+      # every job — including the ones that check out and run a pull request's
+      # own code.
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ghcr.io refuses an uppercase path, and github.repository preserves
+      # whatever case the owner and repository were named with — so the reference
+      # is lowercased here rather than written inline and hoped over. The sha
+      # tag carries the first seven characters of the commit, which is what makes
+      # a running container traceable back to one by eye. The moving tag is the
+      # branch's own name rather than the literal "main", so it follows
+      # `on.push.branches` instead of restating it — and it is emitted only on a
+      # push, because a pull request's ref name is `104/merge` and a slash is not
+      # legal in a tag. That cannot be left to the `push:` flag below: buildx
+      # validates every tag it is handed before it decides whether to push one,
+      # so an unpushed invalid tag fails the build just as loudly as a pushed one.
+      - id: image
+        run: |
+          echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "sha=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "moving=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # buildx supplies the driver that can emit a manifest list at all — the
+      # default docker driver builds one platform and stops. QEMU registers the
+      # binfmt handlers a foreign-architecture RUN would need; the Dockerfile is
+      # written so that none happens, and this stays as the thing that keeps a
+      # RUN added to the runtime stage from failing on one architecture only.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # The token is the one the runner already has, scoped by the block above
+      # and expiring with the job. No personal access token is stored anywhere.
+      # Skipped on a pull request, where there is nothing to push and where a
+      # fork's GITHUB_TOKEN is read-only and this step would simply fail.
+      - if: github.event_name == 'push'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          # False on a pull request: the image is built, both architectures, and
+          # then discarded. What that buys is the answer to "does the Dockerfile
+          # still build", which is the only question a pull request can ask about
+          # it and the one that otherwise waits until after the merge.
+          push: ${{ github.event_name == 'push' }}
+          # Two tags on a push, and they answer different questions. The sha tag
+          # is immutable and is what a deployment pins to; the branch tag moves
+          # and is what says which build is current. On a pull request the second
+          # is empty, which this action drops from the list — see the step above
+          # for why it cannot simply be written out and left to `push: false`.
+          tags: |
+            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.sha }}
+            ${{ steps.image.outputs.moving }}
+          # Read always, written only from main. A pull request reuses the layers
+          # main last published — npm ci and dotnet restore, which are the slow
+          # ones — and cannot poison what the next one reads. An empty cache-to
+          # is how buildx is told not to export, and a fork's job could not write
+          # to this cache anyway.
+          cache-from: type=gha
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
