@@ -239,7 +239,7 @@ public class SlotQueryTests
     }
 
     private static SlotQuery Query(KairosDbContext context) =>
-        new(context, new AvailabilityQuery(context), new SlotGenerator(), [new LocalBusySource(context)]);
+        new(context, new AvailabilityQuery(context), new SlotGenerator(), [new LocalBusySource(context, SystemClock.Instance)]);
 
     private static void AddBooking(
         KairosDbContext context, Guid linkId, Instant start, BookingStatus status = BookingStatus.Confirmed)
