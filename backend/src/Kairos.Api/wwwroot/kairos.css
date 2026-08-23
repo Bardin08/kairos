@@ -160,8 +160,8 @@
     --gray-950: #0E1014;
 
     /* ---- primitives: accent ---------------------------------------------
-       Spent on exactly two things: the selected time, and the primary action.
-       Anywhere else it is a bug. */
+       Three jobs: the selected time, the action that commits it, the current
+       destination. The wordmark is the one exemption; anywhere else, a bug. */
     --indigo-50:  #EEF0FE;
     --indigo-100: #DFE3FD;
     --indigo-200: #C3C9FA;
