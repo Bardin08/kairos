@@ -47,7 +47,7 @@ public static class MeetingsFixture
     /// asserted to answer THIS zone rather than the organizer's.</summary>
     public const string BookerZone = "Europe/Warsaw";
 
-    /// <summary>Seeds the world and books <see cref="BookedInstant"/>. Returns the booking's id.</summary>
+    /// <summary>Seeds the world before booking <see cref="BookedInstant"/>.</summary>
     public static async Task<Guid> BookAsync(KairosApp app, HttpClient client)
     {
         Seed(app);

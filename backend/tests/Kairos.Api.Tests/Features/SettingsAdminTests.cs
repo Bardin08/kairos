@@ -306,7 +306,6 @@ public class SettingsAdminTests
         overridesAfter.ShouldBe(overridesBefore);
     }
 
-    /// <summary>The first start the public page would offer on the seeded Monday.</summary>
     private static async Task<string> FirstSlotAsync(KairosApp app) =>
         (await SlotsAsync(app, Slug)).First();
 

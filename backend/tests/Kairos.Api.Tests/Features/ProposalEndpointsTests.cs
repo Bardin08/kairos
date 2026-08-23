@@ -502,7 +502,7 @@ public class ProposalEndpointsTests
             .ShouldBe(MovedNextTo);
     }
 
-    /// <summary>The old slot is free the moment the move is real, and on every link.</summary>
+    /// <summary>Freed on every link, not only the one the meeting was booked through.</summary>
     [Fact]
     public async Task Accept_AnOpenProposal_ReleasesTheOriginalSlot()
     {
@@ -516,7 +516,6 @@ public class ProposalEndpointsTests
         (await MeetingsFixture.SlotsOnOtherLinkAsync(app)).ShouldContain(MeetingsFixture.BookedInstant);
     }
 
-    /// <summary>A declined proposal leaves the meeting exactly as it was, asserted field by field.</summary>
     [Fact]
     public async Task Decline_AnOpenProposal_LeavesTheBookingExactlyAsItWas()
     {
@@ -734,13 +733,10 @@ public class ProposalEndpointsTests
             TestContext.Current.CancellationToken);
 
     /// <summary>
-    /// Proposes <paramref name="start"/> and hands back a token that opens it.
-    /// </summary>
-    /// <remarks>
     /// The plaintext never leaves the mailer, so the row is re-minted with a token this test
     /// knows: the database holds only a SHA-256, and re-hashing a known string is the only way
     /// back to something the invitee's route will resolve.
-    /// </remarks>
+    /// </summary>
     private static async Task<string> ProposeWithKnownTokenAsync(
         KairosApp app,
         HttpClient client,

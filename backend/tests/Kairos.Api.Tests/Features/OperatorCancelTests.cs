@@ -30,7 +30,6 @@ public class OperatorCancelTests
 {
     private const string Reason = "I have to be somewhere else.";
 
-    /// <summary>The character an over-long reason is built out of, repeated.</summary>
     private const string ReasonCharacter = "x";
 
     private const int OverLongReasonLength = CancelMeetingRequest.MaxReasonLength + 1;
