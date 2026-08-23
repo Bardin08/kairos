@@ -91,9 +91,8 @@ public sealed class AvailabilityQuery(KairosDbContext context)
         {
             if (replacements.TryGetValue(date.ToDateOnly(), out var forDate))
             {
-                // An override IS the day. The weekly rules for it are not merged in, and a date
-                // whose only row has no times leaves the day with nothing rather than falling
-                // back to them.
+                // An override IS the day: the weekly rules are not merged in, and a date whose
+                // only row has no times leaves the day empty rather than falling back to them.
                 foreach (var replacement in forDate)
                 {
                     if (replacement.StartMinute is { } overrideStart && replacement.EndMinute is { } overrideEnd)

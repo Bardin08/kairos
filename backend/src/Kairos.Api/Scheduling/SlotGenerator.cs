@@ -3,10 +3,10 @@ using NodaTime;
 namespace Kairos.Api.Scheduling;
 
 /// <summary>
-/// The hot path: runs on every booking-page load, for every duration, across a date range.
-/// Pure — no I/O, no clock, no database — so DST, margin and duration behaviour are
-/// exhaustively testable, and allocation-aware because a month of slots is a lot of garbage
-/// to make in order to answer one question.
+/// The hot path: runs on every booking-page load, for every duration, across a date range. Pure —
+/// no I/O, no clock, no database — so DST, margin and duration behaviour are exhaustively testable,
+/// and allocation-aware because a month of slots is a lot of garbage to make to answer one
+/// question.
 /// </summary>
 public sealed class SlotGenerator
 {
@@ -34,10 +34,10 @@ public sealed class SlotGenerator
 
         var earliest = now + Duration.FromMinutes(limits.MinNoticeMinutes);
 
-        // Both bounds are load-bearing, not defensive padding. A zero increment is a legal
-        // column value — "null inherits, zero is deliberate" — and would divide by zero below
-        // and never advance the walk. An increment past a day cannot place a second candidate
-        // anyway, and clamping it keeps the walk's arithmetic inside a day's worth of minutes.
+        // Both bounds are load-bearing, not defensive padding. A zero increment is a legal column
+        // value — "null inherits, zero is deliberate" — and would divide by zero below and never
+        // advance the walk. An increment past a day cannot place a second candidate anyway, and
+        // clamping keeps the walk's arithmetic inside a day's worth of minutes.
         var step = Math.Clamp(limits.StartIncrementMinutes, 1, MinutesPerDay);
         var durationMinutes = (int)slotDuration.TotalMinutes;
 
@@ -119,7 +119,7 @@ public sealed class SlotGenerator
         return false;
     }
 
-    /// <summary>Minutes from midnight, discarding any part of a minute.</summary>
+    /// <summary>Discards any part of a minute.</summary>
     private static int MinutesFromMidnight(LocalTime time) =>
         (time.Hour * MinutesPerHour) + time.Minute;
 
@@ -135,10 +135,10 @@ public sealed class SlotGenerator
 
     /// <summary>The first grid point at or after <paramref name="minutes"/>.</summary>
     /// <remarks>
-    /// The grid is anchored on midnight rather than on the window's start, so every window in
-    /// the account lands on one shared set of times. It is a real consequence and not an
-    /// accident: a 25-minute increment makes a 09:00 window open at 09:10, not 09:00. The
-    /// return may exceed a day, which the caller's bound rejects rather than wrapping.
+    /// The grid is anchored on midnight rather than on the window's start, so every window in the
+    /// account lands on one shared set of times. A real consequence rather than an accident: a
+    /// 25-minute increment makes a 09:00 window open at 09:10. The return may exceed a day, which
+    /// the caller's bound rejects rather than wrapping.
     /// </remarks>
     private static int AlignUp(int minutes, int stepMinutes)
     {
@@ -151,14 +151,14 @@ public sealed class SlotGenerator
     /// transition and every candidate on it has to be mapped individually.
     /// </summary>
     /// <remarks>
-    /// A ZoneInterval is by definition a maximal run of constant offset, so two probes landing
-    /// in an equal interval prove no transition happens anywhere between them. The probes
-    /// bracket local midnight by a day behind and two ahead, which contains the whole local day
-    /// for any real offset (the widest is ±14h). Inside a single interval MapLocal returns
-    /// exactly one mapping and it is <c>local.WithOffset(offset)</c> — so this is the same
-    /// answer, not an approximation, and the DST rules below still decide every transition day.
-    /// Verified against MapLocal over 10.8M candidates across 9 zones — including Lord Howe's
-    /// half-hour shift and Chatham's +12:45 — with no disagreement.
+    /// A ZoneInterval is by definition a maximal run of constant offset, so two probes landing in
+    /// an equal interval prove no transition happens between them. The probes bracket local
+    /// midnight by a day behind and two ahead, which contains the whole local day for any real
+    /// offset (the widest is ±14h). Inside a single interval MapLocal returns exactly one mapping
+    /// and it is <c>local.WithOffset(offset)</c> — the same answer, not an approximation, and the
+    /// DST rules below still decide every transition day. Verified against MapLocal over 10.8M
+    /// candidates across 9 zones — including Lord Howe's half-hour shift and Chatham's +12:45 —
+    /// with no disagreement.
     /// Value equality, not reference equality: two equal ZoneIntervals share a Start and an End,
     /// which is the identical proof, and NodaTime hands back equal-but-distinct instances often
     /// enough that ReferenceEquals drops 6% of ordinary days onto the slow path for nothing.

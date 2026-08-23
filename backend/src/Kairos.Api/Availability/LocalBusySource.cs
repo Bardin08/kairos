@@ -14,12 +14,11 @@ namespace Kairos.Api.Availability;
 /// would happily sell an hour another link already sold.
 /// </summary>
 /// <remarks>
-/// A hold is busy while its proposal is open, its expiry is in the future and the meeting behind
-/// it is still on. The expiry is compared here rather than trusted to the sweeper that marks
-/// lapsed rows, and the status is read rather than assumed closed with the booking: a hold whose
-/// expiry has passed or whose meeting was cancelled underneath it stops holding at that instant,
-/// so a sweeper that is late, dead or never started makes the mail late and never makes
-/// availability wrong.
+/// A hold is busy while its proposal is open, its expiry is in the future and the meeting behind it
+/// is still on. The expiry is compared here rather than trusted to the sweeper that marks lapsed
+/// rows: a hold whose expiry has passed or whose meeting was cancelled underneath it stops holding
+/// at that instant, so a sweeper that is late, dead or never started makes the mail late and never
+/// makes availability wrong.
 /// </remarks>
 public sealed class LocalBusySource(KairosDbContext context, IClock clock) : IBusySource
 {

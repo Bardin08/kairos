@@ -14,8 +14,8 @@ namespace Kairos.Api.Availability;
 /// <summary>
 /// The whole read side of the booking page in one call: resolve the link, resolve its limits
 /// against the globals, expand the pattern, drain every busy source, count the day's bookings,
-/// generate. It throws instead of returning a result type — the endpoint above it has no failure
-/// branch to write, and the middleware turns each of these into ProblemDetails.
+/// generate. It throws instead of returning a result type, so the endpoint above has no failure
+/// branch to write and the middleware turns each throw into ProblemDetails.
 /// </summary>
 public sealed class SlotQuery(
     KairosDbContext context,
@@ -65,8 +65,8 @@ public sealed class SlotQuery(
             .FirstOrDefaultAsync(candidate => candidate.Slug == slug && candidate.Active, cancellationToken)
             // Not "Link '{slug}'": the caller's value is never reflected into a response body, the
             // rule LinksEndpoints states and SlotsEndpoints.ParseDate keeps. It also made one
-            // condition answer two different sentences depending on which of the two link routes
-            // an anonymous caller happened to send an unknown slug to.
+            // condition answer two sentences, depending on which link route an anonymous caller
+            // happened to send an unknown slug to.
             ?? throw DomainException.NotFound("Link");
 
         // SortOrder, not ascending length: it is the order the operator chose for the booking
@@ -120,10 +120,9 @@ public sealed class SlotQuery(
     /// <see cref="ArgumentOutOfRangeException"/> that names "index" and nothing else.
     /// </summary>
     /// <remarks>
-    /// No slug reaches these three messages, and the query no longer takes one to build them with.
-    /// The rule is <see cref="Features.Links.LinksEndpoints"/>'s: the caller's value is never
-    /// reflected into a response body, and it costs the sentence nothing here — the slug is in the
-    /// URL the caller just sent.
+    /// No slug reaches these three messages, by <see cref="Features.Links.LinksEndpoints"/>'s rule:
+    /// the caller's value is never reflected into a response body. It costs the sentence nothing —
+    /// the slug is in the URL the caller just sent.
     /// </remarks>
     private static int Resolve(IReadOnlyList<int> offered, int? requested)
     {
