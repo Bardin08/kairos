@@ -420,19 +420,28 @@ public static class MeetingsAdminEndpoints
         IClock clock,
         CancellationToken cancellationToken)
     {
-        var proposal = await context.BookingProposals
-            .FirstOrDefaultAsync(
-                row => (row.Id == proposalId) && (row.BookingId == id), cancellationToken)
-            ?? throw DomainException.NotFound("Proposal");
+        var exists = await context.BookingProposals.AsNoTracking()
+            .AnyAsync(row => (row.Id == proposalId) && (row.BookingId == id), cancellationToken);
 
-        if (proposal.State == ProposalState.Open)
+        if (!exists)
         {
-            proposal.State = ProposalState.Withdrawn;
-            proposal.DecidedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
-            await context.SaveChangesAsync(cancellationToken);
+            throw DomainException.NotFound("Proposal");
         }
 
-        var booking = await context.Bookings
+        // Conditional on the row still being Open rather than on a read a statement earlier, so an
+        // invitee answering at the same moment cannot have their answer written over by this. The
+        // count is deliberately not checked: withdrawing something already closed is what a
+        // double-clicked button asks for, and the honest answer to it is the row as it stands.
+        var decidedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+        await context.BookingProposals
+            .Where(row => (row.Id == proposalId) && (row.State == ProposalState.Open))
+            .ExecuteUpdateAsync(
+                set => set
+                    .SetProperty(row => row.State, ProposalState.Withdrawn)
+                    .SetProperty(row => row.DecidedAt, decidedAt),
+                cancellationToken);
+
+        var booking = await context.Bookings.AsNoTracking()
             .Include(row => row.Link)
             .Include(row => row.Participants)
             .SingleAsync(row => row.Id == id, cancellationToken);

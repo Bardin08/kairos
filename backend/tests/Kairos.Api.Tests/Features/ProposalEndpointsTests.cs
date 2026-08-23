@@ -1,14 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 
+using Kairos.Api.Availability;
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -70,6 +73,11 @@ public class ProposalEndpointsTests
     private const string RelayAccepted = "2.0.0 Ok: queued";
 
     private const string RelayRefused = "The relay dropped the connection.";
+
+    private const string BusySourceBroken = "The calendar provider fell over.";
+
+    /// <summary>Lower-cased <see cref="ProposalState.Expired"/>, as the invitee's page reads it.</summary>
+    private const string ExpiredState = "expired";
 
     private const string AcceptAction = "accept";
     private const string DeclineAction = "decline";
@@ -382,19 +390,48 @@ public class ProposalEndpointsTests
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
 
-        // Reached through the database rather than through a clock substitution: the expiry is a
-        // stored instant, and pushing it into the past is the same state a real lapse produces.
-        app.Seed(context =>
-        {
-            var proposal = context.BookingProposals.Single(row => row.BookingId == booking);
-            proposal.ExpiresAt = LapsedAt;
-        });
+        Lapse(app, booking);
 
         var answer = await AnswerAsync(app, token, AcceptAction);
 
         answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
             .ShouldContain(BookingsEndpoints.ProposalExpiredCode);
+    }
+
+    /// <summary>
+    /// A failure that is not a refusal must not answer for the invitee.
+    /// </summary>
+    /// <remarks>
+    /// The compensating close writes a decision onto the proposal, and only a refusal is a
+    /// decision. A provider falling over — or, the case that prompted this, an invitee closing the
+    /// tab and cancelling the request — is not the invitee having lost their slot, and burning the
+    /// row over it costs them a suggestion they never saw. The restore still runs, because that
+    /// half compensates a write this request already made and has to happen whatever went wrong.
+    /// </remarks>
+    [Fact]
+    public async Task Accept_TheReCheckFailingForAReasonThatIsNotARefusal_LeavesTheProposalOpen()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+
+        using var broken = app.WithWebHostBuilder(builder => builder.ConfigureTestServices(
+            services => services.AddScoped<IBusySource, ThrowingBusySource>())).CreateClient();
+
+        var answer = await broken.PostAsync(
+            $"{ApiVersions.V1}/bookings/proposals/{token}/{AcceptAction}",
+            content: null,
+            TestContext.Current.CancellationToken);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        app.Read(context => context.BookingProposals.Single(row => row.BookingId == booking))
+            .State.ShouldBe(ProposalState.Open);
+
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
     }
 
     /// <summary>
@@ -446,6 +483,27 @@ public class ProposalEndpointsTests
         answer.ProposedStart.ShouldBe(MovedTo);
         answer.ProposedEnd.ShouldBe(MovedToEnd);
         answer.State.ShouldBe(OpenState);
+    }
+
+    /// <summary>
+    /// A hold whose expiry has passed has stopped holding, whatever its row still says, and the
+    /// page has to be told that rather than shown Accept and Decline over a suggestion that will
+    /// answer 409 to either. Every other reader applies the expiry against the clock; this one
+    /// used to be the exception.
+    /// </summary>
+    [Fact]
+    public async Task GetProposal_AProposalWhoseHoldHasLapsed_ReadsAsExpired()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+        Lapse(app, booking);
+
+        var answer = await app.Client.GetFromJsonAsync<ProposalResponse>(
+            $"{ApiVersions.V1}/bookings/proposals/{token}", TestContext.Current.CancellationToken);
+
+        answer!.State.ShouldBe(ExpiredState);
     }
 
     [Fact]
@@ -573,5 +631,25 @@ public class ProposalEndpointsTests
             context.Bookings.Single(row => row.Id == booking).ManageTokenHash = BookingWriter.Hash(known));
 
         return known;
+    }
+
+    /// <summary>
+    /// Pushes the hold's expiry into the past. Reached through the database rather than through a
+    /// clock substitution: the expiry is a stored instant, and moving it back is the same state a
+    /// real lapse produces.
+    /// </summary>
+    private static void Lapse(KairosApp app, Guid booking) => app.Seed(context =>
+        context.BookingProposals.Single(row => row.BookingId == booking).ExpiresAt = LapsedAt);
+
+    /// <summary>
+    /// A calendar source that is having a bad day. Not a refusal, and not a decision.
+    /// </summary>
+    /// <remarks>Qualified: NodaTime has an Interval too, and both namespaces are in scope here.</remarks>
+    private sealed class ThrowingBusySource : IBusySource
+    {
+        public Task<IReadOnlyList<BusyBlock>> GetBusyAsync(
+            Kairos.Api.Scheduling.Interval window,
+            CancellationToken cancellationToken) =>
+            throw new IOException(BusySourceBroken);
     }
 }

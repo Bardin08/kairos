@@ -92,10 +92,9 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     /// belongs in the save that puts it back.
     /// </summary>
     /// <param name="compensate">
-    /// Staged into the same save as the restore when the check refuses. The accept uses it to
-    /// close the proposal it was answering: the slot that proposal was holding is gone, so
-    /// re-offering it would be offering something that is not there. The other callers have
-    /// nothing to put there and pass null.
+    /// Run when, and only when, the check REFUSES. The accept uses it to close the proposal it was
+    /// answering: the slot that proposal was holding is gone, so re-offering it would be offering
+    /// something that is not there. The other callers have nothing to put there and pass null.
     /// </param>
     /// <remarks>
     /// Every path out of here leaves the booking confirmed except the successful one, which leaves
@@ -105,7 +104,7 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
         Booking booking,
         Instant start,
         Instant now,
-        Action? compensate,
+        Func<Task>? compensate,
         CancellationToken cancellationToken)
     {
         // KNOWN HOLE, and it is not fixed here. Between this save and whichever restore follows,
@@ -125,9 +124,19 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
             await RequireOfferedAsync(
                 booking.Link.Slug, DurationMinutes(booking), start, now, cancellationToken);
         }
-        catch
+        catch (Exception exception)
         {
-            compensate?.Invoke();
+            // Restored for every failure, a dropped connection included — that is what makes the
+            // release safe to commit at all. Compensated only for a refusal, and the two are not
+            // the same question: the compensation writes a DECISION, and only DomainException
+            // means the check gave one. A provider that fell over, or an invitee who closed the
+            // tab mid-request, is not that invitee having lost their slot — closing a live
+            // proposal over it costs them a suggestion they never saw and cannot get back.
+            if (exception is DomainException && compensate is not null)
+            {
+                await compensate();
+            }
+
             await ConfirmAsync(booking);
             throw;
         }
