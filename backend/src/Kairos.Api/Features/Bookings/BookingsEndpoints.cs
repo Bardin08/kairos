@@ -139,8 +139,6 @@ public static class BookingsEndpoints
     /// <summary>Nobody answered it in time. A separate sentence on the page, so a separate code.</summary>
     public const string ProposalExpiredCode = "proposal_expired";
 
-    private const int SecondsPerMinute = 60;
-
     public static RouteGroupBuilder MapBookings(this RouteGroupBuilder group)
     {
         // Every route here is anonymous, three of the four write, and create mails an address the

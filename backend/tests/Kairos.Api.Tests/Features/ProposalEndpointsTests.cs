@@ -43,14 +43,16 @@ public class ProposalEndpointsTests
     /// </summary>
     private const string MovedAgainTo = $"{MeetingsFixture.Day}T15:00:00Z";
 
+    private const string BookedEnd = $"{MeetingsFixture.Day}T11:30:00Z";
+
     /// <summary>
     /// The slot immediately after the meeting, and therefore inside the margin the meeting pads
     /// its own slot with. Nothing may offer it while that meeting is confirmed — which is the
-    /// whole point of it being the one both release paths are asserted on.
+    /// whole point of it being the one both release paths are asserted on. Spelled as the
+    /// booking's own end rather than repeated, so changing the fixture's duration cannot leave
+    /// this pointing at an hour that is no longer adjacent to anything.
     /// </summary>
-    private const string MovedNextTo = $"{MeetingsFixture.Day}T11:30:00Z";
-
-    private const string BookedEnd = $"{MeetingsFixture.Day}T11:30:00Z";
+    private const string MovedNextTo = BookedEnd;
     private const string MovedToEnd = $"{MeetingsFixture.Day}T14:30:00Z";
 
     /// <summary>Lower-cased <see cref="ProposalState.Open"/>, as the invitee's page reads it.</summary>
@@ -64,6 +66,7 @@ public class ProposalEndpointsTests
     private const int SecondsPerMinute = 60;
 
     private const int NoProposal = 0;
+    private const int OneProposal = 1;
 
     private const string RelayHost = "smtp.example.com";
     private const string RelayFrom = "organizer@example.com";
@@ -230,6 +233,17 @@ public class ProposalEndpointsTests
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await again.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
             .ShouldContain(MeetingsAdminEndpoints.ProposalOpenCode);
+
+        // And the refusal costs the meeting nothing. This route releases the booking to run its
+        // check, so every way out of it has to put the booking back exactly as it was — the second
+        // proposal is not written, and neither is a second hold.
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(row.StartUtc))
+            .ShouldBe(MeetingsFixture.BookedInstant);
+        app.Read(context => context.BookingProposals.Count(candidate => candidate.BookingId == booking))
+            .ShouldBe(OneProposal);
     }
 
     /// <summary>
@@ -283,7 +297,6 @@ public class ProposalEndpointsTests
             .State.ShouldBe(ProposalState.Withdrawn);
         (await MeetingsFixture.SlotsOnOtherLinkAsync(app)).ShouldContain(MovedTo);
     }
-
 
     [Fact]
     public async Task Accept_AnOpenProposal_MovesTheBookingAndAdvancesTheSequence()

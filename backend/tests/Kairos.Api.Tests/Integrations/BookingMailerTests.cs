@@ -32,6 +32,13 @@ public class BookingMailerTests
 {
     private const string ManageToken = "3f2504e04f8911d39a0c0305e82c3301";
     private const string ProposalToken = "0f1e2d3c";
+
+    /// <summary>
+    /// <see cref="ProposalExpiry"/> as the invitee reads it — 17:00Z is 19:00 in Warsaw. Spelled
+    /// out rather than formatted here on purpose: formatting it would be this test carrying its
+    /// own copy of the patterns under test, and would pass whatever they were changed to.
+    /// </summary>
+    private const string Deadline = "do not answer by Monday 7 September 2026, 19:00";
     private const string BaseUrl = "https://kairos.example.com";
     private const string ManageUrlFragment = "/manage/";
     private const string CancellationReason = "The client moved the workshop a week.";
@@ -67,7 +74,12 @@ public class BookingMailerTests
     /// <summary>A day after the booking, and at an hour Warsaw renders differently from UTC.</summary>
     private static readonly Instant ProposedStart = Instant.FromUtc(2026, 9, 8, 11, 0);
 
-    private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 6, 7, 0);
+    /// <summary>
+    /// After the meeting the proposal is about and before the time it offers, which is the only
+    /// window a deadline can honestly sit in. It was a day BEFORE the booking until the sentence
+    /// below started being asserted, and nothing noticed.
+    /// </summary>
+    private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 7, 17, 0);
 
     [Fact]
     public void Compose_Always_AttachesTheIcsAsACalendarRequest()
@@ -353,6 +365,15 @@ public class BookingMailerTests
         body.ShouldContain("13:00-13:25");
         body.ShouldContain(BookerZone);
     }
+
+    /// <summary>
+    /// The sentence the whole hold rests on. An invitee who is not told when the offer lapses has
+    /// no reason to answer today, and the deadline is the only thing in the message that says the
+    /// meeting stays put if they do nothing.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_SaysWhenTheOfferLapses() =>
+        Plain(ComposeProposal()).ShouldContain(Deadline);
 
     /// <summary>
     /// This deployment's state today, and the one that must never throw: no relay configured at

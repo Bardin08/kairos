@@ -360,6 +360,16 @@ public static class MeetingsAdminEndpoints
 
         BookingMover.RequireMovable(booking);
 
+        // Asked before the release rather than left to the index below. A double-submitted form is
+        // the ordinary way this arrives, and answering it without ever setting the booking
+        // Cancelled keeps it out of the window that release opens — the one where a cancel landing
+        // at the same moment reads the meeting as already off and quietly does nothing.
+        if (await HasOpenProposalAsync(context, id, cancellationToken))
+        {
+            throw DomainException.Conflict(
+                ProposalOpenCode, "A proposal for this meeting is already open.");
+        }
+
         var settings = await context.Settings.AsNoTracking()
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
 
@@ -377,13 +387,28 @@ public static class MeetingsAdminEndpoints
         }
         catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
         {
-            // The filtered unique index, which is the mechanism rather than a backstop here: two
-            // tabs proposing at once must not produce two holds for one meeting. The insert is
-            // dropped and the booking put back on its own, since this save carried both.
+            // The filtered unique index, and now genuinely the backstop: the check above answers
+            // the ordinary case, so reaching here means two requests were inside this method
+            // together. The insert is dropped and the booking put back on its own, since the save
+            // that failed carried both.
+            //
+            // Detaching the proposal alone is enough only because Booking has no navigation to its
+            // proposals — a fact that lives in another file. Add one, and EF will fix it up on
+            // detach and the row will ride along on the restore's save after all.
             context.Entry(proposal).State = EntityState.Detached;
             await mover.RestoreAsync(booking);
+
+            // WHICH index fired matters, because this method can violate two. The filtered one on
+            // BookingId means somebody proposed first; the one on TokenHash means 32 random bytes
+            // repeated, and reporting that as "a proposal is already open" would send the operator
+            // looking for a proposal that does not exist.
+            if (!await HasOpenProposalAsync(context, id, cancellationToken))
+            {
+                throw;
+            }
+
             throw DomainException.Conflict(
-                ProposalOpenCode, "A proposal for this meeting is already open.");
+                ProposalOpenCode, "A proposal for this meeting is already open.", exception);
         }
 
         // After the commit, so nothing mails a proposal that does not exist. The plaintext token
@@ -407,6 +432,15 @@ public static class MeetingsAdminEndpoints
 
         return await OneAsync(context, booking, cancellationToken);
     }
+
+    private static Task<bool> HasOpenProposalAsync(
+        KairosDbContext context,
+        Guid bookingId,
+        CancellationToken cancellationToken) =>
+        context.BookingProposals.AsNoTracking()
+            .AnyAsync(
+                row => (row.BookingId == bookingId) && (row.State == ProposalState.Open),
+                cancellationToken);
 
     /// <summary>
     /// Takes a proposal back. Without it, an operator who names the wrong time holds a slot

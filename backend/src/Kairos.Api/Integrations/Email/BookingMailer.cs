@@ -299,26 +299,15 @@ public sealed class BookingMailer(
             FileName = AttachmentFileName,
         };
 
-        var message = new MimeMessage
-        {
-            Subject = Subject(notice, booking.Link.Name, start, zone),
-            Body = new Multipart(MixedSubtype)
+        return Envelope(
+            Subject(notice, booking.Link.Name, start, zone),
+            new Multipart(MixedSubtype)
             {
                 new Multipart(AlternativeSubtype) { body, invitation },
                 attachment,
             },
-        };
-
-        message.From.Add(organizer);
-        message.To.Add(new MailboxAddress(booker.Name, booker.Email));
-
-        // MimeKit otherwise derives the Message-Id's right-hand side from the machine's hostname,
-        // which in a container is a random hex string and not a resolvable domain. Filters read
-        // that as a forgery signal, and this whole task is about landing in an inbox. The sending
-        // domain is the honest answer and costs one line.
-        message.MessageId = MimeUtils.GenerateMessageId(organizer.Domain);
-
-        return message;
+            organizer,
+            booker);
     }
 
     /// <summary>
@@ -361,9 +350,29 @@ public sealed class BookingMailer(
             the suggestion lapses and the meeting stays exactly where it is.
             """);
 
+        return Envelope($"A new time for {booking.Link.Name}?", body, organizer, booker);
+    }
+
+    /// <summary>
+    /// The parts of a message that do not depend on what it says: who it is from, who it is to,
+    /// and the Message-Id. Shared by both composers because it is identical between them and
+    /// because the Message-Id is the one line here with a reason that is easy to forget.
+    /// </summary>
+    /// <remarks>
+    /// MimeKit otherwise derives the Message-Id's right-hand side from the machine's hostname,
+    /// which in a container is a random hex string and not a resolvable domain. Filters read that
+    /// as a forgery signal, and this whole feature is judged on inbox placement. The sending
+    /// domain is the honest answer and costs one line.
+    /// </remarks>
+    private static MimeMessage Envelope(
+        string subject,
+        MimeEntity body,
+        MailboxAddress organizer,
+        BookingParticipant booker)
+    {
         var message = new MimeMessage
         {
-            Subject = $"A new time for {booking.Link.Name}?",
+            Subject = subject,
             Body = body,
         };
 
