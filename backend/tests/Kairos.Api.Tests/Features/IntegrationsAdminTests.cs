@@ -37,7 +37,7 @@ public class IntegrationsAdminTests
 
     private const string UnknownProvider = "bogus";
 
-    /// <summary>2026-08-14T22:29:14Z. Any instant; nothing here reads a clock.</summary>
+    /// <summary>2026-08-15T22:29:14Z. Any instant; nothing here reads a clock.</summary>
     private const long ConnectedAt = 1_786_832_954;
 
     /// <summary>

@@ -1,9 +1,10 @@
 // The availability half of the operator's HTTP surface.
 //
-// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is in
-// the booking route's entry chunk — 240 gzipped bytes of endpoints the invitee
-// can never call. This is reached only through the lazily imported admin shell,
-// and still goes through `adminRequest`.
+// Here rather than in lib/api.ts: that module is in the booking route's entry
+// chunk, so every endpoint added to it is weight the invitee downloads and can
+// never call. This is reached only through the lazily imported admin shell, and
+// still goes through `adminRequest`. (A 240-byte figure once stood here; it was
+// measured when these calls lived in lib/api.ts and no longer reproduces.)
 
 import { adminRequest, adminRequestNothing } from './session'
 

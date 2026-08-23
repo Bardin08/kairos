@@ -17,7 +17,7 @@ namespace Kairos.Api.Integrations.Webhooks;
 public sealed class OutboxWriter(KairosDbContext context, IClock clock)
 {
     /// <summary>
-    /// Adds the message and returns it, untracked-by-nobody and unsaved. The return value exists
+    /// Adds the message and returns it, tracked and unsaved. The return value exists
     /// for the one caller that has to take it back: <c>BookingWriter</c> enqueues inside its own
     /// transaction, and a message left in the change tracker after a failure there would ride
     /// along on the next SaveChanges and announce a booking that was never written.

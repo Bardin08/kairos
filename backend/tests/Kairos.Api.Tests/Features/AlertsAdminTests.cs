@@ -212,7 +212,7 @@ public class AlertsAdminTests
     private static string Day() => LocalDatePattern.Iso.Format(
         SystemClock.Instance.GetCurrentInstant().InUtc().Date.PlusDays(WellAhead).Next(IsoDayOfWeek.Monday));
 
-    /// <summary>One pattern, one Monday-morning rule, one active link, one duration.</summary>
+    /// <summary>One pattern, one Monday nine-to-five rule, one active link, one duration.</summary>
     private static void SeedBookableLink(KairosApp app) => app.Seed(context =>
     {
         context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" });

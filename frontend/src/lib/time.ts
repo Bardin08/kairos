@@ -5,9 +5,10 @@
 // route's chunk, and Rollup shakes out an export nobody imports but keeps one a
 // lazy chunk imports. See routes/admin/adminTime.ts.
 //
-// A date library is the one thing the budget forbids: the shell already spends
-// 61,641 of 76,800 gzipped bytes, and the smallest useful one is larger than
-// everything Kairos writes. `Intl` costs nothing and carries the whole tzdb.
+// A date library is the one thing the budget forbids: the booking route already
+// spends 72,726 of 76,800 gzipped bytes (scripts/bundle-budget.sh, 2026-08-23),
+// and the smallest useful one is larger than everything Kairos writes. `Intl`
+// costs nothing and carries the whole tzdb.
 //
 // Two vocabularies, and confusing them is the bug this file exists to prevent:
 //
