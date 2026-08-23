@@ -100,6 +100,26 @@ test('changing the zone and saving sends the chosen id with every other value', 
 })
 
 /**
+ * The fifth number on this screen, and deliberately not a fifth global limit:
+ * no link overrides a hold, so it has no override count and no place in the
+ * record the link editor iterates. What is pinned is that it reaches the save.
+ */
+test('the proposal hold is set in hours and sent with the rest', async () => {
+  render(<Settings />)
+
+  fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
+    target: { value: String(TWELVE_HOURS) },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() =>
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalHoldHours: TWELVE_HOURS }),
+    ),
+  )
+})
+
+/**
  * An operator changing a global has to know how many links will ignore it. A
  * change that appears to do nothing is the one that gets made twice.
  */
@@ -172,26 +192,6 @@ test('an invalid limit puts data-invalid on the row that contains its input', as
  * is that light and dark override the device in both directions AND that there
  * is still a way back to letting the device decide.
  */
-/**
- * The fifth number on this screen, and deliberately not a fifth global limit:
- * no link overrides a hold, so it has no override count and no place in the
- * record the link editor iterates. What is pinned is that it reaches the save.
- */
-test('the proposal hold is set in hours and sent with the rest', async () => {
-  render(<Settings />)
-
-  fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
-    target: { value: String(TWELVE_HOURS) },
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-  await waitFor(() =>
-    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith(
-      expect.objectContaining({ proposalHoldHours: TWELVE_HOURS }),
-    ),
-  )
-})
-
 test('the theme control forces light and dark, and hands control back to the system', async () => {
   render(<Settings />)
   const theme = await screen.findByLabelText('Theme')
