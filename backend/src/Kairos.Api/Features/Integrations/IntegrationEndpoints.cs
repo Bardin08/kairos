@@ -36,14 +36,17 @@ public sealed record ConnectIntegrationResponse(string ConsentUrl);
 /// lives under <c>Integrations/</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>What protects these endpoints.</b> The two operator-driven routes hang off
 /// <see cref="AdminGroup.MapAdmin"/> under <c>/api/v1/admin</c>. Only the callback's registered URI
 /// is fixed — the other two cost two fetch URLs to move — so it alone stays outside the prefix and
 /// anonymous: a browser arrives on a redirect from the provider, and its ticket is <c>state</c>.
-///
+/// </para>
+/// <para>
 /// <b>state.</b> No row and no cache entry: the provider and an expiry, sealed with the AES-GCM key
 /// that protects the credentials. Forging one needs the key, replaying one has
 /// <see cref="StateLifetimeMinutes"/> minutes, and a restart mid-consent strands nobody.
+/// </para>
 /// </remarks>
 public static class IntegrationEndpoints
 {

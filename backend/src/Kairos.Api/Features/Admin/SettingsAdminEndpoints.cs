@@ -28,12 +28,15 @@ public sealed record OverrideCountsResponse(
 /// The settings screen's read, and the organizer's zone for every screen that names it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The four limits are plain <c>int</c> and never nullable: this is the level a link's null
 /// inherits from, and nullable here would imply a level above the global that does not exist.
-///
+/// </para>
+/// <para>
 /// <see cref="SignedInAs"/> is the operator's name as the identity provider gave it, null when it
 /// gave none. It rides on this response because the workbench asks both questions when it opens,
 /// and a second route for one string would have no other reader.
+/// </para>
 /// </remarks>
 public sealed record SettingsResponse(
     string TimeZone,
@@ -92,14 +95,17 @@ public sealed record SaveSettingsRequest
 }
 
 /// <summary>
+/// <para>
 /// <b>Changing the zone rewrites nothing.</b> Every booking's <c>StartUtc</c> is an instant and
 /// stays where it is; what moves is the wall clock the availability rules describe, so a pattern
 /// reading 09:00–17:00 shifts tomorrow's offered window while the meetings already made do not.
-///
+/// </para>
+/// <para>
 /// <b>No provider list to maintain.</b> The picker's options are
 /// <see cref="DateTimeZoneProviders.Tzdb"/>, which NodaTime already carries: nothing hand-kept to
 /// go stale, no ICU dependency, and the same database the scheduler resolves against — which is why
 /// the check on the way in reads from it rather than from the operating system.
+/// </para>
 /// </summary>
 public static class SettingsAdminEndpoints
 {

@@ -22,13 +22,16 @@ public sealed record AlertResponse(
     IReadOnlyDictionary<string, string> Details);
 
 /// <summary>
+/// <para>
 /// On the admin group like every other admin route, so rule 19's access decision is stated where
 /// the group is built and rule 20's rate-limit answer is the group's argued "none". The shell calls
 /// this on mount and on every navigation, which makes "within one page load" true without a poll.
-///
+/// </para>
+/// <para>
 /// Ordered by severity alone, deliberately not by <see cref="OperatorAlert.Since"/>: a fault with
 /// no known last success sorts first or last depending on how null is treated, and neither is a
 /// claim this can make honestly.
+/// </para>
 /// </summary>
 public static class AlertsAdminEndpoints
 {

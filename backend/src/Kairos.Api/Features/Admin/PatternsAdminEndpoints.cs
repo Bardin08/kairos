@@ -106,12 +106,15 @@ public sealed record PatternResponse(
     IReadOnlyList<string> UsedBy);
 
 /// <summary>
+/// <para>
 /// <b>A pattern is a shape, not a schedule.</b> Nothing here reads a booking or writes a link —
 /// which pattern a link stands on is the link's own field. Both have been proposed for this screen,
 /// and both turn a reusable object into a diary of one.
-///
+/// </para>
+/// <para>
 /// <b>Every write answers with the whole pattern.</b> One extra read per mutation buys a client
 /// that replaces the card rather than merging a partial response into a cached one.
+/// </para>
 /// </summary>
 public static class PatternsAdminEndpoints
 {
