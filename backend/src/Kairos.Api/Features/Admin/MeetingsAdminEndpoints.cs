@@ -410,11 +410,22 @@ public static class MeetingsAdminEndpoints
 
         BookingMover.RequireMovable(booking);
 
+        // A hold that has lapsed is holding nothing, and every conflict reader already reads it
+        // that way. Here it has to be CLOSED rather than read past, because what blocks the next
+        // suggestion is the filtered unique index over BookingId WHERE State = Open — a row, which
+        // no query can fold a clock into. Nothing is saved by this; it commits with the release
+        // below, and if the release never happens the row is exactly as dead as it already was.
+        await proposals.ExpireLapsedAsync(id, now, cancellationToken);
+
         // Asked before the release rather than left to the index below. A double-submitted form is
         // the ordinary way this arrives, and answering it without ever setting the booking
         // Cancelled keeps it out of the window that release opens — the one where a cancel landing
         // at the same moment reads the meeting as already off and quietly does nothing.
-        if (await HasOpenProposalAsync(context, id, cancellationToken))
+        //
+        // The clock is in this read as well as in the close above, and the two are not one check
+        // written twice: this one runs against the database, where the close is still uncommitted,
+        // so a lapsed hold is refused by the row it can still see unless the read discounts it.
+        if (await HasOpenProposalAsync(context, id, now, cancellationToken))
         {
             throw DomainException.Conflict(
                 ProposalOpenCode, "A proposal for this meeting is already open.");
@@ -452,7 +463,7 @@ public static class MeetingsAdminEndpoints
             // BookingId means somebody proposed first; the one on TokenHash means 32 random bytes
             // repeated, and reporting that as "a proposal is already open" would send the operator
             // looking for a proposal that does not exist.
-            if (!await HasOpenProposalAsync(context, id, cancellationToken))
+            if (!await HasOpenProposalAsync(context, id, now, cancellationToken))
             {
                 throw;
             }
@@ -483,14 +494,29 @@ public static class MeetingsAdminEndpoints
         return await OneAsync(context, booking, now, cancellationToken);
     }
 
+    /// <summary>
+    /// Whether a hold is open AND still holding. Both halves, and the clock is not decoration:
+    /// without it a lapsed row that nothing had swept still answered
+    /// <see cref="ProposalOpenCode"/>, which left the operator unable to suggest a new time until
+    /// a tick fired — the one thing in this feature that waited on the sweeper, against a design
+    /// whose whole claim is that nothing does.
+    /// </summary>
     private static Task<bool> HasOpenProposalAsync(
         KairosDbContext context,
         Guid bookingId,
-        CancellationToken cancellationToken) =>
-        context.BookingProposals.AsNoTracking()
+        Instant now,
+        CancellationToken cancellationToken)
+    {
+        // Hoisted, because NodaTime's conversion does not translate inside an expression tree.
+        var seconds = now.ToUnixTimeSeconds();
+
+        return context.BookingProposals.AsNoTracking()
             .AnyAsync(
-                row => (row.BookingId == bookingId) && (row.State == ProposalState.Open),
+                row => (row.BookingId == bookingId)
+                    && (row.State == ProposalState.Open)
+                    && (row.ExpiresAt > seconds),
                 cancellationToken);
+    }
 
     /// <summary>
     /// Takes a proposal back. Without it, an operator who names the wrong time holds a slot

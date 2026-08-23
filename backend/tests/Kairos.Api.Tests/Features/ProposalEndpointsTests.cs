@@ -67,6 +67,7 @@ public class ProposalEndpointsTests
 
     private const int NoProposal = 0;
     private const int OneProposal = 1;
+    private const int TwoProposals = 2;
 
     private const string RelayHost = "smtp.example.com";
     private const string RelayFrom = "organizer@example.com";
@@ -244,6 +245,63 @@ public class ProposalEndpointsTests
             .ShouldBe(MeetingsFixture.BookedInstant);
         app.Read(context => context.BookingProposals.Count(candidate => candidate.BookingId == booking))
             .ShouldBe(OneProposal);
+    }
+
+    /// <summary>
+    /// The same refusal, one hold later, and it must NOT happen.
+    /// </summary>
+    /// <remarks>
+    /// The design's central claim is that nothing waits on <c>ProposalSweeper</c>: every reader of
+    /// a hold compares <see cref="BookingProposal.ExpiresAt"/> against the clock, so a lapsed hold
+    /// stops holding at the instant it lapses whether or not anything has been round to mark it.
+    /// This route was the one place that read <see cref="ProposalState.Open"/> without the clock,
+    /// which left the operator unable to suggest a new time until a tick fired or they withdrew a
+    /// dead suggestion by hand — availability right throughout, and re-proposing wrong.
+    ///
+    /// Nothing sweeps in this test, and that is the assertion. The lapse is written straight onto
+    /// the row and no sweeper runs against it.
+    /// </remarks>
+    [Fact]
+    public async Task Propose_TheOpenHoldHasLapsed_IsAllowedWithoutWaitingForASweep()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+
+        await ProposeAsync(client, booking, MovedTo);
+        Lapse(app, booking);
+
+        var again = await ProposeAsync(client, booking, MovedAgainTo);
+
+        again.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var proposals = app.Read(context => context.BookingProposals.AsNoTracking()
+            .Where(row => row.BookingId == booking)
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.Id)
+            .ToList());
+        proposals.Count.ShouldBe(TwoProposals);
+
+        // The dead one is CLOSED rather than ignored, and the difference is the filtered unique
+        // index over BookingId WHERE State = Open: that is a row and not a read, so a lapsed one
+        // left Open would still occupy the slot the new hold needs.
+        proposals[0].State.ShouldBe(ProposalState.Expired);
+        proposals[0].DecidedAt.ShouldNotBeNull();
+
+        // And left unannounced on purpose. The sweeper picks up Expired rows with no NotifiedAt
+        // precisely so the operator still hears that their earlier suggestion lapsed — closing it
+        // here must hand that notice on rather than swallow it.
+        proposals[0].NotifiedAt.ShouldBeNull();
+
+        proposals[1].State.ShouldBe(ProposalState.Open);
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposals[1].StartUtc))
+            .ShouldBe(MovedAgainTo);
+
+        // The meeting itself never moved. Proposing is asking.
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(row.StartUtc))
+            .ShouldBe(MeetingsFixture.BookedInstant);
     }
 
     /// <summary>

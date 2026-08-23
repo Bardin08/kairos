@@ -69,6 +69,51 @@ public sealed class ProposalWriter(KairosDbContext context, IClock clock)
     }
 
     /// <summary>
+    /// Closes the meeting's hold if it has already lapsed, without saving — so it commits with
+    /// whatever the caller is already writing.
+    /// </summary>
+    /// <remarks>
+    /// Every other reader of a hold treats a lapsed one as holding nothing and needs no help doing
+    /// it: <see cref="StateAt"/> folds the clock, and both conflict readers require
+    /// <see cref="BookingProposal.ExpiresAt"/> to be in the future before the row blocks anything.
+    /// The propose route is the one place that cannot stop at reading, and the reason is the
+    /// filtered unique index over BookingId WHERE State = Open — that is a ROW, not a predicate a
+    /// query can fold a clock into. A lapsed row left Open goes on occupying the one slot the next
+    /// suggestion needs, so the operator cannot re-propose until something closes it. This is what
+    /// closes it, and it is why re-proposing no longer waits on the sweeper the way availability
+    /// never did.
+    ///
+    /// <see cref="ProposalState.Expired"/> rather than <see cref="ProposalState.Withdrawn"/>:
+    /// nobody took this back, the invitee ran out of time, and those are different things to tell
+    /// an operator. <see cref="BookingProposal.NotifiedAt"/> is deliberately left null — the
+    /// sweeper's own predicate is Expired rows nobody has been told about, so closing one here
+    /// hands the notice to it rather than swallowing it.
+    /// </remarks>
+    public async Task ExpireLapsedAsync(
+        Guid bookingId,
+        Instant now,
+        CancellationToken cancellationToken)
+    {
+        // Hoisted, because NodaTime's conversion does not translate inside an expression tree.
+        var seconds = now.ToUnixTimeSeconds();
+
+        var lapsed = await context.BookingProposals
+            .FirstOrDefaultAsync(
+                proposal => (proposal.BookingId == bookingId)
+                    && (proposal.State == ProposalState.Open)
+                    && (proposal.ExpiresAt <= seconds),
+                cancellationToken);
+
+        if (lapsed is null)
+        {
+            return;
+        }
+
+        lapsed.State = ProposalState.Expired;
+        lapsed.DecidedAt = seconds;
+    }
+
+    /// <summary>
     /// Closes the meeting's open hold, if it has one, without saving — so it commits with whatever
     /// the caller is already writing.
     /// </summary>
