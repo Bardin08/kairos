@@ -14,6 +14,12 @@ public class SchemaTests
     private const int NineAm = 9 * MinutesPerHour;
     private const int FivePm = 17 * MinutesPerHour;
 
+    /// <summary>
+    /// The one date both writers name. Nothing about the calendar decides anything here — what
+    /// the race needs is that the two contexts are looking at the same day.
+    /// </summary>
+    private static readonly DateOnly ContestedDate = new(2026, 9, 14);
+
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
     {
@@ -82,7 +88,6 @@ public class SchemaTests
     {
         using var database = new TestDatabase();
         var patternId = Guid.CreateVersion7();
-        var date = new DateOnly(2026, 9, 14);
 
         using (var seed = database.CreateContext())
         {
@@ -91,7 +96,7 @@ public class SchemaTests
             {
                 Id = Guid.CreateVersion7(),
                 PatternId = patternId,
-                Date = date,
+                Date = ContestedDate,
                 StartMinute = NineAm,
                 EndMinute = FivePm,
             });
@@ -101,13 +106,46 @@ public class SchemaTests
         // Both read before either writes, which is the whole of the race.
         using var first = database.CreateContext();
         using var second = database.CreateContext();
-        var firstRows = first.PatternOverrides.Where(row => row.Date == date).ToList();
-        var secondRows = second.PatternOverrides.Where(row => row.Date == date).ToList();
+        var firstRows = first.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
+        var secondRows = second.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
 
         first.PatternOverrides.RemoveRange(firstRows);
         first.SaveChanges();
 
         second.PatternOverrides.RemoveRange(secondRows);
+        Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
+    }
+
+    /// <summary>
+    /// The other half of what the override write leans on, and the half that covers a date
+    /// holding no rows yet: there is nothing to delete then, so the stale delete above never
+    /// fires and the two windows differ, so the unique index has nothing to refuse either. Both
+    /// writers raise the number they read, and the second finds the row already moved. Remove
+    /// IsConcurrencyToken from the column and this passes silently — which is precisely the
+    /// state in which two tabs left a date holding both of their windows.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WhenTwoWritersBothRaiseThePatternVersion_RaisesConcurrency()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.SaveChanges();
+        }
+
+        // Both read before either writes, exactly as two requests on one pattern do.
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var read = first.Patterns.Single(pattern => pattern.Id == patternId);
+        var alsoRead = second.Patterns.Single(pattern => pattern.Id == patternId);
+
+        read.Version++;
+        first.SaveChanges();
+
+        alsoRead.Version++;
         Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
     }
 }

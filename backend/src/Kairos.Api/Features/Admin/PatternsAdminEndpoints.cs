@@ -414,6 +414,13 @@ public static class PatternsAdminEndpoints
             });
         }
 
+        // The whole of what makes two tabs on one date safe. The index below catches only an
+        // identical pair, and the tracked delete only raises where there were rows to delete —
+        // so a date that held nothing yet let both writers insert and kept the union, which is
+        // neither operator's answer. Raising the number they both read means EF writes
+        // WHERE Version = n, the second one matches nothing, and the loser is told.
+        pattern.Version++;
+
         await ConcurrentWrite.NamedAsync(
             async () =>
             {

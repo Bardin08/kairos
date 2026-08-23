@@ -506,6 +506,51 @@ public class PatternsAdminTests
         (await SlotsAsync(app, date)).ShouldNotBeEmpty();
     }
 
+    /// <summary>
+    /// Two admin tabs saving one date at once, over the real pipeline. What is asserted is what
+    /// holds however the two interleave: neither is answered with a stack trace, and the date is
+    /// left holding one writer's set rather than the union of both. Whether the loser is refused
+    /// or merely replaces the winner is the test host's to decide and is not asserted — under
+    /// load the two requests serialize and both answer 200, which is correct and would make a
+    /// stricter assertion a timing measurement wearing a behaviour test's clothes. The refusal
+    /// itself is pinned where it can be forced: the version check in <c>SchemaTests</c>, and the
+    /// mapping from it in <c>ConcurrentWriteTests</c>.
+    /// </summary>
+    [Fact]
+    public async Task SaveOverride_FromTwoWritersAtOnce_LeavesOneWritersSetAndNeverAServerError()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+
+        var morning = SaveOverrideAsync(client, day, [new { startMinute = NineAm, endMinute = Noon }]);
+        var afternoon = SaveOverrideAsync(client, day, [new { startMinute = TwoPm, endMinute = FivePm }]);
+
+        var answers = await Task.WhenAll(morning, afternoon);
+
+        answers.ShouldAllBe(answer => answer.StatusCode != HttpStatusCode.InternalServerError);
+        foreach (var refused in answers.Where(answer => answer.StatusCode != HttpStatusCode.OK))
+        {
+            refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+            (await CodeOfAsync(refused)).ShouldBe(PatternsAdminEndpoints.OverrideDateTakenCode);
+        }
+
+        // One window rather than two, which is what rules out the union — and it is one of the
+        // two that were sent rather than anything in between.
+        var stored = (await SeededPatternAsync(client)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows;
+
+        stored.ShouldHaveSingleItem().ShouldBeOneOf(
+            new OverrideWindowResponse(NineAm, Noon),
+            new OverrideWindowResponse(TwoPm, FivePm));
+
+        foreach (var answer in answers)
+        {
+            answer.Dispose();
+        }
+    }
+
     private static string PatternUrl => $"{ApiVersions.V1}/admin/patterns/{PatternId}";
 
     /// <summary>
