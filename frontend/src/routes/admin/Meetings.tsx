@@ -265,6 +265,7 @@ export default function Meetings() {
           <MeetingActions
             meetingId={meeting.id}
             zone={zone}
+            subject={meeting}
             proposal={meeting.proposal}
             onPropose={() => setProposing(meeting)}
             onChanged={applyChange}

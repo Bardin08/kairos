@@ -1493,6 +1493,83 @@ const main = async () => {
     })
   }
 
+  // ---- 15. The cancel dialog: the four guarantees jsdom cannot make.
+  //
+  // frontend/tests/setup.ts shims showModal and close because jsdom 30 ships
+  // <dialog> as an element with none of its behaviour. That shim keeps the
+  // component's own logic under test and can say nothing about the platform's
+  // half — the focus trap, the inertness of the page behind, the Escape key and
+  // the backdrop. Those are asserted here, in a browser that actually has them,
+  // and a test in the unit suite that appears to cover one of them is covering
+  // the shim.
+  for (const [label, viewport] of [
+    ['cancel-dialog-1280', DESKTOP],
+    ['cancel-dialog-899', TABBAR],
+    ['cancel-dialog-440', PHONE],
+  ]) {
+    await withPage(browser, { viewport }, async (page) => {
+      await adminReady(page, '/meetings')
+      const opener = await page.$('button:has-text("Cancel")')
+      if (opener === null) {
+        record(label, { opened: false, reason: 'no confirmed meeting on /admin/meetings to cancel' })
+        return
+      }
+      await opener.click()
+      await page.waitForSelector('dialog[open]', { timeout: 10000 })
+      await page.screenshot({ path: `${OUT}/${label}.png` })
+
+      const open = await page.evaluate(() => {
+        const dialog = document.querySelector('dialog[open]')
+        const rect = dialog.getBoundingClientRect()
+        const card = dialog.querySelector('.card')
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          top: Math.round(rect.top),
+          // The backdrop is what makes restating the meeting necessary rather
+          // than decorative: blurred, the row underneath cannot be read.
+          backdrop: getComputedStyle(dialog, '::backdrop').backdropFilter,
+          backdropPaint: getComputedStyle(dialog, '::backdrop').backgroundColor,
+          // The whole point of the change: the row keeps its own height.
+          rowGrew: document.querySelector('tbody tr').getBoundingClientRect().height > 320,
+          focusInside: dialog.contains(document.activeElement),
+          focusedTag: document.activeElement?.tagName.toLowerCase() ?? null,
+          labelled: document.getElementById(dialog.getAttribute('aria-labelledby'))?.textContent ?? null,
+          // No state by hue alone.
+          confirmHasIcon: !!dialog.querySelector('.btn-danger svg'),
+          xScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          // Every class the dialog renders has to exist in the sheet, the same
+          // bar the rest of this file holds the product to.
+          classes: [...new Set([...dialog.querySelectorAll('*')].flatMap((n) => [...n.classList]))],
+        }
+      })
+
+      // Tab past every control in the dialog and then some. In a browser the
+      // top layer keeps focus inside; the page behind is inert, so the rail's
+      // links cannot be reached. This is the assertion the shim cannot make.
+      let escaped = false
+      for (let press = 0; press < 12; press++) {
+        await page.keyboard.press('Tab')
+        const outside = await page.evaluate(() => {
+          const dialog = document.querySelector('dialog[open]')
+          if (dialog === null) return true
+          return !dialog.contains(document.activeElement) && document.activeElement !== document.body
+        })
+        if (outside) { escaped = true; break }
+      }
+
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(200)
+      const afterEscape = await page.evaluate(() => ({
+        closed: document.querySelector('dialog[open]') === null,
+        // And back to the button that opened it, not to the top of the page.
+        focusReturned: document.activeElement?.textContent?.trim() === 'Cancel',
+      }))
+
+      record(label, { opened: true, ...open, focusEscapedOnTab: escaped, ...afterEscape })
+    })
+  }
+
   await browser.close()
   writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2))
   console.log(`\nwrote ${OUT}/results.json and screenshots to ${OUT}/`)
