@@ -1672,6 +1672,34 @@
     border-top: var(--border-width) solid var(--border-subtle);
   }
 
+  /* The only new rule this surface adds, and the argument for it is placement
+     and nothing else. Everything inside the panel is existing classes — .icon-btn
+     for the trigger, .badge for the count, .card with .card-pad-sm for the
+     surface, .rowgroup for the list, .prose and .fine for the two lines. What
+     kairos.css had nothing for is a surface that hangs off a control: .card has
+     no positioning at all, and there is no popover, banner or anchored anything
+     in this file. Rule 17 exception, granted deliberately and named here. */
+  .alertpanel { position: relative; }
+
+  .alertpanel > [role="status"] {
+    position: absolute;
+    bottom: calc(100% + var(--space-2));
+    inset-inline-start: 0;
+    width: min(22rem, calc(100vw - var(--space-6)));
+    z-index: 20;
+  }
+
+  /* On a phone it hangs off the tab bar instead, so it still opens upward and
+     still fits at 440px. Same 900px breakpoint the rail and the tab bar already
+     swap at — the number stays in one place. */
+  @media (max-width: 899px) {
+    .alertpanel > [role="status"] {
+      inset-inline-start: var(--space-3);
+      inset-inline-end: var(--space-3);
+      width: auto;
+    }
+  }
+
   .nav { display: grid; gap: 2px; }
   .nav a {
     display: flex;
