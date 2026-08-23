@@ -40,6 +40,18 @@ test('the invalid-state border and focus ring cover the row shape, not only the 
   )
 })
 
+// The substance of the focus fix rather than its mechanics. `outline: none` on
+// the form controls is what actually removed the ring DESIGN.md says is never
+// removed; moving those selectors to :focus-visible was bookkeeping beside it,
+// and only the rename is pinned above. Comments are stripped first, because the
+// block explaining the fix names the declaration in prose and prose about a bug
+// is not the bug.
+test('no rule in the stylesheet removes the focus outline', () => {
+  const css = readFileSync(stylesheet, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  expect(css).not.toContain('outline: none')
+})
+
 // A margin or notice in minutes can legitimately run past 999. .ctl-num's
 // width and .affix's trailing reservation are derived together (see the
 // comments beside each in kairos.css) — this pins the two numbers the
