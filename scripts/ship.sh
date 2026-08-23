@@ -43,11 +43,8 @@ die() { printf 'ship: %s\n' "$1" >&2; exit 1; }
 #
 # `set -e` alone is not enough here. It dies with a bare git message and no idea
 # which step produced it, and it is suspended inside `if`/`while`/`&&` conditions
-# — which is exactly where a status gets lost. Worse, when a fetch fails the very
-# next commands succeed as no-ops: a rebase onto a stale origin/main reports
-# "up to date" and exits 0, and `git push --force-with-lease` with nothing to
-# push reports "Everything up-to-date" and exits 0. A swallowed fetch therefore
-# looks precisely like a clean rebase.
+# — which is exactly where a status gets lost, and where a swallowed fetch starts
+# looking like a clean rebase.
 git_or_die() {  # git_or_die <what-was-being-done> <git args...>
   local what="$1"; shift
   local output status=0
@@ -60,12 +57,11 @@ git_or_die() {  # git_or_die <what-was-being-done> <git args...>
 
 # Fetch origin/main and prove the fetch actually took.
 #
-# The exit code is not sufficient evidence on its own. When a fetch does not
-# update origin/main, every command after it succeeds as a no-op — the rebase
-# prints "Current branch is up to date" and exits 0, the force-push prints
-# "Everything up-to-date" and exits 0 — so a stale base is indistinguishable from
-# a clean rebase. The only honest test is whether the ref the fetch was supposed
-# to move now matches the remote.
+# The exit code is not evidence on its own: when a fetch does not update
+# origin/main, every command after it succeeds as a no-op — the rebase prints
+# "Current branch is up to date", the force-push prints "Everything up-to-date",
+# both exit 0. The only honest test is whether the ref the fetch was supposed to
+# move now matches the remote.
 fetch_origin_main() {  # fetch_origin_main <what-was-being-done>
   local what="$1" remote_tip local_tip
   git_or_die "$what" fetch origin main
@@ -82,9 +78,8 @@ fetch_origin_main() {  # fetch_origin_main <what-was-being-done>
 
 [ "$BRANCH" != "main" ] || die "refusing to ship from main; branch first"
 
-# Untracked files count as dirty. Every task in this plan adds new files, and one
-# forgotten `git add` would otherwise ship a pull request missing half the change
-# while this script honestly reported success.
+# Untracked files count as dirty: one forgotten `git add` would otherwise ship a
+# pull request missing half the change while this script reported success.
 #
 # Computed before the test, not inside it: errexit is suspended in an `if`
 # condition, so a `git ls-files` that failed there would yield an empty string
@@ -218,7 +213,7 @@ rebase_onto_main() {
 
   # Assert the rebase actually took. A rebase onto a stale origin/main exits 0
   # having done nothing, so success is proved by the invariant rather than by
-  # the exit code: after rebasing, origin/main must be an ancestor of HEAD.
+  # the exit code.
   if ! git merge-base --is-ancestor origin/main HEAD; then
     die "rebase of #$PR onto origin/main did not take — origin/main ($(git rev-parse --short origin/main)) is not an ancestor of HEAD ($(git rev-parse --short HEAD)); the working tree may be on a stale base"
   fi

@@ -32,18 +32,16 @@ skip() {  # skip <description> <reason>
   SKIP=$((SKIP+1)); printf '  skip %s — %s\n' "$1" "$2"
 }
 
-# Three states, because they call for three different actions. Reporting any of
-# them as a failure would make the suite red for a reason that has nothing to do
-# with what it is checking — the same defect class as a check that passes when
-# its subject is missing.
+# Three states, because they call for three different actions. Reporting any as a
+# failure would make the suite red for a reason unrelated to what it checks — the
+# same defect class as a check that passes when its subject is missing.
 #
 #   absent  — Tasks 1-3, no frontend/ at all. CI gates the same way.
 #   no-deps — frontend/ exists but nobody ran npm ci in this clone.
 #   ready   — run it all.
 #
 # npm ci is deliberately NOT run from here: this script reports on the tree, it
-# does not mutate it, and a surprise multi-second install inside a check is worse
-# than a sentence telling you which command to run.
+# does not mutate it, and a sentence naming the command beats a surprise install.
 FRONTEND_STATE=absent
 if [ -d frontend ]; then
   FRONTEND_STATE=ready
