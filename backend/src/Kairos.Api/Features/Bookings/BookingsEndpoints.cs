@@ -574,7 +574,13 @@ public static class BookingsEndpoints
     /// that is off, reschedule refusing it, and nothing having withdrawn the calendar event or
     /// announced anything, because both of those live in the cancel endpoint and never ran.
     /// </summary>
-    private static Task ConfirmAsync(KairosDbContext context, Booking booking)
+    /// <remarks>
+    /// Reachable from <see cref="Admin.MeetingsAdminEndpoints"/> for the same reason
+    /// <see cref="RequireOfferedAsync"/> is: the operator's propose makes the identical release to
+    /// run the identical check, and a second copy of an uncancellable compensation is a second
+    /// place for it to acquire a cancellation token and stop compensating.
+    /// </remarks>
+    internal static Task ConfirmAsync(KairosDbContext context, Booking booking)
     {
         booking.Status = BookingStatus.Confirmed;
         booking.CancelledAt = null;

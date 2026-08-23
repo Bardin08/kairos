@@ -32,6 +32,13 @@ public class ProposalEndpointsTests
     /// </summary>
     private const string MovedAgainTo = $"{MeetingsFixture.Day}T15:00:00Z";
 
+    /// <summary>
+    /// The slot immediately after the meeting, and therefore inside the margin the meeting pads
+    /// its own slot with. Nothing may offer it while that meeting is confirmed — which is the
+    /// whole point of it being the one both release paths are asserted on.
+    /// </summary>
+    private const string MovedNextTo = $"{MeetingsFixture.Day}T11:30:00Z";
+
     private const string BookedEnd = $"{MeetingsFixture.Day}T11:30:00Z";
     private const string MovedToEnd = $"{MeetingsFixture.Day}T14:30:00Z";
 
@@ -44,6 +51,8 @@ public class ProposalEndpointsTests
     private const string UnknownToken = "not-a-token";
 
     private const int SecondsPerMinute = 60;
+
+    private const int NoProposal = 0;
 
     private const string AcceptAction = "accept";
     private const string DeclineAction = "decline";
@@ -81,6 +90,53 @@ public class ProposalEndpointsTests
         answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
             .ShouldContain(BookingsEndpoints.SlotUnavailableCode);
+    }
+
+    /// <summary>
+    /// Push the meeting back half an hour — the commonest reason to propose anything — and the
+    /// case the propose check refused outright until it released the booking first. A confirmed
+    /// meeting pads its own slot by the margin, so the hour directly after it is blocked by the
+    /// very meeting being moved.
+    /// </summary>
+    [Fact]
+    public async Task Propose_TheSlotDirectlyAfterTheMeeting_IsOfferedBecauseTheMeetingIsReleased()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var booking = await MeetingsFixture.BookAsync(app, client);
+
+        var answer = await ProposeAsync(client, booking, MovedNextTo);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
+        app.Read(context => context.BookingProposals.Single(candidate => candidate.BookingId == booking))
+            .State.ShouldBe(ProposalState.Open);
+    }
+
+    /// <summary>
+    /// The compensation, and the only reason releasing here is safe at all. This propose has
+    /// already cancelled the booking to run its re-check; without the restore the operator reads
+    /// a refusal and the meeting is off in the database with nobody told and nothing withdrawn.
+    /// </summary>
+    [Fact]
+    public async Task Propose_AnHourTheLinkDoesNotOffer_LeavesTheMeetingConfirmedWhereItWas()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var booking = await MeetingsFixture.BookAsync(app, client);
+
+        var answer = await ProposeAsync(client, booking, OutsideHours);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(row.StartUtc))
+            .ShouldBe(MeetingsFixture.BookedInstant);
+        app.Read(context => context.BookingProposals.Count(candidate => candidate.BookingId == booking))
+            .ShouldBe(NoProposal);
     }
 
     [Fact]
@@ -141,6 +197,27 @@ public class ProposalEndpointsTests
         // the sweeper as a suggestion nobody answered.
         app.Read(context => context.BookingProposals.Single(row => row.BookingId == booking))
             .State.ShouldBe(ProposalState.Accepted);
+    }
+
+    /// <summary>
+    /// The accept's own release, and the only case that pins it. The meeting pads its own slot by
+    /// the margin, so the hour directly after it is covered by the meeting being moved: released,
+    /// the re-check sees a free hour; left confirmed, the acceptance is refused by its own subject.
+    /// </summary>
+    [Fact]
+    public async Task Accept_AProposalOnTheSlotDirectlyAfterTheMeeting_StillMovesIt()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking, MovedNextTo);
+
+        var answer = await AnswerAsync(app, token, AcceptAction);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var moved = app.Read(context => context.Bookings.Single(row => row.Id == booking));
+        InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(moved.StartUtc))
+            .ShouldBe(MovedNextTo);
     }
 
     /// <summary>The old slot is free the moment the move is real, and on every link.</summary>
@@ -293,7 +370,7 @@ public class ProposalEndpointsTests
             TestContext.Current.CancellationToken);
 
     /// <summary>
-    /// Proposes <see cref="MovedTo"/> and hands back a token that opens it.
+    /// Proposes <paramref name="start"/> and hands back a token that opens it.
     /// </summary>
     /// <remarks>
     /// The plaintext never leaves the mailer, so the row is re-minted with a token this test
@@ -303,9 +380,10 @@ public class ProposalEndpointsTests
     private static async Task<string> ProposeWithKnownTokenAsync(
         KairosApp app,
         HttpClient client,
-        Guid booking)
+        Guid booking,
+        string start = MovedTo)
     {
-        await ProposeAsync(client, booking, MovedTo);
+        await ProposeAsync(client, booking, start);
 
         var known = Guid.CreateVersion7().ToString("N");
         app.Seed(context =>

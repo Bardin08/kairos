@@ -299,6 +299,22 @@ public static class MeetingsAdminEndpoints
     /// land on an hour the link does not offer or inside another meeting's margin. That is what
     /// keeps this feature from being a way to write bookings the availability rules would never
     /// have produced.
+    ///
+    /// Release, check, re-place — <see cref="BookingsEndpoints.RescheduleAsync"/>'s shape, and it
+    /// has to be: a confirmed meeting pads its own slot by the margin, so checking with it still
+    /// confirmed refuses the hour directly after it, and "push it back half an hour" is the
+    /// commonest thing an operator wants to propose. Every path out re-confirms, the failing ones
+    /// included, through the same uncancellable <see cref="BookingsEndpoints.ConfirmAsync"/> the
+    /// invitee's reschedule compensates with.
+    ///
+    /// SAME KNOWN HOLE, and it is not fixed here either. Between the release and the re-place this
+    /// booking is Cancelled on disk while nobody has cancelled it, and
+    /// <see cref="Bookings.BookingCanceller"/> reads that as "off already" and returns having done
+    /// nothing — so a cancel landing in the window answers 200, is undone by the re-confirm, and
+    /// leaves the meeting standing with nothing announced and nobody told. It is the window
+    /// RescheduleAsync already documents; this route widens it to a second caller rather than
+    /// creating it. Closing it means a release distinguishable from a cancellation, which is a
+    /// change with its own tests.
     /// </remarks>
     private static async Task<MeetingResponse> ProposeAsync(
         Guid id,
@@ -328,26 +344,43 @@ public static class MeetingsAdminEndpoints
         var settings = await context.Settings.AsNoTracking()
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
 
-        await BookingsEndpoints.RequireOfferedAsync(
-            slots,
-            booking.Link.Slug,
-            (int)((booking.EndUtc - booking.StartUtc) / SecondsPerMinute),
-            start,
-            now,
-            DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
-            cancellationToken);
+        booking.Status = BookingStatus.Cancelled;
+        booking.CancelledAt = now.ToUnixTimeSeconds();
+        await context.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await BookingsEndpoints.RequireOfferedAsync(
+                slots,
+                booking.Link.Slug,
+                (int)((booking.EndUtc - booking.StartUtc) / SecondsPerMinute),
+                start,
+                now,
+                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
+                cancellationToken);
+        }
+        catch
+        {
+            await BookingsEndpoints.ConfirmAsync(context, booking);
+            throw;
+        }
 
         var (proposal, token) = proposals.Add(booking, start, settings.ProposalHoldHours);
 
         try
         {
-            await context.SaveChangesAsync(cancellationToken);
+            // The re-place carries the insert with it. A hold is invisible while the booking under
+            // it is not confirmed, so committing these apart would leave a window in which the
+            // slot just promised to the invitee is held by nothing at all.
+            await BookingsEndpoints.ConfirmAsync(context, booking);
         }
         catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
         {
             // The filtered unique index, which is the mechanism rather than a backstop here: two
-            // tabs proposing at once must not produce two holds for one meeting.
+            // tabs proposing at once must not produce two holds for one meeting. The insert is
+            // dropped and the booking put back on its own, since this save carried both.
             context.Entry(proposal).State = EntityState.Detached;
+            await BookingsEndpoints.ConfirmAsync(context, booking);
             throw DomainException.Conflict(
                 ProposalOpenCode, "A proposal for this meeting is already open.");
         }

@@ -46,6 +46,7 @@ public class EndpointTests
     private const int NineAm = 9 * 60;
     private const int FivePm = 17 * 60;
     private const string FirstSlotTime = "T09:00:00Z";
+    private const string SecondSlotTime = "T09:30:00Z";
     private const string ThirdSlotTime = "T10:00:00Z";
     private const string NeverOfferedTime = "T03:00:00Z";
 
@@ -166,6 +167,35 @@ public class EndpointTests
         moved.GetProperty("sequence").GetInt32()
             .ShouldBe(created.GetProperty("sequence").GetInt32() + 1);
         app.Read(context => context.Bookings.Count()).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A booking does not block its own move. A confirmed meeting pads its slot by the margin, so
+    /// the slot directly after it is covered by the meeting being moved — which is precisely what
+    /// the release before the re-check exists to get out of the way.
+    /// </summary>
+    /// <remarks>
+    /// Asserted nowhere until now, and the gap was invisible: every other reschedule in this file
+    /// moves to an hour the booking's own padded block never reached, so deleting the release
+    /// left the whole suite green. Found by mutating it while building the operator's propose,
+    /// which releases for the same reason and had the same hole.
+    /// </remarks>
+    [Fact]
+    public async Task RescheduleBooking_TheSlotDirectlyAfterIt_IsNotBlockedByTheMeetingBeingMoved()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var response = await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + SecondSlotTime },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("start").GetString().ShouldBe(day + SecondSlotTime);
     }
 
     [Fact]

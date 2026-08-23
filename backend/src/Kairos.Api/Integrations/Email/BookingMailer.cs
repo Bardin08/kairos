@@ -377,6 +377,18 @@ public sealed class BookingMailer(
         $"{baseUrl.TrimEnd('/')}/{ProposalPath}/{Uri.EscapeDataString(proposalToken)}";
 
     /// <summary>
+    /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
+    /// <see cref="ComposeProposal"/> instead. It is spelled out anyway because the discard arm's
+    /// "unknown booking notice" is a lie for this one — the notice is known and this is the wrong
+    /// composer for it, which is an instruction rather than a puzzle.
+    /// </summary>
+    private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice) =>
+        new(
+            nameof(notice),
+            notice,
+            $"A proposal carries no calendar part; compose it with {nameof(ComposeProposal)}.");
+
+    /// <summary>
     /// A confirmation and a reschedule are both REQUEST — the second is the first at a new time,
     /// which is the entire mechanism by which a calendar client updates in place instead of
     /// showing two meetings.
@@ -397,6 +409,7 @@ public sealed class BookingMailer(
             BookingNotice.Confirmation => "Confirmed",
             BookingNotice.Reschedule => "Moved",
             BookingNotice.Cancellation => "Cancelled",
+            BookingNotice.Proposal => throw ComposedElsewhere(notice),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
@@ -444,6 +457,7 @@ public sealed class BookingMailer(
             BookingNotice.Cancellation =>
                 ($"{linkName} has been cancelled. It was:",
                     "The attached invitation removes it from your calendar."),
+            BookingNotice.Proposal => throw ComposedElsewhere(notice),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
