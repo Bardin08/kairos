@@ -11,22 +11,17 @@ using NodaTime;
 namespace Kairos.Api.Features.Bookings;
 
 /// <summary>
-/// Calling a meeting off, once and in one place, whoever asked for it.
+/// One cancellation for both principals. Invitee and operator differ only in who they are, whether
+/// they gave a reason and whether a plaintext manage token is in hand; the status write, the
+/// sequence, the announcement, the contention rule, the calendar withdrawal and the mail are the
+/// same for each, and those are the parts a second copy stops matching silently.
 /// </summary>
 /// <remarks>
-/// There are two principals who may cancel and there is one cancellation. The invitee opens their
-/// manage link; the operator presses a button in the workbench. What differs between them is who
-/// they are, whether they gave a reason and whether a plaintext manage token is in hand — three
-/// arguments. What does not differ is the status write, the sequence, the announcement, the
-/// contention rule, the calendar withdrawal and the mail, and those are the parts where a second
-/// copy silently stops matching the first.
-///
-/// The <c>booking.cancelled</c> announcement is enqueued here and deliberately not wherever
-/// <see cref="Booking.Status"/> becomes <see cref="BookingStatus.Cancelled"/>.
-/// <see cref="BookingsEndpoints"/>'s reschedule is release, re-check, re-place: it sets a booking
-/// cancelled and back to confirmed on every path out, so a hook on the status change would
-/// announce a cancellation for every meeting that merely moved. This is the only place where
-/// cancelled is where the booking stays.
+/// The <c>booking.cancelled</c> announcement is enqueued here rather than wherever
+/// <see cref="Booking.Status"/> becomes <see cref="BookingStatus.Cancelled"/>:
+/// <see cref="BookingsEndpoints"/>'s reschedule sets a booking cancelled and back to confirmed on
+/// every path out, so a hook on the status change would announce a cancellation for every meeting
+/// that merely moved. This is the only place where cancelled is where the booking stays.
 /// </remarks>
 public sealed class BookingCanceller(
     KairosDbContext context,
@@ -40,24 +35,23 @@ public sealed class BookingCanceller(
     /// Cancels <paramref name="booking"/>, or agrees that it is already off.
     /// </summary>
     /// <param name="reason">
-    /// The operator's own words, printed in the invitee's cancellation. Null for a cancellation
-    /// the invitee made themselves, and the null is the record of which of the two happened —
-    /// which is why there is no second column saying who.
+    /// The operator's own words, printed in the invitee's cancellation. Null when the invitee
+    /// cancelled, and that null is the record of which of the two happened — hence no second
+    /// column naming the canceller.
     /// </param>
     /// <param name="manageToken">
-    /// The plaintext token, when the caller has one. The invitee does: they just opened a URL
-    /// carrying it. The operator cannot: only the SHA-256 is stored, and it is never handed back
-    /// after the 201 that minted it. The mail then goes with no manage link on it, which costs
-    /// nothing — that link's only two uses are cancelling a booking already off and moving one
-    /// that no longer exists.
+    /// The plaintext token, when the caller has one. The invitee does, having just opened a URL
+    /// carrying it; the operator cannot, because only the SHA-256 is stored and the plaintext is
+    /// never handed back after the 201 that minted it. That mail goes without a manage link, which
+    /// costs nothing: the link's only uses are cancelling a booking already off and moving one that
+    /// no longer exists.
     /// </param>
     /// <remarks>
     /// Idempotent. A manage link opened twice, or a double-clicked button, gets the answer the
-    /// caller can already see rather than a 404 for a booking plainly in front of them or a 500
-    /// out of the outbox's unique index. The early return and the catch below cover two different
-    /// arrivals of that and neither substitutes for the other: the early return is for a caller
-    /// who asks again after the first one finished, the catch for two callers whose saves are in
-    /// flight together and who therefore both read the booking as confirmed.
+    /// caller can already see rather than a 404 or a 500 out of the outbox's unique index. The
+    /// early return and the catch below cover different arrivals and neither substitutes for the
+    /// other: the early return is for a caller who asks again after the first finished, the catch
+    /// for two saves in flight together whose callers both read the booking as confirmed.
     /// </remarks>
     public async Task CancelAsync(
         Booking booking,
@@ -80,10 +74,10 @@ public sealed class BookingCanceller(
             booking.CancellationReason = reason;
         }
 
-        // In the same save as the cancellation, so no window exists in which the meeting is off
-        // and its hold is still holding. Not for availability — both readers already ignore a hold
-        // whose booking is not confirmed — but for the sweeper, which would otherwise lapse it and
-        // mail the operator that nobody answered a suggestion about a meeting that is cancelled.
+        // In the same save as the cancellation, so no window exists in which the meeting is off and
+        // its hold is still holding. Not for availability — both readers ignore a hold whose booking
+        // is not confirmed — but for the sweeper, which would otherwise lapse it and mail the
+        // operator that nobody answered a suggestion about a cancelled meeting.
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
 
         // One SaveChanges, so the cancellation and the announcement of it commit together or
@@ -103,14 +97,14 @@ public sealed class BookingCanceller(
         }
         catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
         {
-            // Two cancels in flight at once. The other one committed first, so the booking is off
-            // and its announcement is queued; this call has nothing left to do but agree. Without
-            // this catch, adding the outbox row would have turned an idempotent 200 into a 500.
+            // Two cancels in flight at once. The other committed first, so the booking is off and
+            // its announcement queued; this call has nothing left to do but agree. Without the
+            // catch, the outbox row would have turned an idempotent 200 into a 500.
             //
-            // Returned from here rather than falling through, and that is load-bearing: the outbox
-            // row this save could not write is still tracked, so the sync service's own
-            // SaveChanges would raise the same violation again and lose the state change it was
-            // making. The other call is withdrawing the event and sending the mail anyway.
+            // Returning here rather than falling through is load-bearing: the outbox row this save
+            // could not write is still tracked, so the sync service's own SaveChanges would raise
+            // the same violation and lose the state change it was making. The other call withdraws
+            // the event and sends the mail anyway.
             return;
         }
 
@@ -121,9 +115,8 @@ public sealed class BookingCanceller(
         await calendars.CancelAsync(booking.Id, cancellationToken);
 
         // After the withdrawal, so the message describes a calendar that has already let the slot
-        // go. Whatever token the caller had stays in memory for this request and is never written
-        // down — which is exactly why this runs here rather than behind the outbox, where a queued
-        // row would have to carry the plaintext.
+        // go. Sent inline rather than behind the outbox because a queued row would have to carry
+        // the plaintext token, which stays in memory for this request and is never written down.
         await mailer.SendCancellationAsync(booking, manageToken, cancellationToken);
     }
 
