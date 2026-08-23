@@ -8,8 +8,7 @@ import { BLANK, type Draft } from './adminTime'
  *
  * One component for two panes because it is one act on two keys: a weekday's
  * windows and a single date's are typed the same way and refused by the same
- * server check, so a pane with its own copy of this is the pane that drifts and
- * teaches the operator a second way to do what they already know.
+ * server check, so a pane with its own copy of this is the pane that drifts.
  *
  * `label` names the day the windows belong to and every control repeats it. On
  * screen the row above already says which day; out of that context — a reader
@@ -46,10 +45,9 @@ export default function WindowRows({
         // is replaced entire.
         //
         // Not .wrap: the preview pane's narrow column already has .week-time
-        // giving ground (kairos.css) so this line does not overflow it —
-        // wrapping on top of that only dropped × onto its own line beneath
-        // the times, which read as a stray extra row rather than a control
-        // still attached to them.
+        // giving ground (kairos.css) so this line does not overflow. Wrapping on
+        // top of that dropped × onto its own line beneath the times, reading as
+        // a stray row rather than a control still attached to them.
         <div className="row gap-2" key={position}>
           <input
             className="input numeric week-time"
@@ -68,12 +66,9 @@ export default function WindowRows({
           />
           {/* .chip-x, not the red word: the preview pane's column is roughly
               276px, and Remove at full size does not fit beside a time pair
-              without halving the inputs. The week pane loses the danger
-              colour and the label it had for that constraint too, even
-              though its own column is fluid and had room to keep both —
-              because this component is one shared act, not two, and a
-              second markup for the same button here is exactly the drift
-              its docstring exists to refuse. */}
+              without halving the inputs. The week pane loses the danger colour
+              and the label for that constraint too, even though its own column
+              had room — this component is one shared act, not two. */}
           <button
             className="chip-x"
             type="button"
@@ -86,12 +81,10 @@ export default function WindowRows({
       ))}
 
       <div className="row gap-2 wrap">
-        {/* Ghost and quiet rather than the bordered .btn it used to be —
-            neither the selection nor the primary action, so the accent and
-            full ink weight are not its to spend. The leading + is not
-            decoration: WeekEditor passes its own ghost in beside this one
-            (Use these hours on every open day), and two bare ghosts read as
-            one piece of link text with nothing to tell them apart. */}
+        {/* Ghost and quiet rather than the bordered .btn it used to be — neither
+            the selection nor the primary action. The leading + is not
+            decoration: WeekEditor passes its own ghost in beside this one, and
+            two bare ghosts read as one piece of link text. */}
         <button
           className="btn btn-ghost btn-muted"
           type="button"

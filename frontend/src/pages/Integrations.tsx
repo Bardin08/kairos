@@ -13,11 +13,10 @@ import {
 import { localZone, shortDate, zonedDate, zonedTime } from '../lib/time'
 
 // The only two status shapes kairos.css draws, and the Second Channel Rule is
-// the whole reason they are shapes: `live` fills the 7px dot, `paused` leaves it
-// hollow at the same size. A working connection is the only thing that earns the
-// filled one — "not configured", "not connected" and "reconnect needed" are all
-// hollow, and the words beside the dot are what tells them apart. Every state
-// here survives a monochrome screenshot.
+// why they are shapes: `live` fills the 7px dot, `paused` leaves it hollow at
+// the same size. Only a working connection earns the filled one — "not
+// configured", "not connected" and "reconnect needed" are all hollow, and the
+// words beside the dot are what tells them apart.
 const LIVE = 'live'
 const PAUSED = 'paused'
 
@@ -30,20 +29,17 @@ const CONNECTED_PARAMETER = 'connected'
 const ERROR_PARAMETER = 'error'
 
 /**
- * Whether the page has a list to render.
- *
- * `locked` is its own answer rather than a variety of `broken` because the
- * recovery is different: nothing on this page fixes it, and signing in does.
- * See `LOCKED_MESSAGE`.
+ * Whether the page has a list to render. `locked` is its own answer rather than
+ * a variety of `broken` because the recovery is different: nothing on this page
+ * fixes it, and signing in does. See `LOCKED_MESSAGE`.
  */
 type Phase = 'loading' | 'ready' | 'locked' | 'broken'
 
 /**
- * What a row says and offers, worked out from the flags alone.
- *
- * No provider name reaches this function. A row describes itself out of
- * `configured` / `connected` / `reconnectRequired`, which is what lets the page
- * render a provider this build has never heard of.
+ * What a row says and offers, worked out from the flags alone. No provider name
+ * reaches this function: a row describes itself out of `configured` /
+ * `connected` / `reconnectRequired`, which is what lets the page render a
+ * provider this build has never heard of.
  */
 type Presentation = {
   /** Filled dot, or hollow. Only a working connection fills it. */
@@ -57,8 +53,7 @@ type Presentation = {
 /**
  * A server route under a path the single page nests on, so it is reached with a
  * plain anchor and never a wouter `<Link>` — the router would swallow the
- * navigation. It issues the OIDC challenge; there is no login form anywhere in
- * this application.
+ * navigation. It issues the OIDC challenge; there is no login form anywhere.
  */
 const SIGN_IN = '/admin/login'
 
@@ -67,12 +62,11 @@ const SIGN_IN = '/admin/login'
  *
  * The route has to stay `/integrations` — `IntegrationEndpoints.ReturnPath` is
  * that string and the provider redirects a browser to it — so this page renders
- * outside the admin shell and inherits none of its chrome: no rail, no tab bar,
- * nothing that leads anywhere. This link is that missing edge, and it is the
- * page's own rather than the browser's Back button on purpose. Back only works
- * when there is somewhere behind you, and on the two ways in that matter there
- * is not: the OAuth callback arrives here as a redirect from another origin, and
- * the same URL opened in a fresh tab has no history at all.
+ * outside the admin shell and inherits none of its chrome. This link is that
+ * missing edge, and it is the page's own rather than the browser's Back button:
+ * Back only works when there is somewhere behind you, and the OAuth callback
+ * arrives here as a redirect from another origin while the same URL in a fresh
+ * tab has no history at all.
  *
  * A wouter `<Link>` and not an anchor, unlike `SIGN_IN` above: /admin/settings
  * is a client route the single page owns, so this is a push and not a reload.
@@ -85,8 +79,7 @@ const SETTINGS = '/admin/settings'
  * Until Part C this named `Integrations:AdminToken` and told the operator to
  * clear it from configuration and restart — a stopgap Task 1 deleted along with
  * the setting, which left this page instructing people to unset something that
- * no longer exists. Pocket ID is what stands here now, so the recovery is to
- * sign in, and the link beside this sentence is where.
+ * no longer exists. Pocket ID stands here now, so the recovery is to sign in.
  */
 const LOCKED_MESSAGE =
   'Your session has expired, or you were never signed in — so there is nothing here to read yet.'
@@ -96,27 +89,25 @@ const LOCKED_MESSAGE =
  * actually has.
  *
  * A control that cannot work is worse than none: it invites a press, spends a
- * round trip and comes back with the same sentence. So the three answers are
- * separate, and `none` is a real one — a Connect refused with
- * `provider_not_configured` is fixed in a configuration file and a restart, and
- * neither retrying nor reconnecting touches it.
+ * round trip and comes back with the same sentence. So `none` is a real answer —
+ * a Connect refused with `provider_not_configured` is fixed in a configuration
+ * file and a restart, and neither retrying nor reconnecting touches it.
  */
 type Recovery = 'none' | 'sign-in' | 'retry'
 
 /**
- * Said out loud rather than left implied, because the alternative is a red
- * sentence describing a fault with nothing beside it — which is what the
- * operator met and reasonably read as a dead end.
+ * Said out loud rather than left implied: the alternative is a red sentence
+ * describing a fault with nothing beside it, which the operator read as a dead
+ * end.
  */
 const RETRY_MESSAGE = 'Nothing on this page can put that right. Read it again, and check the server log if it keeps failing.'
 
 /**
- * A provider name as a heading, without knowing any provider.
- *
- * The API sends the lowercase enum name because that is what the connect path
- * takes. Capitalising the first letter is the whole transformation: a lookup
- * table would be a list of vendors in the frontend, which is exactly what Task
- * 4's first endpoint exists to avoid.
+ * A provider name as a heading, without knowing any provider. The API sends the
+ * lowercase enum name because that is what the connect path takes, and
+ * capitalising the first letter is the whole transformation: a lookup table
+ * would be a list of vendors in the frontend, which the endpoint exists to
+ * avoid.
  */
 function label(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1)
@@ -124,13 +115,11 @@ function label(provider: string): string {
 
 function describe(integration: Integration): Presentation {
   // Asked before `configured`, and that order is the point. This row holds a
-  // credential that cannot be read, so there IS something to put right here,
-  // and reconnecting is what puts it right — which is not true of the ordinary
-  // unconfigured row below, where there is nothing stored and nothing broken.
-  // The button is offered either way: on a deployment that also lacks client
-  // credentials the sentence says so first, and pressing it says so again in
-  // `connectMessage`. A control that names the next blocker beats a state with
-  // no way out of it, which is what this row was.
+  // credential that cannot be read, so there IS something to put right here and
+  // reconnecting is what puts it right — not true of the ordinary unconfigured
+  // row below, where nothing is stored and nothing is broken. The button is
+  // offered either way: on a deployment that also lacks client credentials the
+  // sentence says so first, and pressing it says so again in `connectMessage`.
   if (integration.fault === CREDENTIAL_UNREADABLE) {
     const missing = integration.configured
       ? ''
@@ -146,9 +135,8 @@ function describe(integration: Integration): Presentation {
   }
 
   // Asked next, because it outranks everything below it: with no client
-  // credentials on this deployment there is nothing to connect to, and a
-  // Connect button here would be a button whose only outcome is
-  // `provider_not_configured`. The row explains itself instead.
+  // credentials there is nothing to connect to, and a Connect button here would
+  // be a button whose only outcome is `provider_not_configured`.
   if (!integration.configured) {
     return {
       live: false,
@@ -168,11 +156,10 @@ function describe(integration: Integration): Presentation {
     }
   }
 
-  // Connected and broken. The credential is stored and the provider has stopped
-  // honouring it — the grant was revoked from the provider's own account
-  // settings, or expired out from under us. It is offered the same button
-  // because a fresh consent is the only fix there is; anything vaguer sends the
-  // operator into the logs for something one press solves.
+  // Connected and broken: the credential is stored and the provider has stopped
+  // honouring it — the grant was revoked in the provider's own account settings,
+  // or expired. The same button, because a fresh consent is the only fix there
+  // is.
   if (integration.reconnectRequired) {
     return {
       live: false,
@@ -281,10 +268,8 @@ export default function Integrations() {
 
     try {
       const consentUrl = await connectIntegration(provider)
-      // Navigated to, never fetched. This is another origin's consent screen —
-      // a page a human presses a button on — and the redirect back to
-      // /integrations is what finishes the exchange. A fetch here would be
-      // refused by CORS and would be the wrong idea even if it were not.
+      // Navigated to, never fetched: another origin's consent screen, and the
+      // redirect back to /integrations is what finishes the exchange.
       window.location.assign(consentUrl)
     } catch (error: unknown) {
       const failed = asApiError(error)
@@ -342,8 +327,7 @@ export default function Integrations() {
             <span>
               {failure}
               {/* Both routes into this message — the read that came back 401 and
-                  the Connect that did — set the same recovery, so one test
-                  covers both places the operator can meet it. */}
+                  the Connect that did — set the same recovery. */}
               {recovery === 'sign-in' && (
                 <>
                   {' '}
@@ -456,10 +440,8 @@ export default function Integrations() {
         )}
       </main>
       {/* No `page-foot` here, deliberately. "Scheduled with Kairos" is the
-          invitee's attribution line — it belongs on the surfaces a stranger
-          holding a link reads, which is the booking page and the manage page.
-          An operator administering Kairos does not need to be told what they
-          are administering. */}
+          invitee's attribution line — it belongs on the booking page and the
+          manage page, the surfaces a stranger holding a link reads. */}
     </div>
   )
 }
