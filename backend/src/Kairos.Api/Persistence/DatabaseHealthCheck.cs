@@ -1,5 +1,6 @@
 using System.Data.Common;
 
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -31,17 +32,71 @@ namespace Kairos.Api.Persistence;
 /// round-trip per probe to answer a question that is already true by construction, and would go on
 /// answering it at whatever interval the orchestrator polls.
 /// </para>
+/// <para>
+/// A busy database is degraded and not unready, which is the same decision
+/// <see cref="Shared.DatabaseBusyExceptionHandler"/> already made in the other direction: SQLITE_BUSY
+/// is a queue rather than a fault, and the read that timed out succeeds a moment later. Reported
+/// as unready it would take the one replica out of rotation over contention, and every invitee
+/// would meet the ingress's own 503 for a database that is still answering reads — the same shape
+/// of mistake the paragraph above refuses for a provider. Degraded keeps the process in service
+/// and still says out loud that something is contended.
+/// </para>
 /// </remarks>
 public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
 {
+    /// <summary>
+    /// How long the probe query may spend waiting for a lock before it gives up and says so. The
+    /// provider's own default is 30 seconds, which is a pooled connection held for thirty seconds
+    /// per probe while a kubelet that gave up after one starts the next one — three of them in
+    /// flight at a ten-second period, competing with real traffic for the same pool. A probe that
+    /// cannot answer quickly has answered.
+    /// </summary>
+    public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(QueryTimeoutSeconds);
+
+    /// <summary>The same bound as <see cref="QueryTimeout"/>, in the unit the connection takes.</summary>
+    private const int QueryTimeoutSeconds = 1;
+
+    /// <summary>
+    /// The registration's own ceiling, and a multiple rather than a number of its own because the
+    /// commands below have to be what fires first. The health check service reports a registration
+    /// timeout as the failure status — unready — so a ceiling that beat them would classify a
+    /// contended database as unready and undo the decision recorded above. Three, because a probe
+    /// issues two bounded commands: the pragmas on opening a connection, and the query.
+    /// </summary>
+    /// <remarks>
+    /// It is a backstop and not the bound. A blocked SQLite call retries inside the native library
+    /// until its own command timeout expires, on the thread, where no cancellation token reaches it
+    /// — measured: with the commands unbounded this ceiling did not fire at all and the probe
+    /// answered after 30 seconds. What bounds this check is the two timeouts below.
+    /// </remarks>
+    public static readonly TimeSpan ProbeTimeout = QueryTimeout * TimeoutHeadroom;
+
+    private const int TimeoutHeadroom = 3;
+
     private const string Unreadable =
         "The Kairos database did not answer a read. It may be missing, replaced or unreadable at "
         + "the path this process is configured with.";
+
+    private const string Contended =
+        "The Kairos database did not hand over a read lock in time. It is contended rather than "
+        + "broken, so this process stays in service.";
 
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext check,
         CancellationToken cancellationToken = default)
     {
+        // Both on the probe's own scope and nowhere else. The health check service resolves this
+        // check in a scope of its own, so these are deadlines for this probe rather than a global
+        // retune — a request writing a booking still gets the provider's default 30 seconds,
+        // because a booking is worth waiting for and a probe is not.
+        //
+        // The connection's default covers the command the pragma interceptor runs when EF opens
+        // it, which is where a probe against an exclusively locked database actually stalls:
+        // measured at the full 30 seconds, before the query below was reached. That command is not
+        // this code's to configure directly, and it inherits this.
+        ((SqliteConnection)context.Database.GetDbConnection()).DefaultTimeout = QueryTimeoutSeconds;
+        context.Database.SetCommandTimeout(QueryTimeout);
+
         try
         {
             await context.Settings.AnyAsync(cancellationToken);
@@ -49,7 +104,9 @@ public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
         }
         catch (DbException failure)
         {
-            return HealthCheckResult.Unhealthy(Unreadable, failure);
+            return SqliteErrors.IsDatabaseBusy(failure)
+                ? HealthCheckResult.Degraded(Contended, failure)
+                : HealthCheckResult.Unhealthy(Unreadable, failure);
         }
     }
 }

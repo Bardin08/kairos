@@ -24,10 +24,11 @@ public static class AdminGroup
     /// <c>GET /api/v1/sign-in</c> answers where to sign in, for a browser that has just been
     /// refused: behind the gate it would 401 at exactly the reader it exists for, and it carries
     /// one string that is safe to hand anybody. See <see cref="Features.Admin.SignInEndpoints"/>.
-    /// <c>GET /healthz</c> and <c>GET /readyz</c> are the liveness and readiness probes: anonymous
-    /// because a kubelet holds no session, and outside the version prefix as well as outside this
-    /// one because their paths are written into a deployment manifest that nobody re-reads, so a
-    /// version bump must not move them. See <see cref="HealthEndpoints"/>.
+    /// <c>/healthz</c> and <c>/readyz</c> are the liveness and readiness probes, answering GET and
+    /// HEAD and refusing every other verb: anonymous because a kubelet holds no session, and
+    /// outside the version prefix as well as outside this one because their paths are written into
+    /// a deployment manifest that nobody re-reads, so a version bump must not move them. See
+    /// <see cref="HealthEndpoints"/>.
     /// Everything else that an operator can reach is under this prefix.
     /// <para>
     /// Nothing here carries a rate limit, and that is a decision rather than an omission. Every

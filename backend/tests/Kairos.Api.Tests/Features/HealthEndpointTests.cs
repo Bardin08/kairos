@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Net;
 
+using Kairos.Api.Persistence;
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Hosting;
@@ -33,6 +35,24 @@ public class HealthEndpointTests
     private const string SomebodyElsesCheck = "somebody-elses-check";
 
     /// <summary>
+    /// The one lock a reader cannot get past. An ordinary write does not block a read in WAL mode
+    /// — measured, and the reason readiness stays green through normal contention — so an
+    /// exclusive locking mode is what it takes to reach the path under test. The write is what
+    /// makes the connection take the lock; declaring the mode alone takes nothing.
+    /// </summary>
+    private const string LockAgainstReaders =
+        "PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS Blocker(Id);";
+
+    /// <summary>
+    /// Twice the check's own ceiling. Measured at 1.06 seconds bounded and 30.06 unbounded, so
+    /// there is room for a slow machine and none for the regression this exists to catch.
+    /// </summary>
+    private static readonly TimeSpan SlowestAcceptableProbe =
+        DatabaseHealthCheck.ProbeTimeout * ProbeTimeoutHeadroom;
+
+    private const int ProbeTimeoutHeadroom = 2;
+
+    /// <summary>
     /// Anonymous, because a kubelet holds no session and never will. Asserted on the shipped
     /// pipeline rather than on the mapping, so an authorization convention added to the whole
     /// application later fails here rather than in production at the first probe.
@@ -51,13 +71,13 @@ public class HealthEndpointTests
         var response = await app.Client.GetAsync(
             HealthEndpoints.LivenessPath, TestContext.Current.CancellationToken);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        body.ShouldBe(nameof(HealthStatus.Healthy));
+        await ShouldReportAsync(response, HealthStatus.Healthy, HttpStatusCode.OK);
     }
 
     /// <summary>
     /// The half that would pass by accident if the check never ran: a migrated database is ready.
+    /// The body is read for the reason given on the liveness test — a 200 alone is also what the
+    /// single-page fallback answers with, on any tree where the front end has been built.
     /// </summary>
     [Fact]
     public async Task Readiness_OverAMigratedDatabase_IsOk()
@@ -67,7 +87,7 @@ public class HealthEndpointTests
         var response = await app.Client.GetAsync(
             HealthEndpoints.ReadinessPath, TestContext.Current.CancellationToken);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await ShouldReportAsync(response, HealthStatus.Healthy, HttpStatusCode.OK);
     }
 
     /// <summary>
@@ -84,10 +104,11 @@ public class HealthEndpointTests
     /// over a revoked grant.
     /// </remarks>
     [Theory]
-    [InlineData(true, HttpStatusCode.ServiceUnavailable)]
-    [InlineData(false, HttpStatusCode.OK)]
+    [InlineData(true, HealthStatus.Unhealthy, HttpStatusCode.ServiceUnavailable)]
+    [InlineData(false, HealthStatus.Healthy, HttpStatusCode.OK)]
     public async Task Readiness_WithAFailingCheck_AnswersForItOnlyWhenItIsTaggedForReadiness(
         bool tagged,
+        HealthStatus reported,
         HttpStatusCode expected)
     {
         string[] tags = tagged ? [HealthEndpoints.ReadinessTag] : [];
@@ -101,7 +122,69 @@ public class HealthEndpointTests
         var response = await client.GetAsync(
             HealthEndpoints.ReadinessPath, TestContext.Current.CancellationToken);
 
-        response.StatusCode.ShouldBe(expected);
+        await ShouldReportAsync(response, reported, expected);
+    }
+
+    /// <summary>
+    /// A contended database keeps the process in service. The lock here is held the one way that
+    /// blocks a reader as well as a writer — WAL lets readers past an ordinary write, which is why
+    /// the common case never reaches this path at all — and what is pinned is that the answer is
+    /// 200 <c>Degraded</c> rather than the 503 that would take the only replica out of rotation
+    /// over a database still able to serve a moment later.
+    /// </summary>
+    /// <remarks>
+    /// The elapsed bound is the second half of it, and the half that fails loudly if the query
+    /// timeout is dropped: unbounded, this answers after the provider's default 30 seconds, having
+    /// held a pooled connection for all of them while the probe that asked gave up at one.
+    /// </remarks>
+    [Fact]
+    public async Task Readiness_WhileTheDatabaseIsLockedAgainstReaders_IsDegradedRatherThanUnready()
+    {
+        using var app = new KairosApp();
+
+        // Warmed so the pool holds an open connection: what is under test is a query that cannot
+        // get the lock, not a connection that cannot be opened.
+        var warm = await app.Client.GetAsync(
+            HealthEndpoints.ReadinessPath, TestContext.Current.CancellationToken);
+        warm.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using var blocker = new SqliteConnection(app.ConnectionString);
+        blocker.Open();
+        await using (var command = blocker.CreateCommand())
+        {
+            command.CommandText = LockAgainstReaders;
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        var response = await app.Client.GetAsync(
+            HealthEndpoints.ReadinessPath, TestContext.Current.CancellationToken);
+        var elapsed = Stopwatch.GetElapsedTime(started);
+
+        await ShouldReportAsync(response, HealthStatus.Degraded, HttpStatusCode.OK);
+        elapsed.ShouldBeLessThan(SlowestAcceptableProbe);
+    }
+
+    /// <summary>
+    /// Both halves of the verb restriction, because <c>MapHealthChecks</c> maps every verb unless
+    /// it is told not to — which left an anonymous <c>POST /readyz</c> running a database query for
+    /// anybody who sent one. HEAD is asserted beside it so that narrowing this to GET alone has to
+    /// be a decision rather than a side effect.
+    /// </summary>
+    [Theory]
+    [InlineData(HealthEndpoints.LivenessPath)]
+    [InlineData(HealthEndpoints.ReadinessPath)]
+    public async Task AProbePath_AnswersAProbeVerb_AndRefusesAWriteVerb(string path)
+    {
+        using var app = new KairosApp();
+
+        using var head = new HttpRequestMessage(HttpMethod.Head, path);
+        var headed = await app.Client.SendAsync(head, TestContext.Current.CancellationToken);
+        var posted = await app.Client.PostAsync(
+            path, content: null, TestContext.Current.CancellationToken);
+
+        headed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        posted.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
     }
 
     /// <summary>
@@ -144,5 +227,23 @@ public class HealthEndpointTests
 
         liveness.StatusCode.ShouldBe(HttpStatusCode.OK);
         readiness.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    /// <summary>
+    /// The status and what the endpoint said, together. The body is half the assertion because the
+    /// status alone does not distinguish a health endpoint from the single page: on a tree where
+    /// the front end has been built, an unmapped probe path is answered 200 by
+    /// <c>MapFallbackToFile</c>, and every OK here would go on passing over a route that no longer
+    /// exists.
+    /// </summary>
+    private static async Task ShouldReportAsync(
+        HttpResponseMessage response,
+        HealthStatus reported,
+        HttpStatusCode expected)
+    {
+        response.StatusCode.ShouldBe(expected);
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        body.ShouldBe(reported.ToString());
     }
 }

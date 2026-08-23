@@ -4,7 +4,6 @@ using Kairos.Api.Persistence;
 
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 
 namespace Kairos.Api.Shared;
 
@@ -21,14 +20,17 @@ namespace Kairos.Api.Shared;
 /// <see cref="DomainException"/> is the property that keeps a bug a 500. At the call site it
 /// would mean a failure branch in an endpoint written to have none — three of them, since every
 /// write can contend, not just the create.
+/// <para>
+/// Recognising the code lives in <see cref="SqliteErrors"/> rather than here, because readiness
+/// has to recognise the same condition and answer it the other way round —
+/// <see cref="Persistence.DatabaseHealthCheck"/> reports a contended database as degraded and
+/// keeps the process in service, which is only coherent while both are reading the same number.
+/// </para>
 /// </remarks>
 public sealed class DatabaseBusyExceptionHandler(IProblemDetailsService problemDetails)
     : IExceptionHandler
 {
     public const string DatabaseBusyCode = "database_busy";
-
-    /// <summary>SQLITE_BUSY. The primary code, so every extended form of it is included.</summary>
-    private const int SqliteBusyErrorCode = 5;
 
     private const int MillisecondsPerSecond = 1000;
 
@@ -45,7 +47,7 @@ public sealed class DatabaseBusyExceptionHandler(IProblemDetailsService problemD
         Exception exception,
         CancellationToken cancellationToken)
     {
-        if (!IsDatabaseBusy(exception))
+        if (!SqliteErrors.IsDatabaseBusy(exception))
         {
             return false;
         }
@@ -63,24 +65,5 @@ public sealed class DatabaseBusyExceptionHandler(IProblemDetailsService problemD
                 Extensions = { [ProblemCode.Key] = DatabaseBusyCode },
             },
         });
-    }
-
-    /// <summary>
-    /// Down the chain, because EF wraps a failed SaveChanges in DbUpdateException and the code
-    /// worth reading is on the SqliteException underneath it. Matched on SQLITE_BUSY alone: every
-    /// other SQLite error — a constraint the model should have prevented, a closed database — is
-    /// a bug, and a bug goes on to the 500 and the stack trace that comes with it.
-    /// </summary>
-    private static bool IsDatabaseBusy(Exception exception)
-    {
-        for (var candidate = exception; candidate is not null; candidate = candidate.InnerException)
-        {
-            if (candidate is SqliteException { SqliteErrorCode: SqliteBusyErrorCode })
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

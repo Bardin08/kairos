@@ -1,6 +1,7 @@
 using Kairos.Api.Persistence;
 
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Routing;
 
 namespace Kairos.Api.Shared;
 
@@ -27,9 +28,20 @@ public static class HealthEndpoints
     /// <summary>The name the database check reports under.</summary>
     public const string DatabaseCheckName = "database";
 
+    /// <summary>
+    /// The verbs a probe uses, and the only ones these routes answer. <c>MapHealthChecks</c> maps
+    /// every method by default, which would leave an anonymous, unmetered <c>POST /readyz</c>
+    /// running a database query — a route nothing needs, on the one endpoint here that touches
+    /// disk.
+    /// </summary>
+    private static readonly string[] ProbeMethods = [HttpMethods.Get, HttpMethods.Head];
+
     public static IServiceCollection AddHealthEndpoints(this IServiceCollection services) =>
         services.AddHealthChecks()
-            .AddCheck<DatabaseHealthCheck>(DatabaseCheckName, tags: [ReadinessTag])
+            .AddCheck<DatabaseHealthCheck>(
+                DatabaseCheckName,
+                tags: [ReadinessTag],
+                timeout: DatabaseHealthCheck.ProbeTimeout)
             .Services;
 
     public static void MapHealth(this IEndpointRouteBuilder app)
@@ -39,15 +51,17 @@ public static class HealthEndpoints
         // asking, and the only one a restart can fix. A liveness probe that consulted the database
         // would restart a healthy pod over a lock held for a second, turning a stall into an
         // outage — and it would do it hardest under exactly the load that caused the lock.
-        app.MapHealthChecks(LivenessPath, new HealthCheckOptions { Predicate = _ => false });
+        app.MapHealthChecks(LivenessPath, new HealthCheckOptions { Predicate = _ => false })
+            .WithMetadata(new HttpMethodMetadata(ProbeMethods));
 
         // Readiness runs what is tagged for it, which today is the database and by design nothing
         // remote; see DatabaseHealthCheck for why a provider must never be added here.
         app.MapHealthChecks(
-            ReadinessPath,
-            new HealthCheckOptions
-            {
-                Predicate = registration => registration.Tags.Contains(ReadinessTag),
-            });
+                ReadinessPath,
+                new HealthCheckOptions
+                {
+                    Predicate = registration => registration.Tags.Contains(ReadinessTag),
+                })
+            .WithMetadata(new HttpMethodMetadata(ProbeMethods));
     }
 }

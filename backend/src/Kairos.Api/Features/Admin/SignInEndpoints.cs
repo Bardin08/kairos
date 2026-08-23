@@ -33,9 +33,10 @@ public static class SignInEndpoints
     public const string ConfigurationKey = "Authentication:SignInUrl";
 
     /// <summary>
-    /// Anonymous by necessity rather than by choice, like the two routes named in
-    /// <see cref="AdminGroup"/>: a signed-out operator is the only reader this has, and behind
-    /// the gate it would answer 401 to exactly the person it exists for.
+    /// Anonymous by necessity rather than by choice, like every other route
+    /// <see cref="AdminGroup"/> names as being outside the prefix: a signed-out operator is the
+    /// only reader this has, and behind the gate it would answer 401 to exactly the person it
+    /// exists for.
     /// </summary>
     public static RouteGroupBuilder MapSignIn(this RouteGroupBuilder group, string signInUrl)
     {

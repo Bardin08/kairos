@@ -361,10 +361,11 @@ app.UseAuthorization();
 // After routing, because the endpoint's own metadata is what says whether it carries a budget.
 app.UseRateLimiting();
 
-// The two routes that make a session and end one, and the only two that are anonymous by
-// necessity rather than by choice: a challenge is a browser navigation to another origin, so
-// nothing behind the gate could ever start one. The admin surface sends the window here after a
-// 401 and there is no login form anywhere in this application.
+// The two routes that make a session and end one, anonymous by necessity: a challenge is a
+// browser navigation to another origin, so nothing behind the gate could ever start one. They are
+// two of the six routes outside the admin prefix, and AdminGroup names all six and why. The admin
+// surface sends the window here after a 401 and there is no login form anywhere in this
+// application.
 app.MapGet("/admin/login", () => Results.Challenge(
     new AuthenticationProperties { RedirectUri = "/admin" },
     [OpenIdConnectDefaults.AuthenticationScheme]));
