@@ -279,6 +279,7 @@ public static class BookingsEndpoints
         SlotQuery slots,
         CalendarSyncService calendars,
         BookingMailer mailer,
+        ProposalWriter proposals,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -337,6 +338,11 @@ public static class BookingsEndpoints
         // the meeting, not to the slot. Sequence is how Part B's .ics tells a calendar client
         // that this is the same event at a new time instead of a second invitation.
         booking.Sequence++;
+
+        // An operator's suggestion about where this meeting should go stops applying the moment
+        // the invitee moves it themselves, and it is closed in the save that moves it — never on
+        // the failing paths above, where nothing happened and the question still stands.
+        await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
         await ConfirmAsync(context, booking);
 
         // Here, at the end, and never in the release phase above. That release is bookkeeping —

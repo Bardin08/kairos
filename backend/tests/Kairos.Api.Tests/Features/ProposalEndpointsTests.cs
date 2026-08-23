@@ -154,6 +154,38 @@ public class ProposalEndpointsTests
             .ShouldContain(MeetingsAdminEndpoints.ProposalOpenCode);
     }
 
+    /// <summary>
+    /// The invitee moves the meeting themselves while a suggestion is open.
+    /// </summary>
+    /// <remarks>
+    /// The suggestion is about a meeting that is no longer where it was, and leaving it Open costs
+    /// twice: the slot it names is blocked for the rest of the hold window, and its token still
+    /// resolves — so accepting it afterwards moves the meeting a second time, away from a current
+    /// time the invitee never agreed to and never saw. The cancel path has closed holds since it
+    /// was written; this path had not, because the two are separate copies of the same release.
+    /// </remarks>
+    [Fact]
+    public async Task RescheduleBooking_WhileAProposalIsOpen_ClosesTheHoldAndFreesItsSlot()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        await ProposeAsync(client, booking, MovedTo);
+        var manage = KnownManageToken(app, booking);
+
+        var answer = await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{manage}/reschedule",
+            new RescheduleBookingRequest { Start = MovedAgainTo },
+            TestContext.Current.CancellationToken);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var proposal = app.Read(context =>
+            context.BookingProposals.Single(row => row.BookingId == booking));
+        proposal.State.ShouldBe(ProposalState.Withdrawn);
+        proposal.DecidedAt.ShouldNotBeNull();
+        (await MeetingsFixture.SlotsOnOtherLinkAsync(app)).ShouldContain(MovedTo);
+    }
+
     [Fact]
     public async Task Withdraw_AnOpenProposal_ClosesItAndReleasesTheHold()
     {
@@ -415,4 +447,18 @@ public class ProposalEndpointsTests
             ManageTokenHash = Guid.CreateVersion7().ToString("N"),
         });
     });
+
+    /// <summary>
+    /// Re-mints the booking's manage token to one this test knows, the same way
+    /// <see cref="ProposeWithKnownTokenAsync"/> does and for the same reason: only the SHA-256 is
+    /// stored, and the plaintext left the process in the 201 that created it.
+    /// </summary>
+    private static string KnownManageToken(KairosApp app, Guid booking)
+    {
+        var known = Guid.CreateVersion7().ToString("N");
+        app.Seed(context =>
+            context.Bookings.Single(row => row.Id == booking).ManageTokenHash = BookingWriter.Hash(known));
+
+        return known;
+    }
 }

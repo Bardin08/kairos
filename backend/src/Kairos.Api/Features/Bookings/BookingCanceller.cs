@@ -33,6 +33,7 @@ public sealed class BookingCanceller(
     OutboxWriter outbox,
     CalendarSyncService calendars,
     BookingMailer mailer,
+    ProposalWriter proposals,
     IClock clock)
 {
     /// <summary>
@@ -79,7 +80,11 @@ public sealed class BookingCanceller(
             booking.CancellationReason = reason;
         }
 
-        await CloseAnyHoldAsync(booking, now, cancellationToken);
+        // In the same save as the cancellation, so no window exists in which the meeting is off
+        // and its hold is still holding. Not for availability — both readers already ignore a hold
+        // whose booking is not confirmed — but for the sweeper, which would otherwise lapse it and
+        // mail the operator that nobody answered a suggestion about a meeting that is cancelled.
+        await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
 
         // One SaveChanges, so the cancellation and the announcement of it commit together or
         // neither does — the same rule BookingWriter follows for creation, for the same reason.
@@ -122,30 +127,4 @@ public sealed class BookingCanceller(
         await mailer.SendCancellationAsync(booking, manageToken, cancellationToken);
     }
 
-    /// <summary>
-    /// Closes an open proposal on the meeting, in the same save as the cancellation.
-    /// </summary>
-    /// <remarks>
-    /// Not for availability: both conflict readers already ignore a hold whose booking is not
-    /// confirmed, so the slot is back on offer the moment the cancellation commits whether or not
-    /// this runs. It is for the sweeper. A proposal left Open on a cancelled meeting lapses on its
-    /// own schedule and mails the operator that nobody answered their suggestion — about a meeting
-    /// that is off, which is a message with no action behind it and no way for the reader to tell
-    /// it is stale.
-    /// </remarks>
-    private async Task CloseAnyHoldAsync(Booking booking, Instant now, CancellationToken cancellationToken)
-    {
-        var open = await context.BookingProposals
-            .FirstOrDefaultAsync(
-                proposal => (proposal.BookingId == booking.Id) && (proposal.State == ProposalState.Open),
-                cancellationToken);
-
-        if (open is null)
-        {
-            return;
-        }
-
-        open.State = ProposalState.Withdrawn;
-        open.DecidedAt = now.ToUnixTimeSeconds();
-    }
 }
