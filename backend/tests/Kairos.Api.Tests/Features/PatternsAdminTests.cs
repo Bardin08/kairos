@@ -33,6 +33,9 @@ public class PatternsAdminTests
     private const string LinkName = "Consulting call";
     private const int DurationMinutes = 25;
 
+    /// <summary>A second pattern, so a rename has somewhere to collide from.</summary>
+    private const string SecondPatternName = "Evenings";
+
     private const int MinutesPerHour = 60;
 
     private const int Monday = (int)IsoDayOfWeek.Monday;
@@ -542,6 +545,68 @@ public class PatternsAdminTests
         stored.ShouldHaveSingleItem().ShouldBeOneOf(
             new OverrideWindowResponse(NineAm, Noon),
             new OverrideWindowResponse(TwoPm, FivePm));
+    }
+
+    /// <summary>
+    /// The name is how the operator picks a pattern out of a list, so two patterns wearing one
+    /// name is a workbench where the wrong availability gets attached to a link. The refusal comes
+    /// from the unique index by way of <see cref="ConcurrentWrite"/> rather than from a SELECT this
+    /// handler runs first, which is what makes it hold when two requests race — and it is why the
+    /// code, not the sentence, is what a client is asked to branch on. What the list holds
+    /// afterwards is asserted too: a 409 over a row that landed anyway is the duplicate this
+    /// refuses, wearing the refusal's clothes.
+    /// </summary>
+    [Fact]
+    public async Task CreatePattern_WithANameAlreadyTaken_IsRefusedWithTheCode()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var first = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns",
+            new { name = first.Name },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.PatternNameTakenCode);
+
+        var after = await client.GetFromJsonAsync<IReadOnlyList<PatternResponse>>(
+            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+        after!.Where(candidate => candidate.Name == first.Name)
+            .ShouldHaveSingleItem().Id.ShouldBe(first.Id);
+    }
+
+    /// <summary>
+    /// The same collision reached by the other route, and not covered by the create above: a
+    /// rename goes through ExecuteUpdate, which never loads the row, so it is a second write path
+    /// to the one index. What the pattern was called is what it is still called afterwards —
+    /// a refusal the operator reads on one screen while the list on another already shows the new
+    /// name is a refusal only in the status line.
+    /// </summary>
+    [Fact]
+    public async Task RenamePattern_OntoANameAlreadyTaken_IsRefusedWithTheCode()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var first = await CreatePatternWithMondayNineToFiveAsync(client);
+
+        var second = await PatternOfAsync(await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns",
+            new { name = SecondPatternName },
+            TestContext.Current.CancellationToken));
+
+        var response = await client.PatchAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns/{second.Id}",
+            new { name = first.Name },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.PatternNameTakenCode);
+
+        var after = await client.GetFromJsonAsync<IReadOnlyList<PatternResponse>>(
+            $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
+        after!.Single(candidate => candidate.Id == second.Id).Name.ShouldBe(SecondPatternName);
     }
 
     private static string PatternUrl => $"{ApiVersions.V1}/admin/patterns/{PatternId}";
