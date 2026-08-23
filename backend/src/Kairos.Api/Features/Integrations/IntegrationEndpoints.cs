@@ -128,9 +128,16 @@ public static class IntegrationEndpoints
 
             if (row is not null)
             {
+                // The row's own column now, rather than a question put to the vendor's adapter
+                // about a fact the database holds. A second provider gains this by having a row.
+                reconnect = row.Health == CredentialHealth.ReconnectRequired;
+
                 try
                 {
-                    reconnect = await connector.IsReconnectRequiredAsync(cancellationToken);
+                    // Asked outright. It used to fall out of a decrypt performed for another
+                    // reason, so deleting that call would have taken this diagnosis with it —
+                    // silently, because a page that renders is a page that looks fine.
+                    await store.EnsureReadableAsync(connector.Provider, cancellationToken);
                 }
                 catch (DomainException failure)
                     when (failure.Code == IntegrationCredentialStore.CredentialUnreadableCode)

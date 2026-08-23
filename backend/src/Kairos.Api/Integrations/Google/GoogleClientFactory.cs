@@ -139,9 +139,6 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         }
     }
 
-    public async Task<bool> IsReconnectRequiredAsync(CancellationToken cancellationToken) =>
-        (await ReadPayloadAsync(cancellationToken))?.ReconnectRequired ?? false;
-
     /// <summary>
     /// An authorised client for the connected account, or null when there is nothing to
     /// authorise with — unconfigured, or never connected. Null rather than an exception because
