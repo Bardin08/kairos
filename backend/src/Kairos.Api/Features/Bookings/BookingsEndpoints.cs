@@ -428,8 +428,13 @@ public static class BookingsEndpoints
         // After the claim and never before it. The claim is what decides whether this request is
         // the one that answered, and a mail sent ahead of it would tell the operator about a
         // refusal that another caller had already turned into an acceptance.
+        //
+        // Uncancellable, for the reason CloseIfOpenAsync is: the decline is committed by the time
+        // this runs. The mailer's rule-14 swallow is guarded by the caller's token, so an invitee
+        // who closes the tab would push the failure back out through here instead — and there is
+        // no sweep to catch it, since the sweep only ever looks at holds that lapsed.
         await operators.SendAsync(
-            proposal.Booking, proposal, OperatorNotice.Declined, timeZoneId, cancellationToken);
+            proposal.Booking, proposal, OperatorNotice.Declined, timeZoneId, CancellationToken.None);
 
         return Describe(proposal, now);
     }

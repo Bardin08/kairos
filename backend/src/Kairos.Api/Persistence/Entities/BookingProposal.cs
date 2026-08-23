@@ -47,16 +47,22 @@ public sealed class BookingProposal
     public long? DecidedAt { get; set; }
 
     /// <summary>
-    /// When the sweeper announced this row's lapse, and nothing wider than that. It is the
-    /// sweeper's idempotency marker — a tick that crashes after sending must not mail the same
-    /// lapse again on the next one — and the sweep's own predicate is its only reader.
+    /// When the sweeper announced this row's lapse, and nothing wider than that. It is written
+    /// after the message has gone, in a save of its own, and the sweep's predicate is its only
+    /// reader.
     /// </summary>
     /// <remarks>
+    /// Written last on purpose, which makes the notice at-least-once: a tick that dies between the
+    /// send and this leaves the row Expired with a null marker, and the next tick sends again
+    /// rather than staying silent. A duplicate "nobody answered your suggestion" is an annoyance;
+    /// a lost one is an operator who never finds out, over a meeting they still believe is being
+    /// decided.
+    ///
     /// It is not a record of the operator having been told, and a decline is the case that proves
-    /// it: that path mails the operator and leaves this null. Stamping it there would be worse
-    /// than the gap it closes, because the only write available is the conditional UPDATE that
-    /// claims the row, which runs BEFORE the send — the column would then say a message went out
-    /// on the strength of a decision that had only just been made.
+    /// it: that path mails the operator and leaves this null. Nothing reads it there — the sweep
+    /// excludes an answered row on its state, whatever this holds — and the only write available on
+    /// that path is the conditional UPDATE that claims the row, which runs before its send and
+    /// would record a message that had not left yet.
     /// </remarks>
     public long? NotifiedAt { get; set; }
 }

@@ -6,10 +6,8 @@ using Microsoft.Extensions.Options;
 
 using MimeKit;
 using MimeKit.Text;
-using MimeKit.Utils;
 
 using NodaTime;
-using NodaTime.Text;
 
 namespace Kairos.Api.Integrations.Email;
 
@@ -32,13 +30,12 @@ public sealed class OperatorMailer(
     IOptions<EmailOptions> options,
     ILogger<OperatorMailer> logger)
 {
+    /// <summary>
+    /// The route the frontend claims: <c>/admin/meetings</c>, the workbench screen this notice
+    /// exists to send the operator back to. Behind the session gate, unlike the two paths
+    /// <see cref="BookingMailer"/> builds, which are keyed by a token instead.
+    /// </summary>
     private const string MeetingsPath = "admin/meetings";
-
-    private static readonly ZonedDateTimePattern DatePattern =
-        ZonedDateTimePattern.CreateWithInvariantCulture("dddd d MMMM yyyy", DateTimeZoneProviders.Tzdb);
-
-    private static readonly ZonedDateTimePattern TimePattern =
-        ZonedDateTimePattern.CreateWithInvariantCulture("HH:mm", DateTimeZoneProviders.Tzdb);
 
     /// <summary>
     /// Sends, or does not, and either way returns — rule 14 at the only place it can be enforced.
@@ -109,32 +106,32 @@ public sealed class OperatorMailer(
             ? $"{booker.Name} declined the new time for {booking.Link.Name}."
             : $"{booker.Name} did not answer the new time for {booking.Link.Name}.";
 
+        // The reassurance, or the correction. A cancel closes an OPEN hold and nothing else, so a
+        // row already Expired outlives its meeting being called off — and this notice can reach
+        // the operator a tick later, about a meeting they themselves cancelled. Telling them it
+        // stays where it is would be the one sentence here that is flatly untrue.
+        var standing = booking.Status == BookingStatus.Confirmed
+            ? $"The meeting stays where it is: {When(current)}."
+            : $"The meeting has since been cancelled; it was {When(current)}.";
+
         var body = new TextPart(TextFormat.Plain);
         body.SetText(Encoding.UTF8, $"""
             {headline}
 
-            You suggested {DatePattern.Format(proposed)} at {TimePattern.Format(proposed)} ({zone.Id}).
+            You suggested {When(proposed)}.
 
-            The meeting stays where it is: {DatePattern.Format(current)} at {TimePattern.Format(current)} ({zone.Id}).
+            {standing}
 
-            {settings.PublicBaseUrl!.TrimEnd('/')}/{MeetingsPath}
+            {OutgoingMail.Url(settings.PublicBaseUrl!, MeetingsPath)}
             """);
 
-        var message = new MimeMessage
-        {
-            Subject = headline,
-            Body = body,
-        };
-
-        message.From.Add(organizer);
-        message.To.Add(organizer);
-
-        // The sending domain rather than MimeKit's default, which is the machine's hostname — a
-        // random hex string in a container, and a forgery signal to a filter. The reasoning is
-        // BookingMailer.Envelope's; it is not shared with it because nothing else in these two
-        // messages is.
-        message.MessageId = MimeUtils.GenerateMessageId(organizer.Domain);
-
-        return message;
+        return OutgoingMail.Envelope(headline, body, organizer, organizer);
     }
+
+    /// <summary>
+    /// A day and an hour in one phrase, because every instant in this message is read against
+    /// another one and a column of half-written times is how a call gets missed.
+    /// </summary>
+    private static string When(ZonedDateTime value) =>
+        $"{OutgoingMail.Date(value)} at {OutgoingMail.Time(value)} ({value.Zone.Id})";
 }

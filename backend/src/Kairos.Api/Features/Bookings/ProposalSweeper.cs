@@ -18,6 +18,13 @@ namespace Kairos.Api.Features.Bookings;
 /// makes mail late and never makes availability wrong. What it owns is the part a WHERE clause
 /// cannot do: noticing, so somebody can be told.
 ///
+/// One thing does still wait on it, and it is a defect rather than the design. The propose route
+/// refuses a second suggestion while a row is Open and reads that state without the clock, so a
+/// lapsed hold goes on blocking the next suggestion until a tick closes it or the operator
+/// withdraws it by hand. Availability is right throughout; re-proposing is not. The fix belongs on
+/// that route — treat a lapsed row as not holding, the way every other reader here does — and not
+/// in another job for this one.
+///
 /// Registered beside <see cref="Integrations.Webhooks.MeetingEndedPoller"/> and ticking on its
 /// minute. It does not copy that service's sweep-at-startup and does not need to: a tick missed
 /// there is a meeting.ended nobody queued, and a tick missed here is a late mail about a meeting
@@ -44,7 +51,7 @@ public sealed class ProposalSweeper(
             {
                 // A tick that threw must not take the service down: the next one is a minute away
                 // and the holds it failed to close have already stopped holding anything.
-                logger.LogWarning(exception, "A proposal sweep failed. The next tick will try again.");
+                logger.LogError(exception, "A proposal sweep failed. The next tick will try again.");
             }
         }
     }
@@ -69,6 +76,11 @@ public sealed class ProposalSweeper(
         // NotifiedAt exists rather than the state alone deciding. An answered proposal is not on
         // this list however long ago its expiry ran out: nobody needs telling that nobody replied
         // to a suggestion that was declined.
+        // Tracked, and the one read in this feature that is — every other proposal read is
+        // AsNoTracking under rule 8, because every other one writes through a conditional UPDATE
+        // that names its own predicate. This one has no predicate to write: it closes rows it has
+        // already decided about, twice each, and a change tracker is what lets the second write
+        // touch the marker alone instead of restating the state beside it.
         var lapsed = await context.BookingProposals
             .Include(proposal => proposal.Booking)
             .ThenInclude(booking => booking.Link)
@@ -95,6 +107,11 @@ public sealed class ProposalSweeper(
             .Select(row => row.TimeZoneId)
             .SingleAsync(cancellationToken);
 
+        // Two saves per row rather than two per sweep, which is the stronger of the two orderings
+        // here. Batched, a single row that failed to save would roll back the whole sweep's state
+        // changes AFTER their messages had already gone out — so the next tick would find every
+        // one of them open again and mail the lot a second time. Per row, a failure costs the row
+        // it happened on and leaves every row already finished finished.
         foreach (var proposal in lapsed)
         {
             proposal.State = ProposalState.Expired;
@@ -102,15 +119,20 @@ public sealed class ProposalSweeper(
             // When it actually lapsed, not when this noticed. The sweeper is allowed to be late
             // and the row must not record the lateness as the decision.
             proposal.DecidedAt ??= proposal.ExpiresAt;
-            proposal.NotifiedAt = now;
-
-            // Saved before the send, so a relay that hangs cannot make the next tick send again.
-            // The trade is stated plainly: a crash between here and the send loses one message,
-            // which is a message about a meeting that has not changed.
             await context.SaveChangesAsync(cancellationToken);
 
             await mailer.SendAsync(
                 proposal.Booking, proposal, OperatorNotice.Expired, timeZoneId, cancellationToken);
+
+            // The marker last, and that ordering is the whole failure story. A process that dies
+            // in the gap above leaves the row Expired with a null marker, which is exactly what
+            // the query's second arm picks up — so the notice is re-sent rather than lost. This
+            // fails at-least-once on purpose: a duplicate "nobody answered your suggestion" is an
+            // annoyance, and a lost one is an operator who never learns their suggestion died over
+            // a meeting they still believe is being decided. Marking first would trade that the
+            // other way and there is nothing here worth buying with silence.
+            proposal.NotifiedAt = now;
+            await context.SaveChangesAsync(cancellationToken);
         }
     }
 }

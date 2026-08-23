@@ -47,6 +47,7 @@ public class OperatorMailerTests
     private const string DeclinedHeadline = $"{BookerName} declined the new time for {LinkName}.";
     private const string ExpiredHeadline = $"{BookerName} did not answer the new time for {LinkName}.";
     private const string StandsWhereItWas = "The meeting stays where it is:";
+    private const string SinceCancelled = "The meeting has since been cancelled";
 
     /// <summary>The proposal's hour in Tokyo. 11:00Z is 20:00 there and 13:00 in Warsaw.</summary>
     private const string ProposedInTokyo = "20:00";
@@ -107,6 +108,21 @@ public class OperatorMailerTests
     }
 
     /// <summary>
+    /// The one sentence in this mail that can go stale under it. A cancel closes an OPEN hold, so
+    /// a row that is already Expired survives its meeting being called off — and the next tick
+    /// picking that row up would otherwise mail the operator that a meeting they cancelled stays
+    /// where it is.
+    /// </summary>
+    [Fact]
+    public void Compose_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
+    {
+        var body = Plain(Compose(OperatorNotice.Expired, BookingStatus.Cancelled));
+
+        body.ShouldNotContain(StandsWhereItWas);
+        body.ShouldContain(SinceCancelled);
+    }
+
+    /// <summary>
     /// The organizer's zone, not the booker's, because the organizer is who this is addressed to
     /// — the same rule the invitee's mail follows in the other direction. Both instants are
     /// asserted: the hour that was suggested and the hour the meeting is still at are read off
@@ -157,10 +173,12 @@ public class OperatorMailerTests
     }
 
     /// <summary>Composed, written and parsed back, so what is read is what a relay would hand on.</summary>
-    private static MimeMessage Compose(OperatorNotice notice)
+    private static MimeMessage Compose(
+        OperatorNotice notice,
+        BookingStatus status = BookingStatus.Confirmed)
     {
         using var stream = new MemoryStream();
-        Mailer(Options()).Compose(Booking(), Proposal(), notice, OrganizerZone).WriteTo(stream);
+        Mailer(Options()).Compose(Booking(status), Proposal(), notice, OrganizerZone).WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }
@@ -184,7 +202,7 @@ public class OperatorMailerTests
         return new OperatorMailer(new EmailSender(wrapped), wrapped, NullLogger<OperatorMailer>.Instance);
     }
 
-    private static Booking Booking()
+    private static Booking Booking(BookingStatus status = BookingStatus.Confirmed)
     {
         var id = Guid.CreateVersion7();
         return new Booking
@@ -192,7 +210,7 @@ public class OperatorMailerTests
             Id = id,
             StartUtc = Start.ToUnixTimeSeconds(),
             EndUtc = (Start + MeetingLength).ToUnixTimeSeconds(),
-            Status = BookingStatus.Confirmed,
+            Status = status,
             ManageTokenHash = string.Empty,
             Link = new Link { Slug = "consulting", Name = LinkName },
             Participants =
