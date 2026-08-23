@@ -428,13 +428,18 @@ export default function Manage() {
                     type="button"
                     data-loading={busy || undefined}
                     onClick={runReschedule}
+                    // The label is a verb now, so the destination has to reach a
+                    // screen reader some other way or the control announces
+                    // "Move" and nothing else. Described by, not labelled by:
+                    // the button is still named "Move", and the date follows it.
+                    aria-describedby="reschedule-when"
                   >
                     Move
                   </button>
                   {/* Beside the button rather than inside its label, exactly as
                       Book.tsx:573 does it: figures set in the numeric face, and
                       a button that does not resize as the date changes. */}
-                  <span className="muted t-sm numeric">{chosen.long}</span>
+                  <span className="muted t-sm numeric" id="reschedule-when">{chosen.long}</span>
                 </div>
               )}
             </div>

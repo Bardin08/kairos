@@ -204,7 +204,16 @@ test('the reschedule CTA sets its date in the numeric face, beside the button', 
     expect(cta.textContent).toBe('Move')
   }
 
-  // And the date is on the page, in the face figures are set in.
+  // And the date is on the page, in the face figures are set in. The time the
+  // click above chose, not merely a digit: /\d/ would pass on the date alone
+  // and on a stale label from the previous selection.
   const when = document.querySelector('.desktop-cta .numeric')
-  expect(when?.textContent).toMatch(/\d/)
+  expect(when?.textContent).toContain('13:00')
+
+  // Named by the verb, described by the date — otherwise the control announces
+  // "Move" and never says where to. Scoped to .desktop-cta because the phone
+  // action bar renders a second button with the same label and is display:none
+  // beside this one, never absent.
+  const cta = document.querySelector('.desktop-cta .btn-primary')
+  expect(cta?.getAttribute('aria-describedby')).toBe(when?.id)
 })
