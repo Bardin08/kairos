@@ -34,6 +34,9 @@ const INVALID_ATTRIBUTE_SELECTOR = '[data-invalid="true"]'
 const SEEDED_HOLD_HOURS = 48
 const TWELVE_HOURS = 12
 
+/** Not a shorter hold. A proposal that lapsed before it was sent holds nothing. */
+const NO_HOLD = '0'
+
 const settings: OperatorSettings = {
   timeZone: UTC,
   signedInAs: 'Vlad Bardin',
@@ -116,6 +119,24 @@ test('a start increment of zero is refused here rather than by the server', asyn
   render(<Settings />)
 
   fireEvent.change(await screen.findByLabelText('Start increment'), { target: { value: '0' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true')
+  expect(vi.mocked(saveSettings)).not.toHaveBeenCalled()
+})
+
+/**
+ * The hold's floor, which is the start increment's floor for a different
+ * reason: a zero-hour hold has lapsed before the invitee's mail is composed,
+ * so the proposal would hold nothing at all. The backend refuses it; this is
+ * the same rule said early enough that nothing is submitted to learn it.
+ */
+test('a proposal hold of zero hours is refused here rather than by the server', async () => {
+  render(<Settings />)
+
+  fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
+    target: { value: NO_HOLD },
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true')
