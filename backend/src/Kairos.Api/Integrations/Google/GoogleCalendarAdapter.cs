@@ -20,8 +20,6 @@ using Settings = Kairos.Api.Persistence.Entities.Settings;
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
-/// The connected Google account's calendar, in all three jobs Kairos asks of it: what the
-/// organizer is already busy with, where a new meeting goes, and the Meet it is joined through.
 /// One class because it is one account and one client; three interfaces because they are three
 /// capabilities and a provider that only did one of them would implement only that one.
 /// </summary>
@@ -133,9 +131,6 @@ public sealed class GoogleCalendarAdapter(
     public async Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
         await clients.GetCredentialAsync(cancellationToken) is not null;
 
-    /// <summary>
-    /// The meeting, in the organizer's own calendar, with a Meet attached.
-    /// </summary>
     /// <remarks>
     /// Two idempotency keys, both the booking id, because Google offers two and they guard
     /// different things. <c>CreateConferenceRequest.RequestId</c> makes the <em>conference</em>
@@ -188,7 +183,6 @@ public sealed class GoogleCalendarAdapter(
         return created.Id;
     }
 
-    /// <summary>The same event, at the new time.</summary>
     /// <remarks>
     /// <c>Patch</c> rather than <c>Update</c>, and the difference is the whole of this method's
     /// correctness. Update replaces the resource: every field absent from the body is cleared,

@@ -12,9 +12,7 @@ using Microsoft.Extensions.Options;
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
-/// Everything Google-shaped about connecting and staying connected: the consent URL and its two
-/// non-negotiable parameters, the code exchange, and an authorised client whose access token is
-/// refreshed on demand. Nothing outside this folder names a Google type.
+/// Nothing outside this folder names a Google type.
 /// </summary>
 /// <remarks>
 /// A singleton, because the cache is the point: <see cref="UserCredential"/> holds the current
@@ -244,9 +242,8 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     }
 
     /// <summary>
-    /// What Google needs to still be connected tomorrow, and the only shape that knows the words
-    /// "refresh token". Private and nested because it never leaves this class: the store is
-    /// generic over it, so it crosses no signature that anything else can see.
+    /// Private and nested because it never leaves this class: the store is generic over it, so it
+    /// crosses no signature that anything else can see.
     /// </summary>
     /// <remarks>
     /// It used to carry a reconnect flag as well. That is a property of the credential now, so a
