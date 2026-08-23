@@ -6,37 +6,31 @@ using NodaTime;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// One fixed window per caller per class, spent one request at a time. Owning the count rather
-/// than mirroring a framework limiter is what makes the answer and the headers the same number: a
-/// framework limiter keeps the count where the application cannot read it, leaving it to
-/// reconstruct one beside it.
+/// One fixed window per caller per class, spent one request at a time. Owning the count is what
+/// makes the answer and the headers the same number: a framework limiter keeps it where the
+/// application cannot read it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A <see cref="MemoryCache"/> entry per partition, expiring when its window ends, so the eviction
-/// is the expiry: an entry lives exactly as long as the count it holds is meaningful, and a caller
-/// that stops calling stops costing anything one window later. Nothing sweeps and nothing has to
-/// be told when a caller goes away.
+/// A <see cref="MemoryCache"/> entry per partition, expiring when its window ends, so eviction is
+/// the expiry. Nothing sweeps, and nothing has to be told when a caller goes away.
 /// </para>
 /// <para>
 /// The count is approximate under concurrency, in the direction of letting a request through: two
-/// requests that miss the cache at the same instant both build a counter, one wins the entry, and
-/// the loser's increment lands on an object nobody reads. That costs at most one extra request per
-/// concurrent first-arrival, only in the opening instant of a window, and corrects itself as soon
-/// as the entry is shared. A count exact under contention is a lock on the hot path of every
-/// anonymous request — a worse trade than the eleventh booking attempt occasionally getting
-/// through.
+/// requests missing the cache at the same instant both build a counter, one wins the entry, and the
+/// loser's increment lands on an object nobody reads. At most one extra request per concurrent
+/// first-arrival, in the opening instant of a window. Exactness would cost a lock on the hot path
+/// of every anonymous request.
 /// </para>
 /// </remarks>
 public sealed class RateLimitBudget(IClock clock, ILogger<RateLimitBudget> logger) : IDisposable
 {
     /// <summary>
-    /// How many callers are counted at once. Entries retire themselves as their windows end, so
-    /// this bounds a flood arriving faster than they retire rather than being a working limit — ten
-    /// thousand distinct addresses inside one window is a crawler, not a booking page. At the
-    /// ceiling the cache evicts by its own policy rather than refusing anyone, so an evicted caller
-    /// starts a fresh window with its full allowance back. That is the right way round: the
-    /// alternative is letting an address-rotating flood grow the process until it is killed.
+    /// How many callers are counted at once. Entries retire with their windows, so this bounds a
+    /// flood arriving faster than they retire rather than being a working limit — ten thousand
+    /// addresses in one window is a crawler. At the ceiling the cache evicts rather than refusing,
+    /// so an evicted caller gets a fresh window with its full allowance. The alternative is letting
+    /// an address-rotating flood grow the process until it is killed.
     /// </summary>
     private const long MaxTrackedCallers = 10_000;
 
@@ -79,15 +73,13 @@ public sealed class RateLimitBudget(IClock clock, ILogger<RateLimitBudget> logge
     }
 
     /// <summary>
-    /// Said once for the life of this application: a listener with no peer is a deployment shape
-    /// rather than an event, and a line per request would be a second denial of service on a host
-    /// already being flooded.
+    /// Once for the life of this application: a listener with no peer is a deployment shape, and a
+    /// line per request would be a second denial of service on a host already flooded.
     /// </summary>
     /// <remarks>
-    /// Here rather than beside the middleware that calls it, because this object is one per
-    /// application while that code is static. A static flag would be tripped by whichever
-    /// application in the process met the case first and leave every other one silent — which in a
-    /// test run means the assertion lands on whichever suite happened to go first.
+    /// Here rather than beside the middleware that calls it, which is static: a static flag is
+    /// tripped by whichever application in the process met the case first, leaving every other one
+    /// silent — in a test run, whichever suite went first.
     /// </remarks>
     public void WarnAboutMissingPeerOnce()
     {

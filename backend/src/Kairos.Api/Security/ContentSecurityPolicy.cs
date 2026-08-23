@@ -7,26 +7,23 @@ using Microsoft.Extensions.FileProviders;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// What the single page is allowed to load and run, written once at startup from the page that is
-/// actually on disk. Everything Kairos serves is same-origin — the fonts are in <c>/fonts</c>, the
-/// stylesheet is vendored beside them, and the SPA fetches nothing but this application's own API —
-/// so every directive is <c>'self'</c> or narrower, and only the inline script needs naming.
+/// What the single page is allowed to load and run, written once at startup from the page on disk.
+/// Everything Kairos serves is same-origin — vendored fonts and stylesheet, no fetch but its own
+/// API — so every directive is <c>'self'</c> or narrower and only the inline script needs naming.
 /// </summary>
 /// <remarks>
-/// The hash is computed here rather than baked in as a constant, because a constant is right the
-/// day it is written and wrong the first time somebody edits that script — and it fails quietly:
-/// the browser refuses the script, the pre-paint theme read never runs, and the page flashes the
-/// wrong theme on every load with nothing in any log. Read once at startup rather than per request,
-/// because the page it reads is written by a build rather than by anything this process does.
+/// The hash is computed rather than baked in as a constant: a constant goes wrong the first time
+/// somebody edits that script, and fails quietly — the browser refuses it, the pre-paint theme read
+/// never runs, and the page flashes the wrong theme with nothing in any log. Once at startup, not
+/// per request, because a build writes that page and this process does not.
 /// </remarks>
 /// <remarks>
 /// No <c>report-to</c> and no <c>report-uri</c>, decided rather than overlooked. A reporting
-/// endpoint is an unauthenticated write route accepting JSON from any browser that has ever loaded
-/// this origin, and Kairos would have to rate-limit it, bound it and give an operator somewhere to
-/// read it — a task, not a directive. Of the two silent failures it would cover, the hash drifting
-/// from the page is closed above, and a directive that turns out too tight shows up in a console
-/// the first time the page is opened. Reporting, if wanted later, arrives with its own route and
-/// its own retention, not as a line in this string.
+/// endpoint is an unauthenticated write route taking JSON from any browser that ever loaded this
+/// origin, to be rate-limited, bounded and read by somebody — a task, not a directive. Of the two
+/// silent failures it would cover, the hash drifting is closed above, and a too-tight directive
+/// shows up in a console the first time the page opens. It would arrive with its own route and
+/// retention, not as a line in this string.
 /// </remarks>
 public static partial class ContentSecurityPolicy
 {
@@ -83,12 +80,11 @@ public static partial class ContentSecurityPolicy
     }
 
     /// <summary>
-    /// A <c>&lt;script&gt;</c> that carries no <c>src</c>, and the text it executes. The lookahead
-    /// matches an attribute NAMED src — whitespace, the name, then its equals sign — not the
-    /// letters wherever they appear. A word boundary is not enough: it excludes <c>srcset</c>, but a
-    /// hyphen is a non-word character, so <c>data-src</c> satisfies it too and the script is
-    /// skipped. Skipping fails silently — the policy stays well formed, the browser refuses a script
-    /// nobody hashed, and nothing is logged.
+    /// A <c>&lt;script&gt;</c> carrying no <c>src</c>, and the text it executes. The lookahead
+    /// matches an attribute NAMED src — whitespace, name, equals — not the letters wherever they
+    /// appear. A word boundary excludes <c>srcset</c> but not <c>data-src</c>, whose hyphen is a
+    /// non-word character, and the script would be skipped silently: policy still well formed,
+    /// browser refusing a script nobody hashed, nothing logged.
     /// </summary>
     [GeneratedRegex(
         @"<script\b(?![^>]*\ssrc\s*=)[^>]*>(.*?)</script>",

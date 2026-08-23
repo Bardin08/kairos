@@ -82,9 +82,8 @@ public sealed class SlotGenerator
     }
 
     /// <summary>
-    /// An exact upper bound on the candidates the walk will visit, so the result list is sized
-    /// once and never grown or over-reserved. Slots are only ever dropped from here — by notice,
-    /// collision, a DST gap or the daily cap — so this is never an undercount.
+    /// An exact upper bound on the candidates the walk visits, so the list is sized once. Slots are
+    /// only dropped from here — notice, collision, a DST gap, the cap — never added.
     /// </summary>
     /// <remarks>
     /// The <c>+ 1</c> counts the candidate sitting on the window's opening edge: a 09:00-09:40
@@ -135,10 +134,9 @@ public sealed class SlotGenerator
 
     /// <summary>The first grid point at or after <paramref name="minutes"/>.</summary>
     /// <remarks>
-    /// The grid is anchored on midnight rather than on the window's start, so every window in the
-    /// account lands on one shared set of times. A real consequence rather than an accident: a
-    /// 25-minute increment makes a 09:00 window open at 09:10. The return may exceed a day, which
-    /// the caller's bound rejects rather than wrapping.
+    /// Anchored on midnight rather than the window's start, so every window lands on one shared set
+    /// of times — deliberately, though it means a 25-minute increment opens a 09:00 window at 09:10.
+    /// The return may exceed a day, which the caller's bound rejects rather than wrapping.
     /// </remarks>
     private static int AlignUp(int minutes, int stepMinutes)
     {
@@ -151,17 +149,15 @@ public sealed class SlotGenerator
     /// transition and every candidate on it has to be mapped individually.
     /// </summary>
     /// <remarks>
-    /// A ZoneInterval is by definition a maximal run of constant offset, so two probes landing in
-    /// an equal interval prove no transition happens between them. The probes bracket local
-    /// midnight by a day behind and two ahead, which contains the whole local day for any real
-    /// offset (the widest is ±14h). Inside a single interval MapLocal returns exactly one mapping
-    /// and it is <c>local.WithOffset(offset)</c> — the same answer, not an approximation, and the
-    /// DST rules below still decide every transition day. Verified against MapLocal over 10.8M
-    /// candidates across 9 zones — including Lord Howe's half-hour shift and Chatham's +12:45 —
-    /// with no disagreement.
-    /// Value equality, not reference equality: two equal ZoneIntervals share a Start and an End,
-    /// which is the identical proof, and NodaTime hands back equal-but-distinct instances often
-    /// enough that ReferenceEquals drops 6% of ordinary days onto the slow path for nothing.
+    /// A ZoneInterval is a maximal run of constant offset, so two probes landing in an equal one
+    /// prove no transition between them. They bracket local midnight a day behind and two ahead,
+    /// covering the whole local day for any real offset (widest ±14h). Inside one interval MapLocal
+    /// returns exactly <c>local.WithOffset(offset)</c>, so this is the same answer, not an
+    /// approximation. Verified against MapLocal over 10.8M candidates across 9 zones — Lord Howe's
+    /// half-hour shift and Chatham's +12:45 included — with no disagreement.
+    /// Value equality, not reference: equal ZoneIntervals share a Start and an End, the identical
+    /// proof, and NodaTime returns equal-but-distinct instances often enough that ReferenceEquals
+    /// drops 6% of ordinary days onto the slow path.
     /// </remarks>
     private static Offset? ConstantOffsetFor(LocalDate date, DateTimeZone zone)
     {
