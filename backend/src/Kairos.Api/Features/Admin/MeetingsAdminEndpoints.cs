@@ -85,20 +85,17 @@ public sealed record MeetingLinkResponse(Guid Id, string Name);
 /// </param>
 public sealed record MeetingProposalResponse(Guid Id, string Start, string ExpiresAt, string State);
 
-/// <summary>
-/// One meeting as the operator's list draws it.
-/// </summary>
+/// <summary>One meeting as the operator's list draws it.</summary>
 /// <remarks>
 /// The calendar fields are flattened out of Part B's <see cref="CalendarEntry"/> rather than
-/// nested, because the row asks one question of it — did this reach a calendar, and if not why —
-/// and a nested object would invite the page to start rendering a state machine. There is no
-/// provider type here and no vendor word: <see cref="CalendarProvider"/> is the lowercase
-/// <see cref="IntegrationProvider"/> name, which is the same string
-/// <c>/integrations</c> already answers with.
+/// nested: the row asks it one question — did this reach a calendar, and if not why — and a nested
+/// object invites the page to render a state machine. No vendor word either:
+/// <see cref="CalendarProvider"/> is the lowercase <see cref="IntegrationProvider"/> name, the
+/// string <c>/integrations</c> already answers with.
 /// </remarks>
 /// <param name="ParticipantTimeZone">
-/// The zone the participant read the times in, and never the organizer's. It is on the row
-/// because "what time did they think this was" is the question that gets asked after a no-show.
+/// The participant's zone, never the organizer's. "What time did they think this was" is the
+/// question asked after a no-show.
 /// </param>
 /// <param name="Slug">
 /// The link's slug, beside its id and not instead of it. The row's propose panel reads the times
@@ -127,16 +124,12 @@ public sealed record MeetingResponse(
     string? CalendarError,
     MeetingProposalResponse? Proposal);
 
-/// <summary>
-/// Everything one render of the tab needs, in one round trip.
-/// </summary>
+/// <summary>Everything one render of the tab needs, in one round trip.</summary>
 /// <remarks>
-/// <see cref="Links"/> is the filter's options and is deliberately not affected by the filters:
-/// narrowing to one link must not leave the operator with a dropdown holding only that link and
-/// no way back. It is the links that have meetings, not every link that exists — a filter offering
-/// a value that can only ever return nothing is a filter with dead options in it. That also keeps
-/// this tab off the links admin's endpoint, which is another task's and would be a dependency
-/// this page does not need.
+/// <see cref="Links"/> is the filter's options and deliberately unaffected by the filters:
+/// narrowing to one link must not leave the operator a dropdown holding only that link. It lists
+/// the links that have meetings, not every link, since an option that can only return nothing is a
+/// dead one. That also keeps this tab off the links admin's endpoint.
 /// </remarks>
 public sealed record MeetingsResponse(
     string TimeZone,
@@ -148,11 +141,10 @@ public sealed record MeetingsResponse(
 /// which link it came through.
 /// </summary>
 /// <remarks>
-/// The read is one route and the write is another: an operator cancels a meeting here, because
-/// the alternative was editing the calendar by hand, which leaves the calendar and Kairos
-/// disagreeing about a meeting Kairos is the source of truth for. What is still absent is any
-/// meeting Kairos did not create: reading a calendar back is a slice with its own conflict rules
-/// and it is not smuggled in behind a list.
+/// The write is a separate route: an operator cancels here because the alternative, editing the
+/// calendar by hand, leaves it and Kairos disagreeing about a meeting Kairos owns. Meetings Kairos
+/// did not create are still absent — reading a calendar back has its own conflict rules and is not
+/// smuggled in behind a list.
 /// </remarks>
 public static class MeetingsAdminEndpoints
 {
@@ -318,17 +310,13 @@ public static class MeetingsAdminEndpoints
         ];
     }
 
-    /// <summary>
-    /// The operator calls a meeting off, with a sentence the invitee reads.
-    /// </summary>
+    /// <summary>The operator calls a meeting off, with a sentence the invitee reads.</summary>
     /// <remarks>
-    /// The cancellation itself is <see cref="Bookings.BookingCanceller"/>'s, shared with the
-    /// invitee's own cancel: the work that belongs to this route is the principal, the reason and
-    /// the shape of the answer, not the scheduling.
+    /// The cancellation is <see cref="Bookings.BookingCanceller"/>'s, shared with the invitee's own
+    /// cancel; this route owns the principal, the reason and the shape of the answer.
     ///
-    /// No manage token reaches the mailer, and none can — only its SHA-256 is stored, and the
-    /// plaintext exists in exactly two requests, neither of them this one. The invitee gets the
-    /// cancellation with no manage link on it and the operator's reason in place of it.
+    /// No manage token reaches the mailer and none can — only its SHA-256 is stored. The invitee
+    /// gets the cancellation with the operator's reason in place of a manage link.
     /// </remarks>
     private static async Task<MeetingResponse> CancelAsync(
         Guid id,
@@ -350,27 +338,22 @@ public static class MeetingsAdminEndpoints
     }
 
     /// <summary>
-    /// Offers the invitee a new time and holds it until they answer. Nothing about the meeting
-    /// changes here — that is the whole design: the invitee agreed to a time, so the operator
-    /// proposes and the invitee decides.
+    /// Offers the invitee a new time and holds it until they answer. The meeting itself does not
+    /// change: the invitee agreed to a time, so the operator proposes and the invitee decides.
     /// </summary>
     /// <remarks>
-    /// The instant goes through the same check the public create path uses, so a proposal cannot
-    /// land on an hour the link does not offer or inside another meeting's margin — which is what
-    /// keeps this from being a way to write bookings the availability rules would never produce.
+    /// The instant goes through the check the public create path uses, so a proposal cannot land on
+    /// an hour the link does not offer or inside another meeting's margin.
     ///
-    /// Release, check, re-place — <see cref="BookingsEndpoints.RescheduleAsync"/>'s shape, and it
-    /// has to be: a confirmed meeting pads its own slot by the margin, so checking with it still
-    /// confirmed refuses the hour directly after it, and "push it back half an hour" is the
-    /// commonest thing an operator wants to propose. Every path out re-confirms, the failing ones
-    /// included, through the same uncancellable <see cref="BookingsEndpoints.ConfirmAsync"/> the
-    /// invitee's reschedule compensates with.
+    /// Release, check, re-place — <see cref="BookingsEndpoints.RescheduleAsync"/>'s shape: a
+    /// confirmed meeting pads its own slot by the margin, so checking with it still confirmed
+    /// refuses the hour directly after it. Every path out re-confirms through the same uncancellable
+    /// <see cref="BookingsEndpoints.ConfirmAsync"/>, the failing ones included.
     ///
-    /// SAME KNOWN HOLE, not fixed here either: between the release and the re-place the booking is
-    /// Cancelled on disk with nobody having cancelled it, so a cancel landing in that window
-    /// answers 200, is undone by the re-confirm, and leaves the meeting standing with nothing
-    /// announced and nobody told. <see cref="Bookings.BookingMover"/> describes it in full; this
-    /// route widens it to a second caller rather than creating it.
+    /// SAME KNOWN HOLE, not fixed here: between the release and the re-place the booking is
+    /// Cancelled on disk with nobody having cancelled it, so a cancel landing there answers 200 and
+    /// is undone by the re-confirm, leaving the meeting standing with nothing announced.
+    /// <see cref="Bookings.BookingMover"/> has it in full; this route widens it to a second caller.
     /// </remarks>
     private static async Task<MeetingResponse> ProposeAsync(
         Guid id,
@@ -446,12 +429,10 @@ public static class MeetingsAdminEndpoints
         {
             // The filtered unique index, and now genuinely the backstop: the check above answers
             // the ordinary case, so reaching here means two requests were inside this method
-            // together. The insert is dropped and the booking put back on its own, since the save
-            // that failed carried both.
-            //
-            // Detaching the proposal alone is enough only because Booking has no navigation to its
-            // proposals — a fact that lives in another file. Add one, and EF will fix it up on
-            // detach and the row will ride along on the restore's save after all.
+            // together. The insert is dropped and the booking put back on its own, since the failed
+            // save carried both. Detaching the proposal alone suffices only because Booking has no
+            // navigation to its proposals — add one and EF fixes it up on detach, and the row rides
+            // along on the restore's save.
             context.Entry(proposal).State = EntityState.Detached;
             await mover.RestoreAsync(booking);
 

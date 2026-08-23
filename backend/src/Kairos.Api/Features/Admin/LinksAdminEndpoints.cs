@@ -14,9 +14,8 @@ namespace Kairos.Api.Features.Admin;
 /// <remarks>
 /// The four limit columns come back exactly as they sit in the database — <c>null</c> where the
 /// link inherits the global, a number where it does not, and <c>0</c> is a number. Resolving them
-/// here would be the same defect this whole slice exists to prevent: a link showing 15 looks
-/// identical whether it inherited that or had it written in, and once the resolved value has been
-/// round-tripped through an editor the link has silently stopped tracking the global forever.
+/// here is the defect this slice exists to prevent: 15 looks the same inherited or written in, and
+/// one round trip through an editor detaches the link from the global for good.
 /// </remarks>
 public sealed record AdminLinkResponse(
     Guid Id,
@@ -56,14 +55,12 @@ public sealed record LinksPageResponse(
     GlobalLimitsResponse Globals);
 
 /// <summary>
-/// A link's editable shape, for create and update alike. Deliberately not carrying the four
-/// limits: they have their own route, whose whole point is that they are nullable in a way these
-/// fields are not.
+/// A link's editable shape, for create and update alike. Deliberately not carrying the four limits:
+/// they have their own route, whose point is that they are nullable in a way these fields are not.
 /// </summary>
 /// <remarks>
-/// <see cref="Active"/> is likewise absent. Archiving is a state transition with its own route
-/// rather than a field of a form — one writer per column, so a stale editor cannot resurrect a
-/// link somebody archived in another tab.
+/// <see cref="Active"/> is likewise absent: archiving is a state transition with its own route, so
+/// one writer per column and a stale editor cannot resurrect a link archived in another tab.
 /// </remarks>
 public sealed record SaveLinkRequest
 {
@@ -120,10 +117,9 @@ public sealed record SaveLinkRequest
 /// the load-bearing decision in this file.
 /// </summary>
 /// <remarks>
-/// Under PATCH semantics "absent" and "explicitly null" are different intentions, and JSON gives
-/// no clean way to tell them apart short of JSON Patch — a lot of machinery to distinguish two
-/// things a full replace makes unambiguous. Here the body always carries all four keys, so a null
-/// is always an instruction and never an omission.
+/// Under PATCH semantics "absent" and "explicitly null" are different intentions, and JSON tells
+/// them apart only through JSON Patch. With all four keys always present, a null is an instruction
+/// and never an omission.
 /// </remarks>
 public sealed record UpdateLimitsRequest
 {
@@ -246,15 +242,12 @@ public static class LinksAdminEndpoints
         KairosDbContext context,
         CancellationToken cancellationToken)
     {
-        // Before the three checks below, and that order is the whole of what this route promises:
-        // the link is the resource, so a body validated against a link that is not there answers
-        // 409 or 400 about a resource that does not exist. The other three {id:guid} routes resolve
-        // first and 404, and an operator on a stale page has to be told to reload rather than sent
-        // hunting for a collision to resolve.
-        //
-        // Tracked, and with the durations loaded: replacing the set relies on EF seeing the rows
-        // that are going away. Loaded without them, Clear() removes nothing and the link ends up
-        // offering the union of every list it has ever had.
+        // Before the three checks below: the link is the resource, so a body validated against a
+        // link that is not there answers 409 or 400 about something that does not exist. The other
+        // three {id:guid} routes resolve first and 404, and an operator on a stale page needs to be
+        // told to reload rather than sent hunting for a collision. Tracked, and with the durations
+        // loaded: replacing the set relies on EF seeing the rows that are going away — without them
+        // Clear() removes nothing and the link offers the union of every list it has ever had.
         var link = await context.Links
             .Include(candidate => candidate.Durations)
             .FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken)
@@ -277,10 +270,9 @@ public static class LinksAdminEndpoints
 
     /// <summary>
     /// The three assignments below are what <see cref="LimitWriteTests"/> exists for, and the one
-    /// place Part A's whole global-then-override design could be killed in a single line: the
-    /// request's value is assigned across as it arrived, null included, rather than being coalesced
-    /// into whatever the link is currently resolving to. Writing the resolved value here would
-    /// leave the link looking identical in the UI and silently detached from the global.
+    /// place Part A's global-then-override design could be killed in a line: the request's value is
+    /// assigned across as it arrived, null included, never coalesced into what the link currently
+    /// resolves to. The resolved value would leave it looking identical and detached from the global.
     /// </summary>
     private static async Task<AdminLinkResponse> UpdateLimitsAsync(
         Guid id,

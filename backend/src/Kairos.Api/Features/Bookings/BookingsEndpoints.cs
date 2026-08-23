@@ -71,20 +71,17 @@ public sealed record RescheduleBookingRequest
 
 /// <summary>
 /// One booking as every one of these endpoints answers it. <see cref="ManageToken"/> is non-null
-/// exactly once, in the 201 from create: after that only its hash exists, so nothing can hand it
-/// back a second time.
+/// exactly once, in the 201 from create: after that only its hash exists.
 /// </summary>
 /// <param name="CalendarSync">
 /// Where this booking is in the organizer's calendar, lower-cased from
-/// <see cref="CalendarSyncState"/>. Null means nothing was ever attempted — the ordinary state of
-/// a deployment with no calendar connected, not a fault. Enough for a UI to say "this meeting is
-/// not in your calendar" and nothing more: the provider's own error text stays out of a response
-/// an invitee's manage token can read, being unfiltered third-party prose that routinely carries
-/// the organizer's account address inside it.
+/// <see cref="CalendarSyncState"/>. Null means nothing was ever attempted, the ordinary state with
+/// no calendar connected. No provider error text: it is unfiltered third-party prose routinely
+/// carrying the organizer's account address, and an invitee's manage token can read this response.
 /// </param>
 /// <param name="ConferenceUrl">
-/// Where to join, or null if this meeting has no second channel. The invitee already has this URL
-/// in their invitation; it is here so a page can show it without one.
+/// Where to join, or null if this meeting has no second channel. The invitee already has it in
+/// their invitation; it is here so a page can show it without one.
 /// </param>
 public sealed record BookingResponse(
     Guid Id,
@@ -244,11 +241,8 @@ public static class BookingsEndpoints
     /// </summary>
     /// <remarks>
     /// Everything that happens to the booking is <see cref="BookingCanceller"/>'s, shared with the
-    /// operator's cancel in <see cref="Admin.MeetingsAdminEndpoints"/> — the same cancellation
-    /// asked for by somebody else.
-    ///
-    /// No reason: the invitee knows why, and the null column is what records that this was their
-    /// cancellation rather than the operator's.
+    /// operator's cancel in <see cref="Admin.MeetingsAdminEndpoints"/>. No reason is passed: the
+    /// null column is what records that this was the invitee's cancellation, not the operator's.
     /// </remarks>
     private static async Task<BookingResponse> CancelAsync(
         string token,
@@ -314,26 +308,20 @@ public static class BookingsEndpoints
             await FindProposalAsync(context, token, cancellationToken),
             clock.GetCurrentInstant());
 
-    /// <summary>
-    /// The invitee agrees, and only now does anything become true.
-    /// </summary>
+    /// <summary>The invitee agrees, and only now does anything become true.</summary>
     /// <remarks>
-    /// Release, re-check, re-place — <see cref="RescheduleAsync"/>'s shape, and for the same
-    /// reason: a confirmed booking blocks its own calendar, so it is released before the re-check
-    /// or a move an hour later is refused by the meeting being moved.
+    /// Release, re-check, re-place — <see cref="RescheduleAsync"/>'s shape and for its reason: a
+    /// confirmed booking blocks its own calendar, so it is released before the re-check.
     ///
     /// The proposal is closed in that same save, and no exclusion parameter exists anywhere: a row
-    /// that is no longer Open is a row neither conflict reader can see. That is not what carries
-    /// the re-check, though. Both readers also require the booking under a hold to be Confirmed, so
-    /// the release alone already hides this proposal's hold for the length of the re-check. What
-    /// closing it here buys is everything after: the re-place puts the booking back Confirmed, and
-    /// a hold still Open at that moment would block the slot the meeting now occupies, refuse every
-    /// later proposal through the filtered unique index, and reach the sweeper as a suggestion
-    /// nobody answered. Same save, so no window exists in which one is true without the other.
+    /// that is no longer Open is invisible to both conflict readers. That is not what carries the
+    /// re-check — both readers also require a hold's booking to be Confirmed, so the release alone
+    /// already hides this hold. Closing it buys what comes after: at the re-place a still-open hold
+    /// would block the slot the meeting now occupies, refuse every later proposal through the
+    /// filtered unique index, and reach the sweeper as a suggestion nobody answered.
     ///
-    /// Every path out puts the booking back confirmed, the failing ones included. A proposal closed
-    /// by a re-check that failed goes to Withdrawn rather than back to Open: the slot it was
-    /// holding is gone, so re-offering it would be offering something that is not there.
+    /// Every path out puts the booking back confirmed. A proposal closed by a failed re-check goes
+    /// to Withdrawn rather than Open: the slot it was holding is gone.
     /// </remarks>
     private static async Task<BookingResponse> AcceptProposalAsync(
         string token,
@@ -394,14 +382,12 @@ public static class BookingsEndpoints
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
 
-    /// <summary>
-    /// The invitee says no.
-    /// </summary>
+    /// <summary>The invitee says no.</summary>
     /// <remarks>
-    /// "A declined proposal leaves the meeting exactly as it was" is true here by construction
-    /// rather than by care: the booking is read through <see cref="FindProposalAsync"/>, which is
-    /// AsNoTracking, so there is no tracked booking for anything on this path to write — and the
-    /// one write it does make goes out as a targeted UPDATE against the proposal row alone.
+    /// "A declined proposal leaves the meeting exactly as it was" holds by construction: the
+    /// booking is read through <see cref="FindProposalAsync"/>, which is AsNoTracking, so nothing
+    /// on this path has a tracked booking to write, and its one write is a targeted UPDATE against
+    /// the proposal row.
     /// </remarks>
     private static async Task<ProposalResponse> DeclineProposalAsync(
         string token,
@@ -431,20 +417,16 @@ public static class BookingsEndpoints
         return Describe(proposal, now);
     }
 
-    /// <summary>
-    /// Closes the proposal, and refuses if somebody else got there first.
-    /// </summary>
+    /// <summary>Closes the proposal, and refuses if somebody else got there first.</summary>
     /// <remarks>
-    /// The predicate is on the UPDATE rather than on a row read a moment before it, which is the
-    /// whole point. Accept and decline are check-then-write: two in flight together both read the
-    /// row as Open and both go on, which is a meeting moved under a proposal recorded Declined, or
-    /// one meeting moved twice with two mails behind it and the calendar synced twice. Zero rows
-    /// affected means somebody answered it between the read and here.
+    /// The predicate is on the UPDATE rather than on a row read a moment earlier. Accept and
+    /// decline are check-then-write: two in flight both read Open and both go on, which is a meeting
+    /// moved under a proposal recorded Declined, or moved twice with two mails and two calendar
+    /// syncs. Zero rows affected means somebody answered between the read and here.
     ///
-    /// The backstop rather than the mechanism, in the sense <see cref="BookingWriter"/>'s partial
-    /// unique index is: <see cref="RequireOpen"/> refuses the ordinary case a moment earlier and
-    /// says WHICH of the two refusals it is, which this cannot. This covers only the overlap no
-    /// sequential check can see.
+    /// The backstop rather than the mechanism, as <see cref="BookingWriter"/>'s partial unique index
+    /// is: <see cref="RequireOpen"/> refuses the ordinary case earlier and says WHICH refusal it is,
+    /// which this cannot. This covers only the overlap no sequential check can see.
     /// </remarks>
     private static async Task ClaimAsync(
         KairosDbContext context,
@@ -464,9 +446,8 @@ public static class BookingsEndpoints
     /// Moves the row out of Open in one statement, and says whether it was this caller that did it.
     /// </summary>
     /// <remarks>
-    /// Uncancellable, because both callers are compensating or completing a write the request has
-    /// already committed. Losing to another caller is not an error here — the compensation on a
-    /// refused move is content to leave a decline that landed first exactly where it is.
+    /// Uncancellable: both callers compensate or complete a write the request has already
+    /// committed. Losing to another caller is not an error — a decline that landed first stands.
     /// </remarks>
     private static async Task<bool> CloseIfOpenAsync(
         KairosDbContext context,
@@ -523,13 +504,12 @@ public static class BookingsEndpoints
     }
 
     /// <summary>
-    /// By hash against the unique index, and a token that matches nothing is a 404 whatever its
-    /// shape — the same answer a real token for a deleted proposal gets.
+    /// By hash against the unique index; a token that matches nothing is a 404 whatever its shape,
+    /// the same answer a real token for a deleted proposal gets.
     /// </summary>
     /// <remarks>
-    /// Untracked, rule 8, and it is not only about the read: every write to a proposal on these
-    /// routes goes out as its own conditional UPDATE, so nothing here needs a tracked row and
-    /// nothing can accidentally save the booking that rides along in the Include.
+    /// Untracked, rule 8: every write to a proposal on these routes is its own conditional UPDATE,
+    /// so nothing needs a tracked row and nothing can accidentally save the booking in the Include.
     ///
     /// The participants ride along for two readers now — <see cref="BookerZoneOf"/>, which every
     /// response here is rendered in, and <see cref="OperatorMailer"/>, which names the invitee.
@@ -636,10 +616,9 @@ public static class BookingsEndpoints
     /// The booking, plus the two facts about it that live outside its own row.
     /// </summary>
     /// <remarks>
-    /// Two reads rather than a join. Both tables are keyed by booking id, both are empty on a
-    /// deployment with nothing connected, and both are read once per response on an endpoint
-    /// nobody hits in a loop — so the cost is two indexed lookups against SQLite, and what it buys
-    /// is that <see cref="Tracked"/> stays the query the write paths use.
+    /// Two reads rather than a join: both tables are keyed by booking id and read once per response
+    /// on an endpoint nobody hits in a loop, so two indexed lookups buy keeping
+    /// <see cref="Tracked"/> as the query the write paths use.
     /// </remarks>
     private static async Task<BookingResponse> ToResponseAsync(
         KairosDbContext context,

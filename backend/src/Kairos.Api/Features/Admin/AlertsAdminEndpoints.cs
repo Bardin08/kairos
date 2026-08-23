@@ -5,8 +5,8 @@ using NodaTime.Text;
 namespace Kairos.Api.Features.Admin;
 
 /// <summary>
-/// One alert as the workbench renders it. Every field is source-neutral, which is what lets the
-/// shell list whatever the channel returns and hold copy only for the codes it knows.
+/// One alert as the workbench renders it. Every field is source-neutral, so the shell lists
+/// whatever the channel returns and holds copy only for the codes it knows.
 /// </summary>
 /// <param name="Since">ISO instant of the last time the thing worked, or null.</param>
 /// <param name="Details">
@@ -22,17 +22,13 @@ public sealed record AlertResponse(
     IReadOnlyDictionary<string, string> Details);
 
 /// <summary>
-/// <para>
-/// On the admin group like every other admin route, so ground rule 19's access decision is stated
-/// where the group is built and rule 20's rate-limit answer is the group's argued "none". The shell
-/// calls this on mount and on every navigation, which is what makes "within one page load" true
-/// without a poll or a socket.
-/// </para>
-/// <para>
+/// On the admin group like every other admin route, so rule 19's access decision is stated where
+/// the group is built and rule 20's rate-limit answer is the group's argued "none". The shell calls
+/// this on mount and on every navigation, which makes "within one page load" true without a poll.
+///
 /// Ordered by severity alone, deliberately not by <see cref="OperatorAlert.Since"/>: a fault with
-/// no known last success would sort first or last depending on how null is treated, and neither is
-/// a claim this can make honestly.
-/// </para>
+/// no known last success sorts first or last depending on how null is treated, and neither is a
+/// claim this can make honestly.
 /// </summary>
 public static class AlertsAdminEndpoints
 {

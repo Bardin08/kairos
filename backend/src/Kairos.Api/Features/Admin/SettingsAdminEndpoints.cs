@@ -25,20 +25,15 @@ public sealed record OverrideCountsResponse(
     int StartIncrementMinutes);
 
 /// <summary>
-/// The whole of the settings screen's read, and the organizer's zone for every screen that needs
-/// to name it.
+/// The settings screen's read, and the organizer's zone for every screen that names it.
 /// </summary>
 /// <remarks>
-/// <para>
 /// The four limits are plain <c>int</c> and never nullable: this is the level a link's null
-/// inherits from, and a nullable field here would imply a level above the global that does not
-/// exist.
-/// </para>
-/// <para>
+/// inherits from, and nullable here would imply a level above the global that does not exist.
+///
 /// <see cref="SignedInAs"/> is the operator's name as the identity provider gave it, null when it
-/// gave none. It rides on this response because the workbench asks both questions in the same
-/// breath when it opens, and a second route to answer one string would have no other reader.
-/// </para>
+/// gave none. It rides on this response because the workbench asks both questions when it opens,
+/// and a second route for one string would have no other reader.
 /// </remarks>
 public sealed record SettingsResponse(
     string TimeZone,
@@ -58,14 +53,11 @@ public sealed record SettingsResponse(
 /// </summary>
 public sealed record TimeZoneOptionResponse(string Id, string Offset);
 
-/// <summary>
-/// The six values the operator sets, all of them, every time.
-/// </summary>
+/// <summary>The six values the operator sets, all of them, every time.</summary>
 /// <remarks>
-/// The four limits' floors are the same ones a link's overrides answer to, and for the same
-/// reasons: a negative margin inverts the padded busy interval and starts creating overlaps that
-/// look like availability, and a zero start increment makes the generator's minute step never
-/// advance.
+/// The four limits' floors are a link's overrides' floors, for the same reasons: a negative margin
+/// inverts the padded busy interval and starts creating overlaps that look like availability, and
+/// a zero start increment makes the generator's minute step never advance.
 /// </remarks>
 public sealed record SaveSettingsRequest
 {
@@ -100,19 +92,14 @@ public sealed record SaveSettingsRequest
 }
 
 /// <summary>
-/// <para>
 /// <b>Changing the zone rewrites nothing.</b> Every booking's <c>StartUtc</c> is an instant and
-/// stays where it is. What moves is the wall clock the availability rules describe: a pattern that
-/// says 09:00–17:00 means nine to five in whichever zone this row names, so the window offered
-/// tomorrow shifts while the meetings already made do not.
-/// </para>
-/// <para>
+/// stays where it is; what moves is the wall clock the availability rules describe, so a pattern
+/// reading 09:00–17:00 shifts tomorrow's offered window while the meetings already made do not.
+///
 /// <b>No provider list to maintain.</b> The picker's options are
-/// <see cref="DateTimeZoneProviders.Tzdb"/>, which NodaTime already carries: no hand-kept list to
-/// go stale and no ICU dependency to reintroduce. It is also the database the scheduler resolves
-/// against, which is why the check on the way in reads from it rather than from anything the
-/// operating system happens to know.
-/// </para>
+/// <see cref="DateTimeZoneProviders.Tzdb"/>, which NodaTime already carries: nothing hand-kept to
+/// go stale, no ICU dependency, and the same database the scheduler resolves against — which is why
+/// the check on the way in reads from it rather than from the operating system.
 /// </summary>
 public static class SettingsAdminEndpoints
 {
@@ -206,10 +193,9 @@ public static class SettingsAdminEndpoints
 
     /// <summary>
     /// <see cref="ClaimsIdentity.Name"/> is the id token's <c>name</c> claim, which the OIDC
-    /// handler asks for with the <c>profile</c> scope it requests by default. A provider that sends
-    /// no name leaves this null and the workbench draws no identity block; the alternative is a
-    /// subject identifier or an email address presented as a person's name, and a made-up name is
-    /// worse than none.
+    /// handler asks for with the <c>profile</c> scope it requests by default. A provider sending no
+    /// name leaves this null and the workbench draws no identity block, rather than presenting a
+    /// subject identifier or an email address as a person's name.
     /// </summary>
     private static string? SignedInAs(ClaimsPrincipal user)
     {

@@ -11,17 +11,16 @@ using NodaTime;
 namespace Kairos.Api.Features.Bookings;
 
 /// <summary>
-/// One cancellation for both principals. Invitee and operator differ only in who they are, whether
-/// they gave a reason and whether a plaintext manage token is in hand; the status write, the
-/// sequence, the announcement, the contention rule, the calendar withdrawal and the mail are the
-/// same for each, and those are the parts a second copy stops matching silently.
+/// One cancellation for both principals. Invitee and operator differ only in who they are, their
+/// reason and whether they hold a plaintext manage token; everything downstream is identical, and
+/// a second copy of it stops matching silently.
 /// </summary>
 /// <remarks>
 /// The <c>booking.cancelled</c> announcement is enqueued here rather than wherever
 /// <see cref="Booking.Status"/> becomes <see cref="BookingStatus.Cancelled"/>:
-/// <see cref="BookingsEndpoints"/>'s reschedule sets a booking cancelled and back to confirmed on
-/// every path out, so a hook on the status change would announce a cancellation for every meeting
-/// that merely moved. This is the only place where cancelled is where the booking stays.
+/// <see cref="BookingsEndpoints"/>'s reschedule cancels and re-confirms on every path out, so a
+/// hook on the status change would announce every meeting that merely moved. Here, cancelled is
+/// where the booking stays.
 /// </remarks>
 public sealed class BookingCanceller(
     KairosDbContext context,
@@ -31,27 +30,20 @@ public sealed class BookingCanceller(
     ProposalWriter proposals,
     IClock clock)
 {
-    /// <summary>
-    /// Cancels <paramref name="booking"/>, or agrees that it is already off.
-    /// </summary>
+    /// <summary>Cancels <paramref name="booking"/>, or agrees that it is already off.</summary>
     /// <param name="reason">
-    /// The operator's own words, printed in the invitee's cancellation. Null when the invitee
-    /// cancelled, and that null is the record of which of the two happened — hence no second
-    /// column naming the canceller.
+    /// The operator's words, printed in the invitee's cancellation. Null when the invitee cancelled,
+    /// and that null is the record of which happened — hence no column naming the canceller.
     /// </param>
     /// <param name="manageToken">
-    /// The plaintext token, when the caller has one. The invitee does, having just opened a URL
-    /// carrying it; the operator cannot, because only the SHA-256 is stored and the plaintext is
-    /// never handed back after the 201 that minted it. That mail goes without a manage link, which
-    /// costs nothing: the link's only uses are cancelling a booking already off and moving one that
-    /// no longer exists.
+    /// The plaintext token when the caller has one. The invitee does, having just opened a URL
+    /// carrying it; the operator cannot, since only the SHA-256 is stored. That mail loses its
+    /// manage link, which costs nothing: the link only cancels a booking already off.
     /// </param>
     /// <remarks>
     /// Idempotent. A manage link opened twice, or a double-clicked button, gets the answer the
-    /// caller can already see rather than a 404 or a 500 out of the outbox's unique index. The
-    /// early return and the catch below cover different arrivals and neither substitutes for the
-    /// other: the early return is for a caller who asks again after the first finished, the catch
-    /// for two saves in flight together whose callers both read the booking as confirmed.
+    /// caller can already see rather than a 404 or a 500 out of the outbox's unique index. The early
+    /// return covers asking again after the first finished; the catch covers two saves in flight.
     /// </remarks>
     public async Task CancelAsync(
         Booking booking,
@@ -98,13 +90,11 @@ public sealed class BookingCanceller(
         catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
         {
             // Two cancels in flight at once. The other committed first, so the booking is off and
-            // its announcement queued; this call has nothing left to do but agree. Without the
-            // catch, the outbox row would have turned an idempotent 200 into a 500.
-            //
-            // Returning here rather than falling through is load-bearing: the outbox row this save
-            // could not write is still tracked, so the sync service's own SaveChanges would raise
-            // the same violation and lose the state change it was making. The other call withdraws
-            // the event and sends the mail anyway.
+            // its announcement queued; this call has nothing to do but agree, and without the catch
+            // the outbox row would turn an idempotent 200 into a 500. Returning rather than falling
+            // through is load-bearing: the outbox row this save could not write is still tracked,
+            // so the sync service's SaveChanges would raise the same violation and lose its own
+            // state change. The other call withdraws the event and sends the mail.
             return;
         }
 

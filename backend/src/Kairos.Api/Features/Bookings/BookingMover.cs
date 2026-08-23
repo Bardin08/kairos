@@ -14,16 +14,14 @@ namespace Kairos.Api.Features.Bookings;
 /// Where a booking sits in time, and every rule about putting it there.
 /// </summary>
 /// <remarks>
-/// Three of the four paths that decide a booking's instant — the invitee's reschedule, the
-/// operator's propose and the invitee's accept — run the same dance: release the booking, ask
+/// The reschedule, the propose and the accept all run the same dance: release the booking, ask
 /// whether the slot is offered with it out of the way, then put it back. Written out three times,
-/// the copies had already begun to differ: the reschedule learned to close an open proposal and
-/// the accept did not, which is a slot blocked for two days and a token still answering for a
-/// meeting that has moved. Same argument as <see cref="BookingCanceller"/>, same answer.
+/// the copies had begun to differ — the reschedule closed an open proposal and the accept did not,
+/// which is a slot blocked for two days and a token still answering for a meeting that has moved.
 ///
 /// The release is the part that has to be one copy. A confirmed booking blocks its own calendar,
-/// so nothing can check whether it may move to 11:30 while it is still sitting at 11:00 — and
-/// every path out of the released state has to put it back, the failing ones included.
+/// so nothing can check whether it may move to 11:30 while it still sits at 11:00, and every path
+/// out of the released state has to put it back, the failing ones included.
 /// </remarks>
 public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
 {
@@ -91,9 +89,8 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     /// save that puts it back. Every other path out of here restores it to confirmed first.
     /// </summary>
     /// <param name="compensate">
-    /// Run when, and only when, the check REFUSES. The accept uses it to close the proposal it was
-    /// answering: the slot that proposal was holding is gone, so re-offering it would be offering
-    /// something that is not there. The other callers have nothing to put there and pass null.
+    /// Run when, and only when, the check REFUSES. The accept closes the proposal it was answering,
+    /// whose slot is gone; the other callers pass null.
     /// </param>
     public async Task ReleaseAndCheckAsync(
         Booking booking,
@@ -104,11 +101,11 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     {
         // KNOWN HOLE, not fixed here. Between this save and whichever restore follows, the booking
         // is Cancelled on disk with nobody having cancelled it, and BookingCanceller reads that as
-        // "off already" and returns having done nothing. A cancel landing in the window answers 200
-        // and is then undone: the meeting stands, nothing announced, no calendar event withdrawn,
-        // nobody told. Closing it needs a release distinguishable from a cancellation — a flag, or
-        // a re-read under the write lock — which is a change with its own tests. What this class
-        // buys is that the window has one description instead of three.
+        // "off already" and does nothing: a cancel landing in the window answers 200 and is undone,
+        // leaving the meeting standing with nothing announced, no event withdrawn, nobody told.
+        // Closing it needs a release distinguishable from a cancellation — a flag, or a re-read
+        // under the write lock — a change with its own tests. This class buys the window one
+        // description instead of three.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = now.ToUnixTimeSeconds();
         await context.SaveChangesAsync(cancellationToken);
@@ -141,9 +138,9 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     /// </summary>
     /// <remarks>
     /// The row is mutated rather than replaced: the identifier and the manage token belong to the
-    /// meeting, not to the slot. Sequence is how the .ics tells a calendar client that this is the
-    /// same event at a new time instead of a second invitation, and its length is carried over
-    /// rather than recomputed — a different duration is a different meeting.
+    /// meeting, not the slot. Sequence is how the .ics says "same event, new time" instead of a
+    /// second invitation, and the length is carried over — a different duration is a different
+    /// meeting.
     /// </remarks>
     public Task MoveToAsync(Booking booking, Instant start)
     {
@@ -157,12 +154,12 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     public Task RestoreAsync(Booking booking) => ConfirmAsync(booking);
 
     /// <summary>
-    /// Deliberately uncancellable, and the reason releasing at all is safe. It compensates a write
-    /// this request has already made, so it has to outlive the request the same way
-    /// <see cref="Integrations.Google.GoogleClientFactory"/>'s reconnect flag does: a caller whose
-    /// connection drops between the release and this would otherwise leave the booking cancelled
-    /// forever — reads reporting a meeting that is off, every move refusing it, and no calendar
-    /// event withdrawn or announcement made, since both live in the cancel path and never ran.
+    /// Deliberately uncancellable, and the reason releasing at all is safe: it compensates a write
+    /// this request has already made, so it outlives the request as
+    /// <see cref="Integrations.Google.GoogleClientFactory"/>'s reconnect flag does. A dropped
+    /// connection between the release and this would otherwise leave the booking cancelled forever,
+    /// with no event withdrawn and nothing announced — both live in the cancel path, which never
+    /// ran.
     /// </summary>
     private Task ConfirmAsync(Booking booking)
     {

@@ -11,14 +11,13 @@ using NodaTime.Text;
 namespace Kairos.Api.Features.Integrations;
 
 /// <summary>
-/// One provider as the Integrations page renders it. Every field is provider-neutral, which is
-/// what lets the page list whatever the backend returns instead of hard-coding a Google button.
+/// One provider as the Integrations page renders it. Every field is provider-neutral, so the page
+/// lists whatever the backend returns instead of hard-coding a Google button.
 /// </summary>
 /// <param name="Fault">
-/// A machine-readable code for a stored credential this deployment cannot use, or null when
-/// there is nothing wrong with it. A code and never a sentence: the page turns codes into copy
-/// everywhere else — <c>?error=</c> on the callback does exactly this — and prose from the server
-/// is prose no designer ever sees.
+/// A code for a stored credential this deployment cannot use, null when there is nothing wrong. A
+/// code and never a sentence: the page turns codes into copy everywhere else, and prose from the
+/// server is prose no designer ever sees.
 /// </param>
 public sealed record IntegrationResponse(
     string Provider,
@@ -37,22 +36,14 @@ public sealed record ConnectIntegrationResponse(string ConsentUrl);
 /// lives under <c>Integrations/</c>.
 /// </summary>
 /// <remarks>
-/// <para>
 /// <b>What protects these endpoints.</b> The two operator-driven routes hang off
-/// <see cref="AdminGroup.MapAdmin"/> like every other admin route, under <c>/api/v1/admin</c>.
-/// They were left outside the prefix at first to protect the callback's registered URI, but that
-/// constraint binds the callback alone: <c>list</c> and <c>connect</c> are registered with nobody
-/// and cost two fetch URLs to move. The callback stays exactly where it is and stays anonymous,
-/// because a browser arrives there on a redirect from the provider and the ticket it presents is
-/// <c>state</c>.
-/// </para>
-/// <para>
-/// <b>state.</b> Not a row in a table and not a cache entry: the value is the provider and an
-/// expiry, sealed with the same AES-GCM key that protects the credentials. Forging one needs the
-/// key, replaying one needs to happen inside <see cref="StateLifetimeMinutes"/> minutes, and
-/// restarting the process mid-consent does not strand the operator. Nothing to store and nothing
-/// to expire.
-/// </para>
+/// <see cref="AdminGroup.MapAdmin"/> under <c>/api/v1/admin</c>. Only the callback's registered URI
+/// is fixed — the other two cost two fetch URLs to move — so it alone stays outside the prefix and
+/// anonymous: a browser arrives on a redirect from the provider, and its ticket is <c>state</c>.
+///
+/// <b>state.</b> No row and no cache entry: the provider and an expiry, sealed with the AES-GCM key
+/// that protects the credentials. Forging one needs the key, replaying one has
+/// <see cref="StateLifetimeMinutes"/> minutes, and a restart mid-consent strands nobody.
 /// </remarks>
 public static class IntegrationEndpoints
 {
@@ -94,13 +85,10 @@ public static class IntegrationEndpoints
     }
 
     /// <summary>
-    /// The one route that cannot move and cannot be gated.
+    /// The one route that cannot move and cannot be gated: its path is registered byte-for-byte
+    /// with the provider, so changing it breaks consent rather than protecting it, and the caller
+    /// is a browser on a redirect with no session of ours. Its ticket is <c>state</c>.
     /// </summary>
-    /// <remarks>
-    /// Its path is registered byte-for-byte with the provider, so changing it breaks consent
-    /// rather than protecting it, and the caller is a browser arriving on a redirect with no
-    /// session of ours — which is why the ticket it presents is <c>state</c>.
-    /// </remarks>
     public static RouteGroupBuilder MapIntegrationCallback(this RouteGroupBuilder group)
     {
         group.MapGet("/integrations/{provider}/callback", CallbackAsync)
@@ -255,13 +243,11 @@ public static class IntegrationEndpoints
         Find(connectors, provider) ?? throw DomainException.NotFound(ProviderName);
 
     /// <summary>
-    /// The route segment is matched against the connectors rather than parsed into
-    /// <see cref="IntegrationProvider"/> by the binder, for two reasons found by running it:
-    /// the binder's enum parse is case-sensitive, so <c>/integrations/google/connect</c> — the
-    /// only casing a URL should have — did not bind at all; and a binder rejection is an empty
-    /// 400, where an unimplemented provider is supposed to be a named answer. Matching the
-    /// connectors also means the numeric spelling of the enum, which <c>Enum.TryParse</c>
-    /// accepts, is not a second name for a route.
+    /// Matched against the connectors rather than parsed into <see cref="IntegrationProvider"/> by
+    /// the binder, for two reasons found by running it: the binder's enum parse is case-sensitive,
+    /// so <c>/integrations/google/connect</c> did not bind at all, and a binder rejection is an
+    /// empty 400 where an unimplemented provider owes a named answer. It also keeps the enum's
+    /// numeric spelling, which <c>Enum.TryParse</c> accepts, from being a second name for a route.
     /// </summary>
     private static IIntegrationConnector? Find(
         IEnumerable<IIntegrationConnector> connectors,
