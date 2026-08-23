@@ -17,13 +17,11 @@ function counted(total: number): string {
 
 /**
  * The clock time for each slot, with the zone's offset added to any that would
- * otherwise be indistinguishable.
- *
- * On the day a zone falls back, two instants an hour apart share a clock time —
- * Warsaw 2026-10-25 renders both 00:30Z and 01:30Z as "02:30". Two identical
- * buttons is the defect: the booking would be correct whichever is pressed,
- * and the invitee would have no way of knowing which hour they got. Only the
- * colliding pair is annotated, so the other 364 days keep a clean column.
+ * otherwise be indistinguishable. On the day a zone falls back, two instants an
+ * hour apart share a clock time — Warsaw 2026-10-25 renders both 00:30Z and
+ * 01:30Z as "02:30", and the invitee has no way of knowing which hour they got.
+ * Only the colliding pair is annotated, so the other 364 days keep a clean
+ * column.
  */
 function labelled(slots: string[], zone: string): string[] {
   const times = slots.map((instant) => zonedTime(instant, zone))
@@ -39,10 +37,10 @@ function labelled(slots: string[], zone: string): string[] {
 /**
  * The times on one day, in the invitee's zone.
  *
- * The day heading is the organizer's day, because that is the day the slots
- * were asked for. The times under it are the invitee's, so one of them can
- * legitimately read 00:30 on a Monday heading — hence the `+1d` mark, which is
- * the difference between an invitee arriving on the right day and the wrong one.
+ * The day heading is the organizer's day, because that is the day the slots were
+ * asked for. The times under it are the invitee's, so one can read 00:30 on a
+ * Monday heading — hence the `+1d` mark, the difference between an invitee
+ * arriving on the right day and the wrong one.
  *
  * `resetKey` is what makes the one authored motion moment in Kairos fire.
  * Changing it remounts the list, which restarts the stagger; a selection leaves
@@ -95,8 +93,8 @@ export default function SlotList({
         key={resetKey}
       >
         {slots.map((start, index) => (
-          // The stagger's per-item delay, and the only inline style in Kairos. It sets a custom
-          // property the stylesheet consumes; the rule matches on the prop name and cannot tell.
+          // The stagger's per-item delay, and the only inline style in Kairos.
+          // It sets a custom property the stylesheet consumes.
           // eslint-disable-next-line react/forbid-dom-props -- DESIGN.md stagger: --i is per-item
           <button style={{ '--i': index } as CSSProperties}
             key={start}
