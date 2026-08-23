@@ -12,7 +12,7 @@
 # never a hand-kept list: a stale list would fail looking like a regression.
 #
 # Only JavaScript and CSS are weighed by the bundle number, which is every file
-# the BUILD emits; fonts get their own number below. An image imported from
+# of code the build emits; fonts get their own number below. An image imported from
 # source would land in assets/ and be counted by neither, a hole worth closing
 # the first time one appears. The vendored kairos.css is in neither assets/ nor
 # any budget — it is a source asset the API serves directly, no build emits it,

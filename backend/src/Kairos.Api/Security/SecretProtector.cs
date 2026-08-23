@@ -9,9 +9,11 @@ namespace Kairos.Api.Security;
 /// invented key cannot survive a restart.
 /// </summary>
 /// <remarks>
-/// Why a column and not the backup: Litestream 0.5.x cannot encrypt and silently ignores an age:
-/// block, so a clear refresh token would be streamed to object storage in the clear by a tool that
-/// accepted the directive and dropped it. Encrypting here stops the backup path being load-bearing.
+/// Why a column and not the backup: Litestream 0.5 dropped age encryption with the LTX storage
+/// refactor, and 0.5.0 ignored an age: block in silence — a clear refresh token would have been
+/// streamed to object storage by a tool that accepted the directive and discarded it. 0.5.1 rejects
+/// the block instead, so the silent case is closed, but there is still no encryption to configure.
+/// Encrypting here stops the backup path being load-bearing either way.
 /// </remarks>
 public sealed class SecretProtector
 {

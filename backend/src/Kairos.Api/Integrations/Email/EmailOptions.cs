@@ -41,9 +41,10 @@ public sealed class EmailOptions
     /// <remarks>
     /// Not the relay's setting, but the confirmation is the only thing in Kairos that names this
     /// instance from outside a request — every other URL is relative to the browser that asked. It
-    /// moves to its own section the day a second reader appears. Required rather than optional: a
-    /// confirmation whose only route to cancelling is a relative path is worse than none, because
-    /// the invitee cannot tell it is broken.
+    /// moves to its own section the day a second reader appears. Nullable on the type because
+    /// binding yields null for an absent key, but required in fact — <see cref="IsConfigured"/>
+    /// refuses without it, and a confirmation whose only route to cancelling is a relative path is
+    /// worse than none, because the invitee cannot tell it is broken.
     /// </remarks>
     public string? PublicBaseUrl { get; set; }
 

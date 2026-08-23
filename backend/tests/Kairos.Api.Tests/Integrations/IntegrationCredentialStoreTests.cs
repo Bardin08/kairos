@@ -24,7 +24,7 @@ namespace Kairos.Api.Tests.Integrations;
 /// </remarks>
 public class IntegrationCredentialStoreTests
 {
-    /// <summary>2026-08-19T07:41:12Z. Any instant; nothing here reads a real clock.</summary>
+    /// <summary>2026-08-19T09:01:12Z. Any instant; nothing here reads a real clock.</summary>
     private const long FirstSuccess = 1_787_130_072;
 
     /// <summary>Inside SuccessRefreshSeconds, so a second success must write nothing.</summary>

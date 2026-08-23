@@ -9,7 +9,8 @@ namespace Kairos.Api.Persistence;
 /// with no error to say so.
 /// </summary>
 /// <remarks>
-/// <c>SequentialGuidValueGenerator</c> does not help: still v4, with its sequential bits in the
+/// <c>SequentialGuidValueGenerator</c> does not help: it sets no version at all, and puts its
+/// sequential bits in the
 /// trailing bytes because SQL Server's uniqueidentifier sorts from there. This provider stores Guid
 /// as hyphenated TEXT, so ordering is lexicographic and only v7's leading timestamp makes stored
 /// order chronological.

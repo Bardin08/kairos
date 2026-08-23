@@ -2,7 +2,9 @@ min_version: 2.1.10
 
 # Formatting is a pre-commit concern; tests are a pre-push concern. Running the
 # full suite on every commit teaches people to pass --no-verify, which is worse
-# than having no hook at all.
+# than having no hook at all. frontend-types is the exception and knows it: tsc
+# has no per-file mode worth having, so it types the whole project on every
+# staged .ts change and is the slowest thing here.
 
 pre-commit:
   parallel: true
