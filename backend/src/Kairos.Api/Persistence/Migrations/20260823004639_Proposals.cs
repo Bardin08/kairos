@@ -1,7 +1,5 @@
 ﻿using System;
 
-using Kairos.Api.Scheduling;
-
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -19,7 +17,7 @@ public partial class Proposals : Migration
             table: "Settings",
             type: "INTEGER",
             nullable: false,
-            defaultValue: SchedulingDefaults.ProposalHoldHours);
+            defaultValue: 48);
 
         migrationBuilder.AddColumn<string>(
             name: "CancellationReason",
