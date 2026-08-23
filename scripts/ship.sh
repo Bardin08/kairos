@@ -57,12 +57,11 @@ git_or_die() {  # git_or_die <what-was-being-done> <git args...>
 
 # Fetch origin/main and prove the fetch actually took.
 #
-# The exit code is not sufficient evidence on its own. When a fetch does not
-# update origin/main, every command after it succeeds as a no-op — the rebase
-# prints "Current branch is up to date" and exits 0, the force-push prints
-# "Everything up-to-date" and exits 0 — so a stale base is indistinguishable from
-# a clean rebase. The only honest test is whether the ref the fetch was supposed
-# to move now matches the remote.
+# The exit code is not evidence on its own: when a fetch does not update
+# origin/main, every command after it succeeds as a no-op — the rebase prints
+# "Current branch is up to date", the force-push prints "Everything up-to-date",
+# both exit 0. The only honest test is whether the ref the fetch was supposed to
+# move now matches the remote.
 fetch_origin_main() {  # fetch_origin_main <what-was-being-done>
   local what="$1" remote_tip local_tip
   git_or_die "$what" fetch origin main
@@ -79,9 +78,8 @@ fetch_origin_main() {  # fetch_origin_main <what-was-being-done>
 
 [ "$BRANCH" != "main" ] || die "refusing to ship from main; branch first"
 
-# Untracked files count as dirty. Every task in this plan adds new files, and one
-# forgotten `git add` would otherwise ship a pull request missing half the change
-# while this script honestly reported success.
+# Untracked files count as dirty: one forgotten `git add` would otherwise ship a
+# pull request missing half the change while this script reported success.
 #
 # Computed before the test, not inside it: errexit is suspended in an `if`
 # condition, so a `git ls-files` that failed there would yield an empty string

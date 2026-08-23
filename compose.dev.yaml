@@ -1,22 +1,17 @@
-# The identity provider a laptop does not have, and nothing else.
+# The identity provider a laptop does not have, and nothing else. A deployment
+# signs the operator into Pocket ID, Authentik, Keycloak or anything else that
+# speaks OIDC on the cluster; a laptop has none of that, nothing ever listened on
+# the committed `https://id.localhost` placeholder, and /admin/login answered 500.
 #
-# A deployment signs the operator into Pocket ID — or Authentik, or Keycloak, or
-# anything else that speaks OIDC — running somewhere on the cluster. A laptop has
-# none of that, and nothing has ever listened on the committed `https://id.localhost`
-# placeholder, so /admin/login answered 500 and the workbench could not be signed
-# into locally at all. This file is what makes that leg runnable.
+# A MOCK provider on purpose: real OIDC discovery and real signed tokens, but any
+# client id, any secret, any redirect URI and any username typed into its login
+# form. That is what makes it useful — the real AddOpenIdConnect handler runs end
+# to end, so no authentication bypass is added to the application to sign in.
 #
-# It is a MOCK provider on purpose: it serves real OIDC discovery and issues real
-# signed tokens, but it accepts any client id, any client secret, any redirect URI,
-# and any username typed into its login form. That is exactly what makes it useful
-# — the real AddOpenIdConnect handler runs end to end, so the code path under test
-# is the shipping one, and no authentication bypass is added to the application to
-# get there.
-#
-# Nothing in this file is needed to run Kairos in production, and nothing outside
+# Nothing here is needed to run Kairos in production and nothing outside
 # appsettings.Development.json points at it. `compose.dev.yaml` rather than
-# `compose.yaml` so that a bare `docker compose up` in this repository does not
-# start an identity provider that trusts everybody.
+# `compose.yaml` keeps a bare `docker compose up` from starting an identity
+# provider that trusts everybody.
 services:
   oidc:
     # Pinned by tag AND digest. The tag records which release a human chose; the

@@ -1,74 +1,49 @@
 #!/usr/bin/env bash
 # Assert the booking route's first load fits its budgets: gzipped code and raw
-# font, each measured separately.
+# font, measured separately. The numbers live here only — CI and
+# scripts/verify.sh both call this script rather than keeping a copy.
 #
-# The budget lives here and nowhere else — CI and scripts/verify.sh both call
-# this script rather than carrying their own copy of the number.
-#
-# Scope: what an invitee actually downloads to see the booking page — the entry
-# chunk, every chunk it imports eagerly, and the CSS those chunks pull into the
-# initial document. CSS counts because the moment a component imports a
-# stylesheet Vite emits a chunk of it, and an unweighed output is a budget with
-# a hole in it.
-#
-# Lazily-loaded chunks — the admin workbench, code-split precisely so the
-# invitee never fetches it — are weighed and printed as information, and are
-# deliberately not charged. Charging them, which is what globbing assets/ did,
-# made the number answer the wrong question: adding an admin page the booking
-# route never loads ate the budget that exists to protect the invitee.
-#
-# Eager and lazy come out of Vite's manifest rather than a hand-kept list of
-# filenames. The manifest is written by the build that emits the chunks, so it
-# cannot drift; a list here would, silently, and the failure would look like a
-# budget regression rather than a stale list.
+# Charged: the entry chunk, every chunk it imports eagerly, and their CSS — what
+# an invitee downloads for the booking page. CSS counts because a component
+# importing a stylesheet makes Vite emit a chunk of it. Lazy chunks, the admin
+# workbench the invitee never fetches, are weighed and printed but not charged;
+# charging them, which is what globbing assets/ did, let an admin page eat the
+# budget that protects the invitee. Eager and lazy come out of Vite's manifest,
+# never a hand-kept list: a stale list would fail looking like a regression.
 #
 # Only JavaScript and CSS are weighed by the bundle number, which is every file
-# the BUILD emits. Fonts are the first non-code asset to appear, and they get
-# their own number below rather than being folded into this one — see the font
-# budget. An image imported from source would still be emitted into assets/ and
-# counted by neither, which remains a hole worth closing the first time one
-# appears.
-#
-# The vendored kairos.css is NOT counted and is not in assets/ — it is a source
-# asset the API serves directly, it is not emitted by any build, and nothing
-# measures it. Do not read a passing run as evidence that it is within a budget.
+# the BUILD emits; fonts get their own number below. An image imported from
+# source would land in assets/ and be counted by neither, a hole worth closing
+# the first time one appears. The vendored kairos.css is in neither assets/ nor
+# any budget — it is a source asset the API serves directly, no build emits it,
+# and nothing measures it, so a passing run is not evidence that it fits.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-# 75 KiB gzipped, and the number is measured rather than chosen.
+# 75 KiB gzipped, measured rather than chosen.
 #
-# It was 60 KiB (61440) until the frontend shell was built and weighed, at which
-# point the shell alone — React 19.2.8, react-dom, wouter, a router with two
-# placeholder routes and nothing else — measured 61641 bytes gzipped. The old
-# figure was calibrated against an earlier React: the same shell on React 19.1.1
-# measures 59779 and on 19.0.0 measures 59603, so 19.2 added roughly 1.9 KiB and
-# pushed a budget that already had no room left over the line.
-#
-# Pinning React back a minor to fit would have bought 1.7 KiB and left the two
-# real pages nothing, so the number moved instead. What is left after the fixed
-# cost of the framework is the app's share: 13.8 KiB gzipped for every page,
-# component and helper Kairos writes. That is the figure a regression is argued
-# against, and it is enough for hand-written UI and not enough for a date
-# library or a chart library.
+# It was 60 KiB (61440) until the frontend shell was weighed: React 19.2.8,
+# react-dom, wouter and a router with two placeholder routes measured 61641
+# bytes gzipped. That figure was calibrated against an earlier React — the same
+# shell measures 59779 on 19.1.1 and 59603 on 19.0.0 — so 19.2 added roughly
+# 1.9 KiB to a budget with no room left. Pinning React back a minor would have
+# bought 1.7 KiB and left the two real pages nothing, so the number moved
+# instead. What remains after the framework is the app's share, 13.8 KiB gzipped:
+# enough for hand-written UI, not for a date library or a chart library.
 readonly BUDGET_GZIP_BYTES=76800
 
-# 32 KiB of font, and it is a SEPARATE number from the one above on purpose.
+# 32 KiB of font, a SEPARATE number from the code budget on purpose. Fonts are
+# weighed raw: WOFF2 carries its own Brotli compression, so gzipping one again
+# adds bytes and reports a figure no invitee ever downloads. Folding a raw
+# number into a gzipped one would leave both meaningless — a JS regression could
+# hide inside font headroom. A regression in either number fails the run.
 #
-# Fonts are weighed raw, not gzipped: WOFF2 carries its own Brotli compression,
-# so gzipping one again adds bytes rather than removing them and would report a
-# figure no invitee ever downloads. Adding a raw number to a gzipped number to
-# get one total would leave the code budget meaningless — a JS regression could
-# hide inside font headroom, and shrinking a font would buy room for code that
-# does not fit. Two numbers, each protecting a different thing, and a
-# regression in either fails the run.
-#
-# What is charged: only the fonts index.html PRELOADS, because those are what
-# the invitee blocks on. That list is read out of the built index.html rather
-# than kept here: a copy would drift silently, and the failure would read as a
-# regression rather than a stale list. Everything else in fonts/ is weighed and
-# printed as information: the latin-ext and cyrillic subsets arrive only when a
-# Polish or Ukrainian name is actually on the page, and Source Serif is one
-# heading loading after first paint.
+# Charged: only the fonts index.html PRELOADS, what the invitee blocks on. That
+# list is read out of the built index.html rather than kept here: a copy would
+# drift silently, and the failure would read as a regression rather than a stale
+# list. Everything else in fonts/ is weighed and printed as information — the
+# latin-ext and cyrillic subsets arrive only for a Polish or Ukrainian name,
+# Source Serif is one heading after first paint.
 #
 # Measured at 31,000 bytes when the type system landed — Source Sans 3 latin at
 # 28,740 plus the digits-only IBM Plex Mono subset at 2,260. The 1,768 bytes of
@@ -83,14 +58,13 @@ if [ ! -f "$MANIFEST" ]; then
   exit 1
 fi
 
-# The old glob had a way of reporting a pass with no bundle at all: a pattern
-# that matched nothing expanded to itself, gzip failed, and `wc -c` still
-# printed 0. The manifest has the same shape of hazard — a file that parses but
-# names no entry chunk yields an empty file list, and an empty list weighs
-# nothing, which is under every budget. So the split below fails rather than
-# returns empty, and the assignment propagates that exit status. Lazy chunks get
-# no such test: a build with no lazy chunk, like a build with no CSS chunk, is
-# ordinary, while a build with no entry never happened.
+# The old glob could report a pass with no bundle at all: a pattern that matched
+# nothing expanded to itself, gzip failed, and `wc -c` still printed 0. A
+# manifest that parses but names no entry chunk is the same hazard — an empty
+# list weighs nothing, which is under every budget — so the split below fails
+# rather than returns empty and the assignment propagates that status. Lazy
+# chunks get no such test: a build with no lazy chunk is ordinary, a build with
+# no entry never happened.
 # shellcheck disable=SC2016  # the $ and ` in the node program are node's, not this shell's
 partition="$(node -e '
   const [manifestPath, outDir] = process.argv.slice(1)
