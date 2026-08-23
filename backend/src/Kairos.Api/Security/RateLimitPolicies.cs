@@ -11,7 +11,7 @@ namespace Kairos.Api.Security;
 /// The rate limit as the wire sees it: which endpoints carry one, what every response tells a
 /// caller about where it stands, and what a refusal looks like. The budget is declared at each
 /// mapping site as endpoint metadata, so "which routes are limited?" is answered by reading the
-/// mapping and not by reading this file. The anonymous routes that declare none are the four
+/// mapping and not by reading this file. The anonymous routes that declare none are the six
 /// outside the admin prefix, and <see cref="Shared.AdminGroup"/>'s remarks are where that decision
 /// is recorded.
 /// </summary>

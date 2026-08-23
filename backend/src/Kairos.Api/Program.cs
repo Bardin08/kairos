@@ -240,6 +240,8 @@ builder.Services.AddHostedService<OutboxDispatcher>();
 
 builder.Services.AddRateLimitPolicies();
 
+builder.Services.AddHealthEndpoints();
+
 // Which addresses may speak for a caller, and which scheme the request really arrived on. Both
 // matter today: the address is what the rate limiter partitions on, and without the scheme a
 // TLS-terminating proxy leaves this application believing every request is plain HTTP — the OIDC
@@ -359,10 +361,11 @@ app.UseAuthorization();
 // After routing, because the endpoint's own metadata is what says whether it carries a budget.
 app.UseRateLimiting();
 
-// The two routes that make a session and end one, and the only two that are anonymous by
-// necessity rather than by choice: a challenge is a browser navigation to another origin, so
-// nothing behind the gate could ever start one. The admin surface sends the window here after a
-// 401 and there is no login form anywhere in this application.
+// The two routes that make a session and end one, anonymous by necessity: a challenge is a
+// browser navigation to another origin, so nothing behind the gate could ever start one. They are
+// two of the six routes outside the admin prefix, and AdminGroup names all six and why. The admin
+// surface sends the window here after a 401 and there is no login form anywhere in this
+// application.
 app.MapGet("/admin/login", () => Results.Challenge(
     new AuthenticationProperties { RedirectUri = "/admin" },
     [OpenIdConnectDefaults.AuthenticationScheme]));
@@ -373,6 +376,11 @@ app.MapGet("/admin/login", () => Results.Challenge(
 app.MapGet("/admin/logout", () => Results.SignOut(
     new AuthenticationProperties { RedirectUri = "/" },
     [CookieAuthenticationDefaults.AuthenticationScheme]));
+
+// What an orchestrator asks before it sends anybody here. Outside the versioned prefix
+// deliberately: a probe path is written into a deployment manifest that nobody re-reads, so a
+// version bump must not be able to move it out from under a running cluster.
+app.MapHealth();
 
 // Versioned from day zero. The first breaking change is a second group mapped beside this one,
 // not a migration every client has to make on the same afternoon.

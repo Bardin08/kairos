@@ -24,10 +24,16 @@ namespace Kairos.Api.Tests.Features;
 /// saves Program.cs a public partial class that has no other reason to be there.
 /// </remarks>
 /// <param name="webRoot">
-/// A directory to serve static files from, for the one test that needs an <c>index.html</c> to
-/// exist. The single page is built by the other CI job and never by this one, so the web root is
-/// empty while these tests run — and a test about the single-page fallback would then pass whether
-/// or not the route that makes it true is there. Left null, nothing changes.
+/// A directory to serve static files from, for a test that needs an <c>index.html</c> whose
+/// contents it chose. Left null, the web root is the application's own, and whether a single page
+/// is sitting in it depends on whether the other CI job has built one into this tree — absent on a
+/// backend-only clone, present on any machine that has run <c>scripts/verify.sh</c>. A test that
+/// reads the page therefore supplies its own directory rather than trusting either state.
+/// <para>
+/// The same difference is why a test that expects a path NOT to be served asserts more than the
+/// status code: with a page present, <c>MapFallbackToFile</c> answers 200 for any unmapped
+/// extensionless path, so a route that no longer exists still looks alive.
+/// </para>
 /// </param>
 public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
 {
@@ -54,6 +60,13 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
     /// path from outside.
     /// </summary>
     public string ConnectionString => $"Data Source={_path}";
+
+    /// <summary>
+    /// The file that connection string points at, for the one test that takes the database away
+    /// from a running application. Exposed rather than re-derived, since a test deleting a path it
+    /// computed itself would pass over a database nothing was using.
+    /// </summary>
+    public string DatabasePath => _path;
 
     /// <summary>Writes through the application's own context, so the schema is the migrated one.</summary>
     public void Seed(Action<KairosDbContext> seed)
