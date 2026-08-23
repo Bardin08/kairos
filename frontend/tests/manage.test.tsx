@@ -211,9 +211,17 @@ test('the reschedule CTA sets its date in the numeric face, beside the button', 
   expect(when?.textContent).toContain('13:00')
 
   // Named by the verb, described by the date — otherwise the control announces
-  // "Move" and never says where to. Scoped to .desktop-cta because the phone
-  // action bar renders a second button with the same label and is display:none
-  // beside this one, never absent.
-  const cta = document.querySelector('.desktop-cta .btn-primary')
-  expect(cta?.getAttribute('aria-describedby')).toBe(when?.id)
+  // "Move" and never says where to. Both bars, because both render a button
+  // with that label: the phone one is display:none beside this one at this
+  // width, never absent, and an accessible name is not a thing a media query
+  // gets to differ on.
+  for (const [bar, date] of [
+    ['.desktop-cta', '.desktop-cta .numeric'],
+    ['.actionbar', '.actionbar-when'],
+  ]) {
+    const cta = document.querySelector(`${bar} .btn-primary`)
+    const describes = document.querySelector(date)
+    expect(describes?.id).toBeTruthy()
+    expect(cta?.getAttribute('aria-describedby')).toBe(describes?.id)
+  }
 })

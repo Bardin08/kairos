@@ -453,10 +453,19 @@ export default function Manage() {
             instead of jolting the list the moment a time is picked. */}
         <div className="actionbar" hidden={chosen === null}>
           <div className="grow">
-            <p className="actionbar-when numeric">{chosen?.short}</p>
+            {/* Its own id rather than the desktop CTA's: both bars stay mounted
+                at every width and only one is painted, so a shared id would put
+                two of them in the document at once. */}
+            <p className="actionbar-when numeric" id="reschedule-when-phone">{chosen?.short}</p>
             <p className="actionbar-meta numeric">{meta}</p>
           </div>
-          <button className="btn btn-primary" type="button" data-loading={busy || undefined} onClick={runReschedule}>
+          <button
+            className="btn btn-primary"
+            type="button"
+            data-loading={busy || undefined}
+            onClick={runReschedule}
+            aria-describedby="reschedule-when-phone"
+          >
             Move
           </button>
         </div>
