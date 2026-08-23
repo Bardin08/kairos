@@ -355,10 +355,9 @@ public static class MeetingsAdminEndpoints
     /// proposes and the invitee decides.
     /// </summary>
     /// <remarks>
-    /// The instant is run through the same check the public create path uses, so a proposal cannot
-    /// land on an hour the link does not offer or inside another meeting's margin. That is what
-    /// keeps this feature from being a way to write bookings the availability rules would never
-    /// have produced.
+    /// The instant goes through the same check the public create path uses, so a proposal cannot
+    /// land on an hour the link does not offer or inside another meeting's margin — which is what
+    /// keeps this from being a way to write bookings the availability rules would never produce.
     ///
     /// Release, check, re-place — <see cref="BookingsEndpoints.RescheduleAsync"/>'s shape, and it
     /// has to be: a confirmed meeting pads its own slot by the margin, so checking with it still
@@ -367,14 +366,11 @@ public static class MeetingsAdminEndpoints
     /// included, through the same uncancellable <see cref="BookingsEndpoints.ConfirmAsync"/> the
     /// invitee's reschedule compensates with.
     ///
-    /// SAME KNOWN HOLE, and it is not fixed here either. Between the release and the re-place this
-    /// booking is Cancelled on disk while nobody has cancelled it, and
-    /// <see cref="Bookings.BookingCanceller"/> reads that as "off already" and returns having done
-    /// nothing — so a cancel landing in the window answers 200, is undone by the re-confirm, and
-    /// leaves the meeting standing with nothing announced and nobody told. It is the window
-    /// RescheduleAsync already documents; this route widens it to a second caller rather than
-    /// creating it. Closing it means a release distinguishable from a cancellation, which is a
-    /// change with its own tests.
+    /// SAME KNOWN HOLE, not fixed here either: between the release and the re-place the booking is
+    /// Cancelled on disk with nobody having cancelled it, so a cancel landing in that window
+    /// answers 200, is undone by the re-confirm, and leaves the meeting standing with nothing
+    /// announced and nobody told. <see cref="Bookings.BookingMover"/> describes it in full; this
+    /// route widens it to a second caller rather than creating it.
     /// </remarks>
     private static async Task<MeetingResponse> ProposeAsync(
         Guid id,
@@ -663,8 +659,6 @@ public static class MeetingsAdminEndpoints
     private static string Format(long unixSeconds) =>
         InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
 
-    /// <summary>The calendar half of a row, flattened. One record so the list and the single read
-    /// hand <see cref="Describe"/> the same thing.</summary>
     private sealed record CalendarFacts(CalendarSyncState State, IntegrationProvider Provider, string? LastError);
 
     /// <summary>

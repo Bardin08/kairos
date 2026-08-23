@@ -107,9 +107,6 @@ public sealed record PatternResponse(
     IReadOnlyList<string> UsedBy);
 
 /// <summary>
-/// The operator's availability: patterns, their weekly rules and their date overrides.
-/// </summary>
-/// <remarks>
 /// <para>
 /// <b>A pattern is a shape, not a schedule.</b> Nothing here reads a booking and nothing here
 /// writes a link. Which pattern a link stands on is the link's field, edited where links are
@@ -121,7 +118,7 @@ public sealed record PatternResponse(
 /// that never merges a partial response into a cached one — the card is replaced, not patched —
 /// and for a single-operator workbench that read costs nothing worth counting.
 /// </para>
-/// </remarks>
+/// </summary>
 public static class PatternsAdminEndpoints
 {
     /// <summary>
@@ -192,16 +189,15 @@ public static class PatternsAdminEndpoints
     /// </summary>
     public const int MaxWindowsPerDate = 6;
 
-    /// <summary>ISO days, Monday through Sunday.</summary>
     public const int DaysInWeek = 7;
 
     /// <summary>
-    /// Derived, never typed twice: a full week of full days, and so the most windows any body on
-    /// this surface could legitimately carry. It is the allocation guard on both write bodies —
-    /// an array the size of Kestrel's 30 MB cap is refused as soon as it is bound, rather than
-    /// after it has been projected and sorted — and deliberately not the domain rule, which
-    /// <see cref="ValidateDay"/> owns: a bound on a whole body cannot tell one day's share from
-    /// another's, so a date carrying a seventh window is refused there and answers a code.
+    /// A full week of full days, and so the most windows any body on this surface could carry. The
+    /// allocation guard on both write bodies — an array the size of Kestrel's 30 MB cap is refused
+    /// as soon as it is bound rather than after it has been projected and sorted — and deliberately
+    /// not the domain rule, which <see cref="ValidateDay"/> owns: a bound on a whole body cannot
+    /// tell one day's share from another's, so a date carrying a seventh window is refused there
+    /// and answers a code.
     /// </summary>
     public const int MaxWindowsPerWeek = MaxWindowsPerDate * DaysInWeek;
 
@@ -468,11 +464,11 @@ public static class PatternsAdminEndpoints
         }
 
         // The whole of what makes two tabs on one date safe. The unique index in
-        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete
-        // only raises where there were rows to delete —
-        // so a date that held nothing yet let both writers insert and kept the union, which is
-        // neither operator's answer. Raising the number they both read means EF writes
-        // WHERE OverridesVersion = n, the second one matches nothing, and the loser is told.
+        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete only
+        // raises where there were rows to delete, so a date that held nothing yet let both writers
+        // insert and kept the union — neither operator's answer. Raising the number they both read
+        // means EF writes WHERE OverridesVersion = n, the second one matches nothing, and the loser
+        // is told.
         pattern.OverridesVersion++;
 
         await ConcurrentWrite.NamedAsync(
@@ -598,7 +594,7 @@ public static class PatternsAdminEndpoints
 
         // Counted here rather than on the request, because the attribute bounds a whole body and
         // this bounds one day of it — the rule the operator actually has, and the one they get a
-        // code for. Runs before anything is written, so the set is refused entire or stored entire.
+        // code for.
         if (windows.Count > MaxWindowsPerDate)
         {
             throw DomainException.Invalid(TooManyWindowsCode, TooManyWindows);
