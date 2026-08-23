@@ -25,3 +25,13 @@ Getting the app running locally is `docs/running-locally.md`.
 ## Branch protection
 
 `main` is protected against everyone, admins included. There is no path that bypasses a pull request, and none is to be added.
+
+## Naming
+
+**Commits are [Conventional Commits](https://www.conventionalcommits.org/).** `<type>(<scope>)?: <subject>`. The types in use are `feat`, `fix`, `docs`, `chore`, `test` and `refactor`. Scope is optional and names the tree or the feature area where it earns its place — `chore(frontend)`, `chore(deps)`, `fix(pattern-editor)`. The subject is lower case, describes what the change does rather than what was touched, and takes no trailing full stop.
+
+**A pull request title is a commit message, because the merge is a squash.** `ship.sh` squash-merges, so the title lands on `main` verbatim with `(#N)` appended and nothing gets a second chance to fix it. Nineteen of the last hundred subjects on `main` are prose rather than a conventional subject, every one of them recent and every one of them a pull request title. Write the title as `<type>: <subject>` and the trunk stays parseable.
+
+**Branches are `<type>/<slug>`**, the type matching the commit type: `feat/secure-cookie`, `fix/pattern-editor`, `docs/agentic-setup`. Dependabot names its own and is left alone.
+
+Rule 18 binds all three: no AI attribution in a commit message, a pull request title or body, or a trailer.
