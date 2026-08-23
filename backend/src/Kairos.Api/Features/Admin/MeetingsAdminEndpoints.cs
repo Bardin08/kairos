@@ -10,6 +10,7 @@ using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 using NodaTime;
 using NodaTime.Text;
@@ -137,6 +138,15 @@ public static class MeetingsAdminEndpoints
 
     /// <summary>A proposal for this meeting is already open and unanswered.</summary>
     public const string ProposalOpenCode = "proposal_open";
+
+    /// <summary>
+    /// No relay is configured, so a proposal could be minted and never delivered — and its token
+    /// exists nowhere else, so it could never be answered either.
+    /// </summary>
+    public const string MailUnconfiguredCode = "mail_unconfigured";
+
+    /// <summary>The relay refused it. The hold was handed back rather than left unanswerable.</summary>
+    public const string ProposalUndeliverableCode = "proposal_undeliverable";
 
     private const string FromParameter = "from";
     private const string ToParameter = "to";
@@ -323,9 +333,22 @@ public static class MeetingsAdminEndpoints
         SlotQuery slots,
         ProposalWriter proposals,
         BookingMailer mailer,
+        IOptions<EmailOptions> email,
         IClock clock,
         CancellationToken cancellationToken)
     {
+        // Before anything is read and well before anything is released. A proposal is a question,
+        // and the only channel that can carry it is the mail — its token exists nowhere but inside
+        // this call. Minting one on a deployment that cannot send is minting a hold that nobody
+        // can ever lift, so the honest answer is to refuse rather than to swallow.
+        if (!email.Value.IsConfigured)
+        {
+            throw DomainException.Conflict(
+                MailUnconfiguredCode,
+                $"A new time cannot be suggested until {EmailOptions.SectionName} is configured: "
+                + "the invitee is asked by email, and there is no other way to ask them.");
+        }
+
         var now = clock.GetCurrentInstant();
         var start = BookingsEndpoints.ParseInstant(request.Start);
 
@@ -388,7 +411,21 @@ public static class MeetingsAdminEndpoints
         // After the commit, so nothing mails a proposal that does not exist. The plaintext token
         // is in hand only here, for the length of this call — the database holds its SHA-256,
         // which is exactly why the send happens on this thread rather than behind the outbox.
-        await mailer.SendProposalAsync(booking, proposal, token, cancellationToken);
+        if (!await mailer.SendProposalAsync(booking, proposal, token, cancellationToken))
+        {
+            // And exactly why a swallowed failure cannot stand here. The hold is committed, the
+            // token is already gone, and there is no second chance to reach the invitee — so the
+            // slot goes straight back and the operator is told. Uncancellable for ConfirmAsync's
+            // reason: this compensates a write the request has already made, and a caller who hung
+            // up must not leave a hold standing that nothing can ever answer.
+            proposal.State = ProposalState.Withdrawn;
+            proposal.DecidedAt = now.ToUnixTimeSeconds();
+            await context.SaveChangesAsync(CancellationToken.None);
+
+            throw DomainException.Conflict(
+                ProposalUndeliverableCode,
+                "The suggestion could not be sent, so nothing is being held. Try again.");
+        }
 
         return await OneAsync(context, booking, cancellationToken);
     }

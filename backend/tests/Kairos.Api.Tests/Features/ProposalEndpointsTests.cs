@@ -3,10 +3,18 @@ using System.Net.Http.Json;
 
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations.Email;
+using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+
+using MimeKit;
 
 using NodaTime;
 using NodaTime.Text;
@@ -54,6 +62,15 @@ public class ProposalEndpointsTests
 
     private const int NoProposal = 0;
 
+    private const string RelayHost = "smtp.example.com";
+    private const string RelayFrom = "organizer@example.com";
+    private const string RelayBaseUrl = "https://kairos.example.com";
+
+    /// <summary>What a relay answers a message it took. Never read; it only has to exist.</summary>
+    private const string RelayAccepted = "2.0.0 Ok: queued";
+
+    private const string RelayRefused = "The relay dropped the connection.";
+
     private const string AcceptAction = "accept";
     private const string DeclineAction = "decline";
 
@@ -61,7 +78,7 @@ public class ProposalEndpointsTests
     public async Task Propose_AnOfferedSlot_OpensAProposalAndLeavesTheBookingWhereItIs()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var before = app.Read(context => context.Bookings.Single(row => row.Id == booking).StartUtc);
 
@@ -82,7 +99,7 @@ public class ProposalEndpointsTests
     public async Task Propose_AnHourTheLinkDoesNotOffer_IsRefused()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
 
         var answer = await ProposeAsync(client, booking, OutsideHours);
@@ -90,6 +107,59 @@ public class ProposalEndpointsTests
         answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
             .ShouldContain(BookingsEndpoints.SlotUnavailableCode);
+    }
+
+    /// <summary>
+    /// A proposal nobody can be told about is not a degraded proposal, it is a slot held hostage.
+    /// </summary>
+    /// <remarks>
+    /// The token exists only inside the call that mints it — the database keeps its SHA-256 — so a
+    /// hold committed without a mail going out is unanswerable for the whole window and nothing
+    /// anywhere can recover it. Rule 14 says a provider being down never fails a BOOKING; this is
+    /// not one, and the mailer's own tests call an unconfigured relay this deployment's ordinary
+    /// state, which is exactly why it has to be refused rather than swallowed.
+    /// </remarks>
+    [Fact]
+    public async Task Propose_NoRelayConfigured_IsRefusedAndOpensNoHold()
+    {
+        using var app = new KairosApp();
+
+        // Deliberately not OperatorWithRelay: this is a fresh deployment, mail never set up.
+        using var client = app.CreateOperatorClient();
+        var booking = await MeetingsFixture.BookAsync(app, client);
+
+        var answer = await ProposeAsync(client, booking, MovedTo);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
+            .ShouldContain(MeetingsAdminEndpoints.MailUnconfiguredCode);
+        app.Read(context => context.BookingProposals.Count()).ShouldBe(NoProposal);
+    }
+
+    /// <summary>
+    /// And the relay that is configured and refuses. The hold is committed by the time anything
+    /// is sent, so it is given straight back and the operator told: a Withdrawn proposal and an
+    /// error beats a dead hold and a 200.
+    /// </summary>
+    [Fact]
+    public async Task Propose_ARelayThatRefusesTheMessage_GivesTheHeldSlotBack()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app, new RefusingRelay());
+        var booking = await MeetingsFixture.BookAsync(app, client);
+
+        var answer = await ProposeAsync(client, booking, MovedTo);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
+            .ShouldContain(MeetingsAdminEndpoints.ProposalUndeliverableCode);
+        app.Read(context => context.BookingProposals.Count(row => row.State == ProposalState.Open))
+            .ShouldBe(NoProposal);
+
+        var row = app.Read(context => context.Bookings.Single(candidate => candidate.Id == booking));
+        row.Status.ShouldBe(BookingStatus.Confirmed);
+        row.CancelledAt.ShouldBeNull();
+        (await MeetingsFixture.SlotsOnOtherLinkAsync(app)).ShouldContain(MovedTo);
     }
 
     /// <summary>
@@ -102,7 +172,7 @@ public class ProposalEndpointsTests
     public async Task Propose_TheSlotDirectlyAfterTheMeeting_IsOfferedBecauseTheMeetingIsReleased()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
 
         var answer = await ProposeAsync(client, booking, MovedNextTo);
@@ -124,7 +194,7 @@ public class ProposalEndpointsTests
     public async Task Propose_AnHourTheLinkDoesNotOffer_LeavesTheMeetingConfirmedWhereItWas()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
 
         var answer = await ProposeAsync(client, booking, OutsideHours);
@@ -143,7 +213,7 @@ public class ProposalEndpointsTests
     public async Task Propose_ASecondProposalWhileOneIsOpen_IsRefused()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
 
         await ProposeAsync(client, booking, MovedTo);
@@ -168,7 +238,7 @@ public class ProposalEndpointsTests
     public async Task RescheduleBooking_WhileAProposalIsOpen_ClosesTheHoldAndFreesItsSlot()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         await ProposeAsync(client, booking, MovedTo);
         var manage = KnownManageToken(app, booking);
@@ -190,7 +260,7 @@ public class ProposalEndpointsTests
     public async Task Withdraw_AnOpenProposal_ClosesItAndReleasesTheHold()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         await ProposeAsync(client, booking, MovedTo);
         var proposal = app.Read(context =>
@@ -211,7 +281,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AnOpenProposal_MovesTheBookingAndAdvancesTheSequence()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
         var before = app.Read(context => context.Bookings.Single(row => row.Id == booking).Sequence);
@@ -240,7 +310,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AProposalOnTheSlotDirectlyAfterTheMeeting_StillMovesIt()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking, MovedNextTo);
 
@@ -257,7 +327,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AnOpenProposal_ReleasesTheOriginalSlot()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
 
@@ -271,7 +341,7 @@ public class ProposalEndpointsTests
     public async Task Decline_AnOpenProposal_LeavesTheBookingExactlyAsItWas()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
         var before = app.Read(context => context.Bookings.AsNoTracking().Single(row => row.Id == booking));
@@ -292,7 +362,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AProposalAlreadyDeclined_IsRefused()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
         await AnswerAsync(app, token, DeclineAction);
@@ -308,7 +378,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AProposalWhoseHoldHasLapsed_IsRefused()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
 
@@ -337,7 +407,7 @@ public class ProposalEndpointsTests
     public async Task Accept_AProposalWhoseSlotIsNoLongerOffered_PutsEverythingBack()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
         TakeTheProposedSlot(app);
@@ -363,7 +433,7 @@ public class ProposalEndpointsTests
     public async Task GetProposal_AnOpenProposal_TellsTheInviteeBothTimesAndThatNothingIsDecided()
     {
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient();
+        using var client = OperatorWithRelay(app);
         var booking = await MeetingsFixture.BookAsync(app, client);
         var token = await ProposeWithKnownTokenAsync(app, client, booking);
 
@@ -447,6 +517,49 @@ public class ProposalEndpointsTests
             ManageTokenHash = Guid.CreateVersion7().ToString("N"),
         });
     });
+
+    /// <summary>
+    /// An operator's client on a deployment whose relay works.
+    /// </summary>
+    /// <remarks>
+    /// Every test here proposes, and a propose is refused outright where no relay is configured —
+    /// so a working one is this suite's world rather than a detail of any one case. Two things are
+    /// replaced and nothing else: the <c>Email</c> section, exactly as an operator sets it, and the
+    /// socket at the very bottom.
+    /// </remarks>
+    private static HttpClient OperatorWithRelay(KairosApp app, EmailSender? relay = null) =>
+        WithRelayConfigured(app).CreateOperatorClient(services =>
+        {
+            services.RemoveAll<EmailSender>();
+            services.AddSingleton(relay ?? new AcceptingRelay());
+        });
+
+    private static WebApplicationFactory<KairosDbContext> WithRelayConfigured(KairosApp app) =>
+        app.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting($"{EmailOptions.SectionName}:{nameof(EmailOptions.Host)}", RelayHost);
+            builder.UseSetting($"{EmailOptions.SectionName}:{nameof(EmailOptions.From)}", RelayFrom);
+            builder.UseSetting(
+                $"{EmailOptions.SectionName}:{nameof(EmailOptions.PublicBaseUrl)}", RelayBaseUrl);
+        });
+
+    /// <summary>
+    /// A relay that takes everything. Substituted at the socket rather than mocked at the protocol:
+    /// what is under test is what the route does with the answer, and <see cref="EmailSender"/>
+    /// itself is verified by mail arriving in an inbox.
+    /// </summary>
+    private sealed class AcceptingRelay() : EmailSender(Options.Create(new EmailOptions()))
+    {
+        public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken) =>
+            Task.FromResult(RelayAccepted);
+    }
+
+    /// <summary>A relay that is configured and will not take it — the failure rule 14 swallows.</summary>
+    private sealed class RefusingRelay() : EmailSender(Options.Create(new EmailOptions()))
+    {
+        public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken) =>
+            throw new IOException(RelayRefused);
+    }
 
     /// <summary>
     /// Re-mints the booking's manage token to one this test knows, the same way

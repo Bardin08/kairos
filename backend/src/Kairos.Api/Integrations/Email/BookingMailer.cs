@@ -110,8 +110,17 @@ public sealed class BookingMailer(
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Cancellation, booking, manageToken, cancellationToken);
 
-    /// <summary>The operator has offered a new time. Nothing has moved; the invitee decides.</summary>
-    public Task SendProposalAsync(
+    /// <summary>
+    /// The operator has offered a new time. Nothing has moved; the invitee decides.
+    /// </summary>
+    /// <returns>
+    /// Whether it went. The one notice that reports this, and the one that has to: a proposal's
+    /// token exists only inside the call that minted it, so a hold whose mail was swallowed can
+    /// never be answered by anybody and holds its slot for the whole window. The other three
+    /// describe a booking that stands on its own whether or not the message arrived, which is what
+    /// rule 14 is about; this one IS the message.
+    /// </returns>
+    public Task<bool> SendProposalAsync(
         Booking booking,
         BookingProposal proposal,
         string proposalToken,
@@ -134,7 +143,7 @@ public sealed class BookingMailer(
         SendComposedAsync(notice, booking, () => Compose(booking, manageToken, notice), cancellationToken);
 
     /// <summary>
-    /// Sends the notice, or does not, and either way returns. Composition is deferred rather than
+    /// Sends the notice, or does not, and says which. Composition is deferred rather than
     /// passed in already done, so that this stays the one home for the configured check, the try
     /// and the logging: rule 14 is a promise about every notice, and a second copy of the swallow
     /// is a second place for one of them to stop keeping it.
@@ -157,7 +166,7 @@ public sealed class BookingMailer(
     /// 201 for a confirmation, from the URL the invitee just opened for a cancel or a move, and
     /// from the mint itself for a proposal.
     /// </remarks>
-    private async Task SendComposedAsync(
+    private async Task<bool> SendComposedAsync(
         BookingNotice notice,
         Booking booking,
         Func<MimeMessage> compose,
@@ -170,7 +179,7 @@ public sealed class BookingMailer(
                 EmailOptions.SectionName,
                 booking.Id,
                 notice);
-            return;
+            return false;
         }
 
         try
@@ -192,6 +201,7 @@ public sealed class BookingMailer(
                 booking.Sequence,
                 message.MessageId,
                 response);
+            return true;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -201,6 +211,7 @@ public sealed class BookingMailer(
                 + "the invitee has not been told; there is no retry, so resend by hand if it matters.",
                 notice,
                 booking.Id);
+            return false;
         }
     }
 
