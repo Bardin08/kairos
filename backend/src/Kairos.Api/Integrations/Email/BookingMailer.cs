@@ -80,9 +80,16 @@ public sealed class BookingMailer(
     /// update without a word, nobody reports a reschedule that did not arrive, and the invitee
     /// turns up at the old time.
     /// </summary>
+    /// <remarks>
+    /// The token is nullable for the same reason a cancellation's is, and it became so when a
+    /// second caller appeared: the invitee's own reschedule arrived holding their manage link, but
+    /// accepting a proposal arrives holding the PROPOSAL's token, and the manage one cannot be
+    /// recovered from a stored SHA-256. The mail goes without the link rather than not going —
+    /// the invitee still has it in the confirmation that minted it.
+    /// </remarks>
     public Task SendRescheduleAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
 
@@ -92,10 +99,10 @@ public sealed class BookingMailer(
     /// one marked CONFIRMED in place however the message was labelled.
     /// </summary>
     /// <remarks>
-    /// The only notice whose token is nullable, and the only one where it can be. A cancellation
-    /// the operator triggered has no plaintext token to put in the mail and no way to recover one.
-    /// The other two keep <c>string</c> deliberately: a confirmation shipped without its manage
-    /// link is unrecoverable, since that token never appears in any later response.
+    /// A cancellation the operator triggered has no plaintext token to put in the mail and no way
+    /// to recover one. The confirmation keeps <c>string</c> deliberately: it is the one message
+    /// that mints the manage token, and shipped without the link that token never appears in any
+    /// later response.
     /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
@@ -129,8 +136,8 @@ public sealed class BookingMailer(
     /// <summary>
     /// Sends the notice, or does not, and either way returns. Composition is deferred rather than
     /// passed in already done, so that this stays the one home for the configured check, the try
-    /// and the two log lines: rule 14 is a promise about every notice, and a second copy of the
-    /// swallow is a second place for one of them to stop keeping it.
+    /// and the logging: rule 14 is a promise about every notice, and a second copy of the swallow
+    /// is a second place for one of them to stop keeping it.
     /// </summary>
     /// <remarks>
     /// Ground rule 14, at the only place it can be enforced: the booking has been written, moved

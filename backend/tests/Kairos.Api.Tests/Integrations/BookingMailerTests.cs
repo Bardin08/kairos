@@ -141,6 +141,26 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// The mail an accepted proposal sends. It has no manage token either — the invitee arrived
+    /// holding the proposal's token, not theirs — and the block is dropped the same way. What must
+    /// survive that is the whole reason the message goes: a REQUEST at the advanced SEQUENCE is
+    /// what moves the event already sitting in their calendar.
+    /// </summary>
+    [Fact]
+    public void Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
+    {
+        var booking = Booking(sequence: 1);
+
+        var message = Compose(booking, notice: BookingNotice.Reschedule, manageToken: null);
+        var ics = Ics(message);
+
+        Plain(message).ShouldNotContain(ManageUrlFragment);
+        ics.ShouldContain($"UID:{booking.Id}");
+        ics.ShouldContain("SEQUENCE:1");
+        ics.ShouldContain("METHOD:REQUEST");
+    }
+
+    /// <summary>
     /// An operator's cancellation has no manage token to put in the mail, and cannot get one:
     /// only the SHA-256 is stored. The notice still has to go, so the link is omitted rather than
     /// invented — and it is worth nothing on a cancelled booking anyway.
@@ -440,9 +460,9 @@ public class BookingMailerTests
     }
 
     /// <summary>
-    /// An open proposal against <paramref name="booking"/>. Only the four instants the composer
-    /// reads are set — the state, the key and the hash are the database's business and asserting
-    /// against a half-built row is what keeps this a test of the message.
+    /// An open proposal against <paramref name="booking"/>. Only the instants the composer reads
+    /// carry anything; the hash is required by the entity and never looked at here, because
+    /// nothing in this file resolves a token.
     /// </summary>
     private static BookingProposal Proposal(Booking booking) =>
         new()

@@ -103,6 +103,22 @@ public sealed record BookingResponse(
     string? CalendarSync,
     string? ConferenceUrl);
 
+/// <summary>
+/// What the invitee is being asked, and what they are being asked to leave. <see cref="State"/> is
+/// the lower-cased <see cref="ProposalState"/>, so a page can render an answered proposal as
+/// finished rather than as an error.
+/// </summary>
+public sealed record ProposalResponse(
+    Guid BookingId,
+    string LinkName,
+    string CurrentStart,
+    string CurrentEnd,
+    string ProposedStart,
+    string ProposedEnd,
+    string ExpiresAt,
+    string TimeZone,
+    string State);
+
 public static class BookingsEndpoints
 {
     /// <summary>
@@ -116,6 +132,12 @@ public static class BookingsEndpoints
     public const string TimeZoneInvalidCode = "timezone_invalid";
 
     public const string BookingCancelledCode = "booking_cancelled";
+
+    /// <summary>Somebody already answered this proposal, or it was taken back.</summary>
+    public const string ProposalClosedCode = "proposal_closed";
+
+    /// <summary>Nobody answered it in time. A separate sentence on the page, so a separate code.</summary>
+    public const string ProposalExpiredCode = "proposal_expired";
 
     private const int SecondsPerMinute = 60;
 
@@ -131,6 +153,16 @@ public static class BookingsEndpoints
         group.MapPost("/bookings/{token}/cancel", CancelAsync).WithName("CancelBooking")
             .RateLimited(RateLimitClass.AnonymousWrite);
         group.MapPost("/bookings/{token}/reschedule", RescheduleAsync).WithName("RescheduleBooking")
+            .RateLimited(RateLimitClass.AnonymousWrite);
+
+        // The invitee's side of an operator's proposal. Anonymous like everything else keyed by a
+        // token, and budgeted the same way: a lookup by hash that computes nothing, against writes
+        // one of which moves a meeting and mails somebody about it.
+        group.MapGet("/bookings/proposals/{token}", GetProposalAsync).WithName("GetProposal")
+            .RateLimited(RateLimitClass.AnonymousRead);
+        group.MapPost("/bookings/proposals/{token}/accept", AcceptProposalAsync).WithName("AcceptProposal")
+            .RateLimited(RateLimitClass.AnonymousWrite);
+        group.MapPost("/bookings/proposals/{token}/decline", DeclineProposalAsync).WithName("DeclineProposal")
             .RateLimited(RateLimitClass.AnonymousWrite);
         return group;
     }
@@ -324,6 +356,184 @@ public static class BookingsEndpoints
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
+
+    private static async Task<ProposalResponse> GetProposalAsync(
+        string token,
+        KairosDbContext context,
+        CancellationToken cancellationToken) =>
+        Describe(
+            await FindProposalAsync(context, token, cancellationToken),
+            await TimeZoneIdAsync(context, cancellationToken));
+
+    /// <summary>
+    /// The invitee agrees, and only now does anything become true.
+    /// </summary>
+    /// <remarks>
+    /// Release, re-check, re-place — <see cref="RescheduleAsync"/>'s shape, and for the same
+    /// reason: a confirmed booking blocks its own calendar, so it is released before the re-check
+    /// or a move an hour later is refused by the meeting being moved.
+    ///
+    /// The proposal is closed in that same save, and there is no exclusion parameter anywhere: a
+    /// row that is no longer Open is a row neither conflict reader can see. That is not what
+    /// carries the re-check, though, and it is worth being exact about which line does. Both
+    /// readers also require the booking under a hold to be Confirmed, so the release alone already
+    /// makes this proposal's own hold invisible for the length of the re-check. What closing it
+    /// here buys is everything after: the re-place puts the booking back Confirmed, and a hold
+    /// still Open at that moment would block the slot the meeting now occupies, refuse every later
+    /// proposal through the filtered unique index, and reach the sweeper as a suggestion nobody
+    /// answered. Same save, so no window exists in which one is true without the other.
+    ///
+    /// Every path out puts the booking back confirmed, the failing ones included. A proposal
+    /// closed by a re-check that failed goes to Withdrawn rather than back to Open: the slot it
+    /// was holding is gone, so re-offering it would be offering something that is not there.
+    /// </remarks>
+    private static async Task<BookingResponse> AcceptProposalAsync(
+        string token,
+        KairosDbContext context,
+        SlotQuery slots,
+        CalendarSyncService calendars,
+        BookingMailer mailer,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.GetCurrentInstant();
+        var proposal = await FindProposalAsync(context, token, cancellationToken);
+        RequireOpen(proposal, now);
+
+        var booking = await Tracked(context)
+            .SingleAsync(row => row.Id == proposal.BookingId, cancellationToken);
+
+        if (booking.Status != BookingStatus.Confirmed)
+        {
+            throw DomainException.Conflict(BookingCancelledCode, "A cancelled booking cannot be moved.");
+        }
+
+        var seconds = booking.EndUtc - booking.StartUtc;
+        var settings = await context.Settings.AsNoTracking()
+            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
+        var start = Instant.FromUnixTimeSeconds(proposal.StartUtc);
+
+        booking.Status = BookingStatus.Cancelled;
+        booking.CancelledAt = now.ToUnixTimeSeconds();
+        proposal.State = ProposalState.Accepted;
+        proposal.DecidedAt = now.ToUnixTimeSeconds();
+        await context.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await RequireOfferedAsync(
+                slots,
+                booking.Link.Slug,
+                (int)(seconds / SecondsPerMinute),
+                start,
+                now,
+                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
+                cancellationToken);
+        }
+        catch
+        {
+            proposal.State = ProposalState.Withdrawn;
+            await ConfirmAsync(context, booking);
+            throw;
+        }
+
+        booking.StartUtc = start.ToUnixTimeSeconds();
+        booking.EndUtc = booking.StartUtc + seconds;
+        booking.Sequence++;
+        await ConfirmAsync(context, booking);
+
+        // Rule 14's tail, in the order the reschedule above keeps it and never in the release
+        // phase: that release is bookkeeping the failing paths undo, and a calendar hook hung on
+        // it would withdraw the event for a meeting that merely moved.
+        await calendars.RescheduleAsync(booking, cancellationToken);
+
+        // No manage token, and none can be had: the URL the invitee opened carried the PROPOSAL's
+        // token and only the manage token's SHA-256 is stored. The mail goes without that link.
+        await mailer.SendRescheduleAsync(booking, manageToken: null, cancellationToken);
+
+        return await ToResponseAsync(context, booking, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// The invitee says no. The booking is not opened for writing at all, which is what makes
+    /// "a declined proposal leaves the meeting exactly as it was" true by construction.
+    /// </summary>
+    private static async Task<ProposalResponse> DeclineProposalAsync(
+        string token,
+        KairosDbContext context,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.GetCurrentInstant();
+        var proposal = await FindProposalAsync(context, token, cancellationToken);
+        RequireOpen(proposal, now);
+
+        proposal.State = ProposalState.Declined;
+        proposal.DecidedAt = now.ToUnixTimeSeconds();
+        await context.SaveChangesAsync(cancellationToken);
+
+        return Describe(proposal, await TimeZoneIdAsync(context, cancellationToken));
+    }
+
+    /// <summary>
+    /// Open and unlapsed, or nothing happens. The two refusals are separate codes because they
+    /// are separate sentences on the page: somebody already answered this, against nobody
+    /// answered it in time.
+    /// </summary>
+    private static void RequireOpen(BookingProposal proposal, Instant now)
+    {
+        if (proposal.State != ProposalState.Open)
+        {
+            throw DomainException.Conflict(ProposalClosedCode, "This suggestion has already been answered.");
+        }
+
+        if (proposal.ExpiresAt <= now.ToUnixTimeSeconds())
+        {
+            throw DomainException.Conflict(ProposalExpiredCode, "This suggestion has lapsed.");
+        }
+    }
+
+    /// <summary>
+    /// By hash against the unique index, and a token that matches nothing is a 404 whatever its
+    /// shape — the same answer a real token for a deleted proposal gets.
+    /// </summary>
+    private static async Task<BookingProposal> FindProposalAsync(
+        KairosDbContext context,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        var hash = BookingWriter.Hash(token);
+        return await context.BookingProposals
+            .Include(proposal => proposal.Booking)
+            .ThenInclude(booking => booking.Link)
+            .FirstOrDefaultAsync(proposal => proposal.TokenHash == hash, cancellationToken)
+            ?? throw DomainException.NotFound("Proposal");
+    }
+
+    /// <summary>
+    /// The proposal as the invitee's page draws it. The organizer's zone rides along because both
+    /// times on that page are the organizer's calendar, and a column of times belonging to nobody
+    /// in particular is how a call gets missed.
+    /// </summary>
+    private static ProposalResponse Describe(BookingProposal proposal, string timeZoneId) =>
+        new(
+            proposal.BookingId,
+            proposal.Booking.Link.Name,
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.Booking.StartUtc)),
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.Booking.EndUtc)),
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.StartUtc)),
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.EndUtc)),
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.ExpiresAt)),
+            timeZoneId,
+            proposal.State.ToString().ToLowerInvariant());
+
+    private static async Task<string> TimeZoneIdAsync(
+        KairosDbContext context,
+        CancellationToken cancellationToken) =>
+        await context.Settings.AsNoTracking()
+            .Where(row => row.Id == Settings.SingletonId)
+            .Select(row => row.TimeZoneId)
+            .SingleAsync(cancellationToken);
 
     /// <summary>
     /// Availability, minimum notice and the daily cap enforced on write. <see cref="BookingWriter"/>
