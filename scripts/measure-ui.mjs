@@ -79,6 +79,14 @@ const DESCRIBE = `(element) => {
 
 async function withPage(browser, { viewport, colorScheme = 'light', theme = null }, body) {
   const context = await browser.newContext({
+    // The harness injects its own probe stylesheets — env() cannot be read from
+    // script, and the grayscale pass needs a filter — and `style-src 'self'`
+    // blocks both since the security headers shipped. Without this the script
+    // dies on its first addStyleTag against any real instance, which is to say
+    // the tool that enforces these rules could no longer be run. It relaxes the
+    // policy for the measuring browser only; the header the application sends is
+    // exactly what SecurityHeadersTests pins, and is what a real browser gets.
+    bypassCSP: true,
     viewport,
     colorScheme,
     timezoneId: ZONE,

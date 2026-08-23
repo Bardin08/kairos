@@ -1,7 +1,9 @@
 import { useEffect, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter'
 
+import { getAlerts, type Alert } from './adminAlerts'
 import { getSettings } from './adminSettings'
+import AlertPanel from './AlertPanel'
 import Availability from './Availability'
 import Links from './Links'
 import Locked from './Locked'
@@ -183,6 +185,24 @@ export default function AdminShell() {
   // navigation, and nothing about it should turn red because a fetch did.
   const [operator, setOperator] = useState<string | null>(null)
 
+  // What is broken, re-read on every navigation. That is what makes "a visible
+  // alert on every admin screen within one page load" true without a poll: the
+  // operator cannot reach a screen without this having been asked for it.
+  const [alerts, setAlerts] = useState<Alert[]>([])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    getAlerts(controller.signal)
+      .then(setAlerts)
+      // Silent, exactly like the settings read below. The rail is navigation, and
+      // nothing about it should turn red because a fetch did — least of all the
+      // control whose whole job is to be believed when it does.
+      .catch(() => {})
+
+    return () => controller.abort()
+  }, [current])
+
   useEffect(() => {
     const controller = new AbortController()
 
@@ -241,6 +261,7 @@ export default function AdminShell() {
               line without one of them being cut. */}
           <div className="rail-foot">
             <div className="grow">
+              <AlertPanel alerts={alerts} />
               {operator !== null && (
                 <div className="row gap-2 mb-3">
                   <span className="avatar avatar-sm" aria-hidden="true">
@@ -279,6 +300,7 @@ export default function AdminShell() {
           destination reads as a row of its own and the three primaries keep the
           bottom edge, where the thumb is. */}
       <nav className="tabbar" aria-label="Sections">
+        <AlertPanel alerts={alerts} />
         {destinationLink(SETTINGS, current)}
         <div className="tabbar-inner">
           {DESTINATIONS.map((destination) => destinationLink(destination, current))}
