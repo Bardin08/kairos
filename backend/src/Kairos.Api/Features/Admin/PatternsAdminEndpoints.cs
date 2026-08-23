@@ -1,11 +1,3 @@
-//
-// Deliberately not bumping Version, unlike the save above. Not because widening the
-// aggregate lock would be unacceptable — the save does exactly that, and PatternChanged
-// is worded for it — but because there is nothing here for a token to protect: this
-// handler reads nothing it then writes. ExecuteDelete decides on rows the database
-// matched at delete time, so two of these racing already answer coherently — one deletes,
-// the other is told the override does not exist, which by then is true. A bump would mean
-// loading the pattern purely to write a column no caller on this path reads.
 using System.ComponentModel.DataAnnotations;
 
 using Kairos.Api.Availability;
@@ -166,10 +158,12 @@ public static class PatternsAdminEndpoints
     /// the other one did", which a stack trace does not say.
     /// </summary>
     /// <remarks>
-    /// The pattern rather than the date, and the difference is not pedantry: the token this is
-    /// raised from sits on the pattern, so a save of one date is refused by a save of another.
-    /// Naming the date would tell the operator to go and look at a date nothing touched, and the
-    /// edit they lost was on the one they were already on.
+    /// The pattern rather than the week or the date, and the difference is not pedantry: one code
+    /// is raised by two guards. The rules save is refused when another rules save replaced the
+    /// week under it; a date's save is refused by any save of any date on the same pattern, since
+    /// that lock is the pattern's. Naming either would send the operator to look at something
+    /// nothing touched, while the pattern is the one thing both refusals genuinely have in common
+    /// — and is the screen the operator is already on.
     /// </remarks>
     public const string PatternChangedCode = "pattern_changed";
 
@@ -370,6 +364,12 @@ public static class PatternsAdminEndpoints
             ValidateDay(day.Select(rule => (Start: rule.StartMinute, End: rule.EndMinute)));
         }
 
+        // The week as it stood when this request read it. Everything below turns "somebody else
+        // replaced the week while this operator was choosing" into a refusal rather than into a
+        // merge of the two, and it does so by hand rather than by an EF concurrency token — see
+        // Pattern.RulesVersion for why a second token would be the wrong instrument.
+        var seenRulesVersion = pattern.RulesVersion;
+
         context.PatternRules.RemoveRange(pattern.Rules);
         foreach (var rule in request.Rules)
         {
@@ -382,21 +382,46 @@ public static class PatternsAdminEndpoints
             });
         }
 
-        // The same read-modify-write the override route does, and the same crash when two of them
-        // interleave: the second RemoveRange finds its rows already gone and EF raises. Mapped
-        // here so the weekly route answers what the date route answers.
-        //
-        // Deliberately not raising Version, unlike the override save. A rules write that took the
-        // token would start refusing override saves on dates it has nothing to do with, which
-        // widens the aggregate lock and buys nothing — the crash is what this came for.
-        await ConcurrentWrite.NamedAsync(
-            async () =>
-            {
-                await context.SaveChangesAsync(cancellationToken);
-                return true;
-            },
-            PatternChangedCode,
-            PatternChanged);
+        // The same budget BookingWriter takes, and for the same reason: busy_timeout is not what
+        // bounds a contended write, because Microsoft.Data.Sqlite retries SQLITE_BUSY until the
+        // command timeout and that defaults to thirty seconds. Measured on this stack — a writer
+        // blocked behind the transaction below waited 31s unbounded and 5s with this line, while
+        // DatabaseBusyExceptionHandler tells the caller to come back in 5. This is the second
+        // place in the codebase that holds the write lock, so it is the second place that has to
+        // say how long it is prepared to wait for it.
+        context.Database.SetCommandTimeout(
+            TimeSpan.FromMilliseconds(SqlitePragmas.BusyTimeoutMilliseconds));
+
+        await using var write = await context.Database.BeginTransactionAsync(cancellationToken);
+
+        // The gate, and it runs before a rule row is touched. ExecuteUpdate bypasses the change
+        // tracker and is generated from this predicate alone, so it is unaffected by the token on
+        // OverridesVersion — which is the whole reason the two are separate columns.
+        var claimed = await context.Patterns
+            .Where(row => row.Id == pattern.Id && row.RulesVersion == seenRulesVersion)
+            .ExecuteUpdateAsync(
+                update => update.SetProperty(row => row.RulesVersion, row => row.RulesVersion + 1),
+                cancellationToken);
+
+        if (claimed == 0)
+        {
+            // Another writer replaced this week between the read and here. Refused before a
+            // single rule row is written rather than written and rolled back: a week half one
+            // operator's and half another's is a shape neither asked for, and is what this route
+            // used to produce on a pattern that had no rules to collide over.
+            throw DomainException.Conflict(PatternChangedCode, PatternChanged);
+        }
+
+        // No ConcurrentWrite here, unlike every other write in this file, and the omission is
+        // measured rather than assumed. The transaction above holds the write lock from its BEGIN
+        // on this stack — a second connection's insert against it waits and then reports "database
+        // is locked" — so no other writer's delete can land between the gate and this line; the
+        // gate itself proves nothing had moved before it; and PatternRules carries no unique index
+        // for the other branch to catch. A wrapper for a race that cannot happen reads as one that
+        // can.
+        await context.SaveChangesAsync(cancellationToken);
+
+        await write.CommitAsync(cancellationToken);
 
         return await ReadAsync(context, pattern.Id, cancellationToken);
     }
@@ -447,8 +472,8 @@ public static class PatternsAdminEndpoints
         // only raises where there were rows to delete —
         // so a date that held nothing yet let both writers insert and kept the union, which is
         // neither operator's answer. Raising the number they both read means EF writes
-        // WHERE Version = n, the second one matches nothing, and the loser is told.
-        pattern.Version++;
+        // WHERE OverridesVersion = n, the second one matches nothing, and the loser is told.
+        pattern.OverridesVersion++;
 
         await ConcurrentWrite.NamedAsync(
             async () =>
@@ -482,7 +507,7 @@ public static class PatternsAdminEndpoints
         // The date goes back to the weekly rules. Removing an override is not the same as
         // blocking the day, which is why the two are different requests.
         //
-        // Deliberately not bumping Version, unlike the save above. The token guards a
+        // Deliberately not raising OverridesVersion, unlike the save above. The token guards a
         // read-modify-write, and this has none: ExecuteDelete decides on rows the database
         // matched rather than on a set read earlier, so two of these racing already answer
         // coherently — one deletes and the other is told the override does not exist, which by

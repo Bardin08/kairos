@@ -22,7 +22,11 @@ public sealed class PatternConfiguration : IEntityTypeConfiguration<Pattern>
         // turns that into the named 409. Only a tracked write is bound by it: RenameAsync and
         // DeleteAsync go through ExecuteUpdate and ExecuteDelete, which never load the row and
         // are unaffected, which is why adding this changed no answer they give.
-        builder.Property(pattern => pattern.Version)
+        //
+        // RulesVersion deliberately does NOT get the same call. The omission is the design rather
+        // than an oversight, and the argument for it is on the property itself — see
+        // Pattern.RulesVersion.
+        builder.Property(pattern => pattern.OverridesVersion)
             .IsConcurrencyToken();
 
         // The name is how the operator picks one in Part C, so two patterns called "Weekdays"
