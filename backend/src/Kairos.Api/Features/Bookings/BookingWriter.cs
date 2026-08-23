@@ -48,16 +48,16 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     private static readonly int OpenProposalState = (int)ProposalState.Open;
 
     /// <summary>
-    /// EF's BeginTransaction issues a DEFERRED transaction, which takes a write lock only when it
-    /// first writes. Two deferred transactions that both read then write deadlock in a way
-    /// busy_timeout cannot rescue, because SQLite returns SQLITE_BUSY immediately when waiting
-    /// could never resolve it. BEGIN IMMEDIATE takes the write lock up front, which is what makes
-    /// check-then-insert correct here. This is the only raw SQL in the codebase.
+    /// EF's BeginTransaction issues a DEFERRED transaction, which takes a write lock only on its
+    /// first write. Two of those that both read then write deadlock past busy_timeout's help —
+    /// SQLite returns SQLITE_BUSY immediately when waiting could never resolve it. BEGIN IMMEDIATE
+    /// takes the lock up front, which is what makes check-then-insert correct here, and it is the
+    /// only raw SQL in the codebase.
     /// </summary>
     /// <param name="slug">
-    /// The link's public name, for the <c>booking.created</c> body. Passed in rather than looked
-    /// up because the caller resolved the link a moment ago and a second read inside the write
-    /// transaction would be the same fact fetched twice.
+    /// The link's public name, for the <c>booking.created</c> body. Passed in because the caller
+    /// resolved the link a moment ago, and a second read inside the write transaction would fetch
+    /// the same fact twice.
     /// </param>
     public CreateBookingResult TryCreate(
         Guid linkId,
@@ -109,17 +109,15 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
             // check and by the booking it writes, so both agree on when this call happened.
             var now = clock.GetCurrentInstant().ToUnixTimeSeconds();
 
-            // Two terms, summed, because a slot is unavailable for two different reasons and both
-            // have to be inside the same BEGIN IMMEDIATE. Half-open on both sides, and MAX here is
-            // SQLite's two-argument scalar maximum, so the rule matches SlotGenerator exactly: pad
-            // by the larger of the two margins, never their sum, and let a slot start the moment
-            // the padding ends.
+            // Two terms, summed: a slot is unavailable for two reasons and both belong inside the
+            // same BEGIN IMMEDIATE. Half-open on both sides, and MAX is SQLite's two-argument scalar
+            // maximum, so the rule matches SlotGenerator exactly — pad by the larger of the two
+            // margins, never their sum, and let a slot start the moment the padding ends.
             //
-            // The second term is the proposal hold. Its expiry is compared against the clock here
-            // rather than against a row the sweeper has marked, for the reason LocalBusySource
-            // gives: a hold that has lapsed must stop holding whether or not anything has run.
-            // The meeting behind it has to still be on for the same reason — a proposal left open
-            // over a booking cancelled underneath it would hold a slot for a meeting that is off.
+            // The second term is the proposal hold. Its expiry is compared against the clock rather
+            // than a row the sweeper has marked, for LocalBusySource's reason: a lapsed hold must
+            // stop holding whether or not anything has run. Its booking must still be confirmed for
+            // the same reason — otherwise a hold blocks a slot for a meeting that is off.
             var clashes = context.Database.SqlQuery<int>($"""
                 SELECT
                   (SELECT COUNT(*)
@@ -179,12 +177,11 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
 
             context.Bookings.Add(pending);
 
-            // Inside the transaction this method already owns, and before the one SaveChanges
-            // that carries the booking. That is the entire point of the outbox: the booking and
-            // the announcement of it are the same INSERT batch inside the same BEGIN IMMEDIATE,
-            // so there is no window in which one exists without the other — not a small window,
-            // none. Enqueued here rather than by the endpoint because the endpoint could only do
-            // it after the COMMIT, which is the dual write the pattern exists to delete.
+            // Inside the transaction this method already owns, and before the one SaveChanges that
+            // carries the booking, so the booking and its announcement are the same INSERT batch
+            // inside the same BEGIN IMMEDIATE and no window exists in which one is there without
+            // the other. Enqueued here rather than by the endpoint because the endpoint could only
+            // do it after the COMMIT, which is the dual write the outbox exists to delete.
             announcement = outbox.Enqueue(
                 bookingId,
                 OutboxMessageType.BookingCreated,
@@ -225,10 +222,10 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
 
     /// <summary>
     /// Undoes what this call did, and nothing else. Both guards matter: a bare ROLLBACK after a
-    /// BEGIN IMMEDIATE that never ran would discard a transaction the caller opened — the shape a
-    /// reschedule takes — and clearing the change tracker wholesale would discard entities the
-    /// caller is holding. Left tracked, the three failed inserts would ride along on the caller's
-    /// next SaveChanges and re-insert the booking this method just refused — and announce it.
+    /// BEGIN IMMEDIATE that never ran discards a transaction the caller opened — the shape a
+    /// reschedule takes — and clearing the change tracker discards entities the caller holds. Left
+    /// tracked, the three failed inserts ride along on the caller's next SaveChanges and re-insert
+    /// the booking this method just refused, announcement included.
     /// </summary>
     private void Abandon(bool started, Booking? pending, OutboxMessage? announcement)
     {

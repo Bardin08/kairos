@@ -84,11 +84,10 @@ public sealed record PatternRuleResponse(Guid Id, int IsoDayOfWeek, int StartMin
 public sealed record OverrideWindowResponse(int StartMinute, int EndMinute);
 
 /// <summary>
-/// Keyed by date rather than by id, because the date is what identifies it: the operator's route
-/// to it is the day they are thinking about and never an identifier they would have to look up
-/// first. A date with an empty <see cref="Windows"/> is blocked and offers nothing; a date absent
-/// from the list is still on the weekly rules, and telling those two apart is the point of
-/// keeping a row for a date that offers nothing.
+/// Keyed by date rather than by id: the operator's route to it is the day they are thinking about,
+/// not an identifier they would have to look up. A date with an empty <see cref="Windows"/> is
+/// blocked; a date absent from the list is still on the weekly rules, and telling those apart is
+/// why a date that offers nothing keeps a row.
 /// </summary>
 public sealed record PatternOverrideResponse(
     DateOnly Date,
@@ -107,21 +106,16 @@ public sealed record PatternResponse(
     IReadOnlyList<string> UsedBy);
 
 /// <summary>
-/// The operator's availability: patterns, their weekly rules and their date overrides.
-/// </summary>
-/// <remarks>
 /// <para>
-/// <b>A pattern is a shape, not a schedule.</b> Nothing here reads a booking and nothing here
-/// writes a link. Which pattern a link stands on is the link's field, edited where links are
-/// edited; a booking is something that already happened to a shape. Both have been proposed for
-/// this screen and both would turn a reusable object into a diary of one.
+/// <b>A pattern is a shape, not a schedule.</b> Nothing here reads a booking or writes a link —
+/// which pattern a link stands on is the link's own field. Both have been proposed for this screen,
+/// and both turn a reusable object into a diary of one.
 /// </para>
 /// <para>
 /// <b>Every write answers with the whole pattern.</b> One extra read per mutation buys a client
-/// that never merges a partial response into a cached one — the card is replaced, not patched —
-/// and for a single-operator workbench that read costs nothing worth counting.
+/// that replaces the card rather than merging a partial response into a cached one.
 /// </para>
-/// </remarks>
+/// </summary>
 public static class PatternsAdminEndpoints
 {
     /// <summary>
@@ -141,11 +135,10 @@ public static class PatternsAdminEndpoints
     public const string PatternNameRequiredCode = "pattern_name_required";
 
     /// <summary>
-    /// Two windows on one day that overlap — a weekday's or one date's, since both go through the
-    /// same check. Overlapping windows generate the same candidate start twice, which surfaces on
-    /// the booking page as a duplicated time — a data bug wearing a rendering bug's clothes.
-    /// Windows that merely touch are not an overlap: 09:00-12:00 beside 12:00-17:00 is a
-    /// contiguous day and generates each start once.
+    /// Two windows on one day that overlap — a weekday's or one date's, since both go through this
+    /// check. They generate the same candidate start twice, which the booking page shows as a
+    /// duplicated time. Windows that merely touch are not an overlap: 09:00-12:00 beside
+    /// 12:00-17:00 is a contiguous day and generates each start once.
     /// </summary>
     public const string RuleOverlapsCode = "rule_overlaps";
 
@@ -154,26 +147,23 @@ public static class PatternsAdminEndpoints
 
     /// <summary>
     /// Two writers on one pattern, interleaving — two admin tabs, or one tab and a forgotten one.
-    /// Named rather than left as a 500, because the operator's answer is "reload and look at what
-    /// the other one did", which a stack trace does not say.
+    /// Named rather than left as a 500: the operator's answer is "reload and look at what the other
+    /// one did", which a stack trace does not say.
     /// </summary>
     /// <remarks>
-    /// The pattern rather than the week or the date, and the difference is not pedantry: one code
-    /// is raised by two guards. The rules save is refused when another rules save replaced the
-    /// week under it; a date's save is refused by any save of any date on the same pattern, since
-    /// that lock is the pattern's. Naming either would send the operator to look at something
-    /// nothing touched, while the pattern is the one thing both refusals genuinely have in common
-    /// — and is the screen the operator is already on.
+    /// The pattern rather than the week or the date, because one code is raised by two guards: a
+    /// rules save refused when another replaced the week under it, and a date's save refused by any
+    /// save of any date on the same pattern, since that lock is the pattern's. Naming either would
+    /// point the operator at something nothing touched.
     /// </remarks>
     public const string PatternChangedCode = "pattern_changed";
 
     /// <summary>
     /// The <c>{date}</c> segment of an override route is not an ISO calendar date. Thrown from the
     /// handler rather than declared as a route constraint because no regular expression rejects
-    /// 2026-02-30: the parse has to run either way, and left to the binder the failure was a
-    /// <c>BadHttpRequestException</c> — a 500 in Development, where ThrowOnBadRequest defaults on,
-    /// and a 400 with an empty body everywhere else. Every other malformed input on this API
-    /// answers a coded 400.
+    /// 2026-02-30 and the parse has to run anyway. Left to the binder it was a
+    /// <c>BadHttpRequestException</c>: a 500 in Development, where ThrowOnBadRequest defaults on,
+    /// and an empty 400 elsewhere, where every other malformed input answers a coded 400.
     /// </summary>
     public const string DateInvalidCode = "date_invalid";
 
@@ -192,16 +182,14 @@ public static class PatternsAdminEndpoints
     /// </summary>
     public const int MaxWindowsPerDate = 6;
 
-    /// <summary>ISO days, Monday through Sunday.</summary>
     public const int DaysInWeek = 7;
 
     /// <summary>
-    /// Derived, never typed twice: a full week of full days, and so the most windows any body on
-    /// this surface could legitimately carry. It is the allocation guard on both write bodies —
-    /// an array the size of Kestrel's 30 MB cap is refused as soon as it is bound, rather than
-    /// after it has been projected and sorted — and deliberately not the domain rule, which
+    /// A full week of full days, and so the most windows any body here could carry. The allocation
+    /// guard on both write bodies — an array the size of Kestrel's 30 MB cap is refused as it binds,
+    /// not after being projected and sorted — and deliberately not the domain rule, which
     /// <see cref="ValidateDay"/> owns: a bound on a whole body cannot tell one day's share from
-    /// another's, so a date carrying a seventh window is refused there and answers a code.
+    /// another's.
     /// </summary>
     public const int MaxWindowsPerWeek = MaxWindowsPerDate * DaysInWeek;
 
@@ -382,13 +370,12 @@ public static class PatternsAdminEndpoints
             });
         }
 
-        // The same budget BookingWriter takes, and for the same reason: busy_timeout is not what
-        // bounds a contended write, because Microsoft.Data.Sqlite retries SQLITE_BUSY until the
-        // command timeout and that defaults to thirty seconds. Measured on this stack — a writer
-        // blocked behind the transaction below waited 31s unbounded and 5s with this line, while
-        // DatabaseBusyExceptionHandler tells the caller to come back in 5. This is the second
-        // place in the codebase that holds the write lock, so it is the second place that has to
-        // say how long it is prepared to wait for it.
+        // The same budget BookingWriter takes, and for the same reason: busy_timeout does not bound
+        // a contended write, because Microsoft.Data.Sqlite retries SQLITE_BUSY until the command
+        // timeout, thirty seconds by default. Measured on this stack — a writer blocked behind the
+        // transaction below waited 31s unbounded and 5s with this line, and
+        // DatabaseBusyExceptionHandler tells the caller to come back in 5. Second place to hold the
+        // write lock, so second place to say how long it will wait for it.
         context.Database.SetCommandTimeout(
             TimeSpan.FromMilliseconds(SqlitePragmas.BusyTimeoutMilliseconds));
 
@@ -413,12 +400,10 @@ public static class PatternsAdminEndpoints
         }
 
         // No ConcurrentWrite here, unlike every other write in this file, and the omission is
-        // measured rather than assumed. The transaction above holds the write lock from its BEGIN
-        // on this stack — a second connection's insert against it waits and then reports "database
-        // is locked" — so no other writer's delete can land between the gate and this line; the
-        // gate itself proves nothing had moved before it; and PatternRules carries no unique index
-        // for the other branch to catch. A wrapper for a race that cannot happen reads as one that
-        // can.
+        // measured rather than assumed. The transaction above holds the write lock from its BEGIN —
+        // a second connection's insert waits and then reports "database is locked" — so no other
+        // writer's delete can land between the gate and this line; the gate proves nothing moved
+        // before it; and PatternRules carries no unique index for the other branch to catch.
         await context.SaveChangesAsync(cancellationToken);
 
         await write.CommitAsync(cancellationToken);
@@ -468,11 +453,11 @@ public static class PatternsAdminEndpoints
         }
 
         // The whole of what makes two tabs on one date safe. The unique index in
-        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete
-        // only raises where there were rows to delete —
-        // so a date that held nothing yet let both writers insert and kept the union, which is
-        // neither operator's answer. Raising the number they both read means EF writes
-        // WHERE OverridesVersion = n, the second one matches nothing, and the loser is told.
+        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete only
+        // raises where there were rows to delete, so a date that held nothing yet let both writers
+        // insert and kept the union — neither operator's answer. Raising the number they both read
+        // means EF writes WHERE OverridesVersion = n, the second one matches nothing, and the loser
+        // is told.
         pattern.OverridesVersion++;
 
         await ConcurrentWrite.NamedAsync(
@@ -504,15 +489,12 @@ public static class PatternsAdminEndpoints
             throw DomainException.NotFound(OverrideName);
         }
 
-        // The date goes back to the weekly rules. Removing an override is not the same as
-        // blocking the day, which is why the two are different requests.
-        //
-        // Deliberately not raising OverridesVersion, unlike the save above. The token guards a
-        // read-modify-write, and this has none: ExecuteDelete decides on rows the database
-        // matched rather than on a set read earlier, so two of these racing already answer
-        // coherently — one deletes and the other is told the override does not exist, which by
-        // then is true. Bumping would mean loading the pattern to write a column nothing reads
-        // here, and would make a remove on one date refuse a save on an unrelated one.
+        // The date goes back to the weekly rules, which is not blocking the day — hence two
+        // requests. Deliberately not raising OverridesVersion, unlike the save above: the token
+        // guards a read-modify-write and this has none. ExecuteDelete decides on rows the database
+        // matched, so two racing answer coherently — one deletes, the other is told the override
+        // does not exist, which by then is true. Bumping would load the pattern to write a column
+        // nothing reads here, and make a remove on one date refuse a save on an unrelated one.
         return await ReadAsync(context, patternId, cancellationToken);
     }
 
@@ -562,16 +544,15 @@ public static class PatternsAdminEndpoints
 
     /// <summary>
     /// The <c>{date}</c> segment, in the entity's own type. Read through NodaTime's ISO pattern
-    /// rather than by the binder, so the route accepts the one spelling the rest of this API
-    /// speaks — the same pattern <see cref="Slots.SlotsEndpoints"/> and
-    /// <see cref="MeetingsAdminEndpoints"/> read their dates with. The caller's value is not
-    /// echoed back into the message, for the reason those two state.
+    /// rather than by the binder, so the route accepts the one spelling the rest of this API speaks
+    /// — the pattern <see cref="Slots.SlotsEndpoints"/> and <see cref="MeetingsAdminEndpoints"/>
+    /// use. The caller's value is not echoed back into the message, for the reason those two state.
     /// </summary>
     /// <remarks>
     /// A successful parse is not enough to convert: the pattern reads years the stored type cannot
-    /// hold, and a year below it converted into an <c>ArgumentOutOfRangeException</c> that the
-    /// handler leaves alone, so the refusal had to happen here to stay a coded 400. Nothing guards
-    /// the far end because the pattern's four-digit year already refuses anything past 9999.
+    /// hold, and a year below it threw <c>ArgumentOutOfRangeException</c>, which the handler leaves
+    /// alone, so the refusal happens here to stay a coded 400. The far end needs no guard — the
+    /// pattern's four-digit year already refuses anything past 9999.
     /// </remarks>
     private static DateOnly ParseDate(string value)
     {
@@ -598,7 +579,7 @@ public static class PatternsAdminEndpoints
 
         // Counted here rather than on the request, because the attribute bounds a whole body and
         // this bounds one day of it — the rule the operator actually has, and the one they get a
-        // code for. Runs before anything is written, so the set is refused entire or stored entire.
+        // code for.
         if (windows.Count > MaxWindowsPerDate)
         {
             throw DomainException.Invalid(TooManyWindowsCode, TooManyWindows);

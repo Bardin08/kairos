@@ -12,19 +12,17 @@ using NodaTime.Text;
 namespace Kairos.Api.Features.Slots;
 
 /// <summary>
-/// Four inputs from three binding sources, which is what a request record is for. The rule the
-/// whole feature folder follows: an input gets a record and an attribute where the attribute
-/// decides something nothing downstream would — presence of a query value, a numeric bound, an
-/// address shape. A lone route segment that goes straight into a resolver gets neither, which is
-/// why <c>GET /links/{slug}</c> and the three <c>/bookings/{token}</c> routes take a bare
-/// parameter: a route segment cannot be absent, and "no such thing" is the resolver's 404 rather
-/// than a 400 about a regular expression.
+/// The rule the whole feature folder follows: an input gets a record and an attribute where the
+/// attribute decides something nothing downstream would — a query value's presence, a numeric
+/// bound, an address shape. A lone route segment going straight into a resolver gets neither, which
+/// is why <c>GET /links/{slug}</c> and the three <c>/bookings/{token}</c> routes take a bare
+/// parameter: a segment cannot be absent, and "no such thing" is the resolver's 404.
 /// </summary>
 /// <remarks>
-/// The slug carries no pattern attribute for that same reason. It had one, and the cost was that
-/// an unusable slug answered 400 here and 404 on <c>GET /links/{slug}</c> — the same input, the
-/// same meaning, two answers. The gate also protected nothing: the slug's only use is one lookup
-/// on a unique index, which resolves or throws before any window is expanded or any slot walked.
+/// The slug carries no pattern attribute for that reason. It had one, and an unusable slug then
+/// answered 400 here and 404 on <c>GET /links/{slug}</c> — same input, two answers. The gate
+/// protected nothing either: the slug's only use is one lookup on a unique index, which resolves
+/// or throws before any window is expanded.
 /// </remarks>
 public sealed record GetSlotsRequest
 {
@@ -49,11 +47,9 @@ public sealed record GetSlotsRequest
 }
 
 /// <summary>
-/// The public booking page's only read. The handler has no failure branch: malformed shapes are
-/// refused by the attributes above before it runs, the two date parses throw, and everything
-/// else — unknown slug, inactive link, a duration the link does not offer, a range wider than
-/// the query answers for — is thrown inside <see cref="SlotQuery"/> and turned into
-/// ProblemDetails by <see cref="DomainExceptionHandler"/>.
+/// The public booking page's only read. The handler has no failure branch: the attributes above
+/// refuse malformed shapes, the two date parses throw, and everything else is thrown inside
+/// <see cref="SlotQuery"/> and turned into ProblemDetails by <see cref="DomainExceptionHandler"/>.
 /// </summary>
 public static class SlotsEndpoints
 {
