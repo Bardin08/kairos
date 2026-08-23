@@ -30,11 +30,9 @@ const WEEKDAYS = [
 const MONDAY = 1
 
 /**
- * `Mon, Tue, Wed · 09:00–17:00` — the card's one line of hours.
- *
- * Distinct windows rather than one per rule: a Monday-to-Friday nine-to-five is
- * five rules and one sentence, and a split day is two windows however many days
- * carry it.
+ * `Mon, Tue, Wed · 09:00–17:00` — the card's one line of hours. Distinct windows
+ * rather than one per rule: a Monday-to-Friday nine-to-five is five rules and
+ * one sentence, and a split day is two windows however many days carry it.
  */
 function summarize(rules: PatternRule[]): string {
   const days = WEEKDAYS.filter((_, index) =>
