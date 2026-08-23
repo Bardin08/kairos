@@ -68,6 +68,13 @@ public class ProposalEndpointsTests
     private const int NoProposal = 0;
     private const int OneProposal = 1;
     private const int TwoProposals = 2;
+    private const int OneNotice = 1;
+
+    /// <summary>
+    /// What the operator's own mail says happened. The invitee's name is the fixture's, so the
+    /// verb is what distinguishes this notice from the one a lapse produces.
+    /// </summary>
+    private const string DeclinedByTheInvitee = "declined the new time";
 
     private const string RelayHost = "smtp.example.com";
     private const string RelayFrom = "organizer@example.com";
@@ -531,6 +538,30 @@ public class ProposalEndpointsTests
             .State.ShouldBe(ProposalState.Declined);
     }
 
+    /// <summary>
+    /// The half of a decline that is not bookkeeping: the operator suggested an hour and has to
+    /// find out it was refused, because nothing else in this feature will ever tell them. The
+    /// message is picked out by its recipient — every other mail in this test goes to the invitee,
+    /// and this one goes to the mailbox Kairos sends from.
+    /// </summary>
+    [Fact]
+    public async Task Decline_AnOpenProposal_TellsTheOperatorNobodyElseWill()
+    {
+        using var app = new KairosApp();
+        var relay = new RecordingRelay();
+        using var client = OperatorWithRelay(app, relay);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+
+        await AnswerAsync(client, token, DeclineAction);
+
+        var notices = relay.Sent
+            .Where(message => message.To.Mailboxes.Any(box => box.Address == RelayFrom))
+            .ToList();
+        notices.Count.ShouldBe(OneNotice);
+        notices[0].Subject!.ShouldContain(DeclinedByTheInvitee);
+    }
+
     [Fact]
     public async Task Accept_AProposalAlreadyDeclined_IsRefused()
     {
@@ -689,7 +720,15 @@ public class ProposalEndpointsTests
             TestContext.Current.CancellationToken);
 
     private static Task<HttpResponseMessage> AnswerAsync(KairosApp app, string token, string action) =>
-        app.Client.PostAsync(
+        AnswerAsync(app.Client, token, action);
+
+    /// <summary>
+    /// The same anonymous route through a caller of the test's choosing, for the one case that
+    /// has to answer on a host whose relay is substituted — the overload above uses the plain
+    /// application, where no relay is configured and nothing is sent at all.
+    /// </summary>
+    private static Task<HttpResponseMessage> AnswerAsync(HttpClient client, string token, string action) =>
+        client.PostAsync(
             $"{ApiVersions.V1}/bookings/proposals/{token}/{action}",
             content: null,
             TestContext.Current.CancellationToken);
@@ -775,6 +814,21 @@ public class ProposalEndpointsTests
     {
         public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken) =>
             Task.FromResult(RelayAccepted);
+    }
+
+    /// <summary>
+    /// The same relay, keeping what it was handed. For the one assertion about who a message went
+    /// to rather than about what the route did with the answer.
+    /// </summary>
+    private sealed class RecordingRelay() : EmailSender(Options.Create(new EmailOptions()))
+    {
+        public List<MimeMessage> Sent { get; } = [];
+
+        public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken)
+        {
+            Sent.Add(message);
+            return Task.FromResult(RelayAccepted);
+        }
     }
 
     /// <summary>A relay that is configured and will not take it — the failure rule 14 swallows.</summary>

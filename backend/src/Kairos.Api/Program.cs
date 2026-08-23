@@ -195,11 +195,13 @@ builder.Services.AddScoped<IOperatorAlertSource, IntegrationAlertSource>();
 
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 
-// All three are stateless and hold no per-request state: the builder renders text, the sender
-// opens a connection per message, and the mailer only composes. Singletons, like SlotGenerator.
+// Stateless, every one of them, and holding nothing per request: the builder renders text, the
+// sender opens a connection per message, and the mailers only compose. Singletons, like
+// SlotGenerator.
 builder.Services.AddSingleton<IcsBuilder>();
 builder.Services.AddSingleton<EmailSender>();
 builder.Services.AddSingleton<BookingMailer>();
+builder.Services.AddSingleton<OperatorMailer>();
 
 // Scoped, not singleton: they read the request's DbContext. SlotQuery takes
 // IEnumerable<IBusySource>, so the calendar source is one more line here and no change anywhere
