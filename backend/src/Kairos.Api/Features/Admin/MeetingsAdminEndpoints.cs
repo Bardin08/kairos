@@ -330,7 +330,7 @@ public static class MeetingsAdminEndpoints
         Guid id,
         ProposeMeetingRequest request,
         KairosDbContext context,
-        SlotQuery slots,
+        BookingMover mover,
         ProposalWriter proposals,
         BookingMailer mailer,
         IOptions<EmailOptions> email,
@@ -350,7 +350,7 @@ public static class MeetingsAdminEndpoints
         }
 
         var now = clock.GetCurrentInstant();
-        var start = BookingsEndpoints.ParseInstant(request.Start);
+        var start = BookingMover.ParseInstant(request.Start);
 
         var booking = await context.Bookings
             .Include(row => row.Link)
@@ -358,44 +358,22 @@ public static class MeetingsAdminEndpoints
             .FirstOrDefaultAsync(row => row.Id == id, cancellationToken)
             ?? throw DomainException.NotFound("Meeting");
 
-        if (booking.Status != BookingStatus.Confirmed)
-        {
-            throw DomainException.Conflict(
-                BookingsEndpoints.BookingCancelledCode, "A cancelled booking cannot be moved.");
-        }
+        BookingMover.RequireMovable(booking);
 
         var settings = await context.Settings.AsNoTracking()
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
 
-        booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = now.ToUnixTimeSeconds();
-        await context.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            await BookingsEndpoints.RequireOfferedAsync(
-                slots,
-                booking.Link.Slug,
-                (int)((booking.EndUtc - booking.StartUtc) / SecondsPerMinute),
-                start,
-                now,
-                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
-                cancellationToken);
-        }
-        catch
-        {
-            await BookingsEndpoints.ConfirmAsync(context, booking);
-            throw;
-        }
+        await mover.ReleaseAndCheckAsync(booking, start, now, compensate: null, cancellationToken);
 
         var (proposal, token) = proposals.Add(booking, start, settings.ProposalHoldHours);
 
         try
         {
-            // The re-place carries the insert with it. A hold is invisible while the booking under
+            // The restore carries the insert with it. A hold is invisible while the booking under
             // it is not confirmed, so committing these apart would leave a window in which the
-            // slot just promised to the invitee is held by nothing at all.
-            await BookingsEndpoints.ConfirmAsync(context, booking);
+            // slot just promised to the invitee is held by nothing at all. The booking goes back
+            // where it was rather than moving: proposing is asking, and asking moves nothing.
+            await mover.RestoreAsync(booking);
         }
         catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
         {
@@ -403,7 +381,7 @@ public static class MeetingsAdminEndpoints
             // tabs proposing at once must not produce two holds for one meeting. The insert is
             // dropped and the booking put back on its own, since this save carried both.
             context.Entry(proposal).State = EntityState.Detached;
-            await BookingsEndpoints.ConfirmAsync(context, booking);
+            await mover.RestoreAsync(booking);
             throw DomainException.Conflict(
                 ProposalOpenCode, "A proposal for this meeting is already open.");
         }

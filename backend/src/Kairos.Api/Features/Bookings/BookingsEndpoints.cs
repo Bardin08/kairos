@@ -170,7 +170,7 @@ public static class BookingsEndpoints
     private static async Task<Created<BookingResponse>> CreateAsync(
         CreateBookingRequest request,
         KairosDbContext context,
-        SlotQuery slots,
+        BookingMover mover,
         BookingWriter writer,
         CalendarSyncService calendars,
         BookingMailer mailer,
@@ -181,20 +181,11 @@ public static class BookingsEndpoints
         // CreatedAt; minimum notice is measured from this instant alone, so the page's offer and
         // this check cannot disagree about where the notice boundary sits.
         var now = clock.GetCurrentInstant();
-        var start = ParseInstant(request.Start);
+        var start = BookingMover.ParseInstant(request.Start);
         var bookerZone = ResolveZone(request.TimeZone);
 
-        var settings = await context.Settings.AsNoTracking()
-            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
-
-        var offered = await RequireOfferedAsync(
-            slots,
-            request.Slug,
-            request.DurationMinutes,
-            start,
-            now,
-            DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
-            cancellationToken);
+        var offered = await mover.RequireOfferedAsync(
+            request.Slug, request.DurationMinutes, start, now, cancellationToken);
 
         // The link and the margin come off the re-check itself, which is the seam this endpoint
         // exists to keep tight: the read and the write must agree about the resolved margin, or
@@ -276,7 +267,7 @@ public static class BookingsEndpoints
         string token,
         RescheduleBookingRequest request,
         KairosDbContext context,
-        SlotQuery slots,
+        BookingMover mover,
         CalendarSyncService calendars,
         BookingMailer mailer,
         ProposalWriter proposals,
@@ -284,66 +275,18 @@ public static class BookingsEndpoints
         CancellationToken cancellationToken)
     {
         var now = clock.GetCurrentInstant();
-        var start = ParseInstant(request.Start);
+        var start = BookingMover.ParseInstant(request.Start);
 
         var booking = await FindAsync(context, token, cancellationToken);
-        if (booking.Status != BookingStatus.Confirmed)
-        {
-            throw DomainException.Conflict(BookingCancelledCode, "A cancelled booking cannot be moved.");
-        }
+        BookingMover.RequireMovable(booking);
 
-        var seconds = booking.EndUtc - booking.StartUtc;
-        var settings = await context.Settings.AsNoTracking()
-            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
-
-        // A confirmed booking blocks its own calendar, so it is released before the re-check —
-        // otherwise moving a meeting half an hour later is refused by the meeting being moved.
-        // Every path out of here puts the row back confirmed, including the failing ones and the
-        // ones whose caller has already hung up — which is what ConfirmAsync refusing a token is for.
-        //
-        // KNOWN HOLE, and it is not fixed here. Between this line and ConfirmAsync the booking is
-        // Cancelled on disk while nobody has cancelled it, and BookingCanceller reads that as "off
-        // already" and returns having done nothing. A cancel landing in this window therefore
-        // answers 200 and is then undone by the re-confirm below: the meeting stands, no
-        // announcement was queued, no calendar event was withdrawn and nobody was told. It is old
-        // shape and newly reachable, because until the operator's cancel existed the only caller
-        // who could hit it was the one invitee already inside this method. Fixing it means a
-        // release that is distinguishable from a cancellation — a flag, or a re-read under the
-        // write lock — and that is a change with its own tests, not a rider on this one.
-        booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = now.ToUnixTimeSeconds();
-        await context.SaveChangesAsync(cancellationToken);
-
-        try
-        {
-            await RequireOfferedAsync(
-                slots,
-                booking.Link.Slug,
-                (int)(seconds / SecondsPerMinute),
-                start,
-                now,
-                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
-                cancellationToken);
-        }
-        catch
-        {
-            await ConfirmAsync(context, booking);
-            throw;
-        }
-
-        booking.StartUtc = start.ToUnixTimeSeconds();
-        booking.EndUtc = booking.StartUtc + seconds;
-
-        // The row is mutated rather than replaced: the identifier and the manage token belong to
-        // the meeting, not to the slot. Sequence is how Part B's .ics tells a calendar client
-        // that this is the same event at a new time instead of a second invitation.
-        booking.Sequence++;
+        await mover.ReleaseAndCheckAsync(booking, start, now, compensate: null, cancellationToken);
 
         // An operator's suggestion about where this meeting should go stops applying the moment
         // the invitee moves it themselves, and it is closed in the save that moves it — never on
-        // the failing paths above, where nothing happened and the question still stands.
+        // the failing paths inside the release, where nothing happened and the question stands.
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
-        await ConfirmAsync(context, booking);
+        await mover.MoveToAsync(booking, start);
 
         // Here, at the end, and never in the release phase above. That release is bookkeeping —
         // the booking is set cancelled and put back confirmed on every path out of this method,
@@ -396,7 +339,7 @@ public static class BookingsEndpoints
     private static async Task<BookingResponse> AcceptProposalAsync(
         string token,
         KairosDbContext context,
-        SlotQuery slots,
+        BookingMover mover,
         CalendarSyncService calendars,
         BookingMailer mailer,
         IClock clock,
@@ -409,44 +352,20 @@ public static class BookingsEndpoints
         var booking = await Tracked(context)
             .SingleAsync(row => row.Id == proposal.BookingId, cancellationToken);
 
-        if (booking.Status != BookingStatus.Confirmed)
-        {
-            throw DomainException.Conflict(BookingCancelledCode, "A cancelled booking cannot be moved.");
-        }
+        BookingMover.RequireMovable(booking);
 
-        var seconds = booking.EndUtc - booking.StartUtc;
-        var settings = await context.Settings.AsNoTracking()
-            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
         var start = Instant.FromUnixTimeSeconds(proposal.StartUtc);
-
-        booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = now.ToUnixTimeSeconds();
         proposal.State = ProposalState.Accepted;
         proposal.DecidedAt = now.ToUnixTimeSeconds();
-        await context.SaveChangesAsync(cancellationToken);
 
-        try
-        {
-            await RequireOfferedAsync(
-                slots,
-                booking.Link.Slug,
-                (int)(seconds / SecondsPerMinute),
-                start,
-                now,
-                DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
-                cancellationToken);
-        }
-        catch
-        {
-            proposal.State = ProposalState.Withdrawn;
-            await ConfirmAsync(context, booking);
-            throw;
-        }
+        await mover.ReleaseAndCheckAsync(
+            booking,
+            start,
+            now,
+            compensate: () => proposal.State = ProposalState.Withdrawn,
+            cancellationToken);
 
-        booking.StartUtc = start.ToUnixTimeSeconds();
-        booking.EndUtc = booking.StartUtc + seconds;
-        booking.Sequence++;
-        await ConfirmAsync(context, booking);
+        await mover.MoveToAsync(booking, start);
 
         // Rule 14's tail, in the order the reschedule above keeps it and never in the release
         // phase: that release is bookkeeping the failing paths undo, and a calendar hook hung on
@@ -542,58 +461,6 @@ public static class BookingsEndpoints
             .SingleAsync(cancellationToken);
 
     /// <summary>
-    /// Availability, minimum notice and the daily cap enforced on write. <see cref="BookingWriter"/>
-    /// only refuses a clash with another confirmed booking, so without this a POST naming 03:00
-    /// on a Sunday would succeed against a calendar that never offered it. Returns what the query
-    /// resolved, so the write path never has to resolve the link or its margin a second time.
-    /// </summary>
-    /// <remarks>
-    /// Reachable from <see cref="Admin.MeetingsAdminEndpoints"/> rather than private, and the
-    /// same for <see cref="ParseInstant"/>: the operator's propose enforces this identical rule,
-    /// and a second copy of it there would be a second place for the rule to drift.
-    /// </remarks>
-    internal static async Task<SlotResults> RequireOfferedAsync(
-        SlotQuery slots,
-        string slug,
-        int durationMinutes,
-        Instant start,
-        Instant now,
-        DateTimeZone organizerZone,
-        CancellationToken cancellationToken)
-    {
-        var date = start.InZone(organizerZone).Date;
-        var offered = await slots.GetSlotsAsync(slug, durationMinutes, date, date, now, cancellationToken);
-        if (!offered.Starts.Contains(start))
-        {
-            throw DomainException.Conflict(SlotUnavailableCode, "That time is not available.");
-        }
-
-        return offered;
-    }
-
-    /// <summary>
-    /// Deliberately uncancellable, and the reason the release above is safe to commit at all. It
-    /// is the compensation for a write this request has already made, so it has to outlive the
-    /// request the same way <see cref="Integrations.Google.GoogleClientFactory"/>'s
-    /// reconnect flag does: an invitee whose connection drops in the window between the release
-    /// and this would otherwise leave the booking cancelled forever — reads reporting a meeting
-    /// that is off, reschedule refusing it, and nothing having withdrawn the calendar event or
-    /// announced anything, because both of those live in the cancel endpoint and never ran.
-    /// </summary>
-    /// <remarks>
-    /// Reachable from <see cref="Admin.MeetingsAdminEndpoints"/> for the same reason
-    /// <see cref="RequireOfferedAsync"/> is: the operator's propose makes the identical release to
-    /// run the identical check, and a second copy of an uncancellable compensation is a second
-    /// place for it to acquire a cancellation token and stop compensating.
-    /// </remarks>
-    internal static Task ConfirmAsync(KairosDbContext context, Booking booking)
-    {
-        booking.Status = BookingStatus.Confirmed;
-        booking.CancelledAt = null;
-        return context.SaveChangesAsync(CancellationToken.None);
-    }
-
-    /// <summary>
     /// The manage token is never stored, so the lookup is by its hash against the unique index.
     /// A token that matches nothing is a 404 whatever its shape — the same answer a real token
     /// for a deleted booking would get, and one that tells a guesser nothing.
@@ -660,18 +527,6 @@ public static class BookingsEndpoints
             manageToken,
             entry?.State.ToString().ToLowerInvariant(),
             conference?.JoinUrl);
-    }
-
-    internal static Instant ParseInstant(string value)
-    {
-        var parsed = InstantPattern.ExtendedIso.Parse(value);
-        if (!parsed.Success)
-        {
-            throw DomainException.Invalid(
-                InstantInvalidCode, "'start' must be a UTC instant, such as 2026-09-07T09:00:00Z.");
-        }
-
-        return parsed.Value;
     }
 
     /// <summary>

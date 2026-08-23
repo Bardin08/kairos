@@ -211,6 +211,7 @@ builder.Services.AddScoped<AvailabilityQuery>();
 builder.Services.AddScoped<SlotQuery>();
 builder.Services.AddScoped<BookingWriter>();
 builder.Services.AddScoped<BookingCanceller>();
+builder.Services.AddScoped<BookingMover>();
 builder.Services.AddScoped<ProposalWriter>();
 
 // One adapter resolved through three interfaces, and one instance per request rather than three:
