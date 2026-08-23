@@ -105,12 +105,10 @@ public sealed record BookingResponse(
 /// finished rather than as an error.
 /// </summary>
 /// <param name="TimeZone">
-/// The BOOKER's own zone, as they gave it, and never the organizer's — the same field
-/// <see cref="BookingResponse.TimeZone"/> carries and for the same reason. This is the third
-/// surface an invitee sees about one booking: the proposal mail formats against
-/// <c>booker.TimeZoneId</c>, the manage page renders <c>booking.timeZone</c>, and a page that
-/// answered the organizer's here would print a different clock time for the same instant in the
-/// tab opened from that mail.
+/// The BOOKER's own zone, as they gave it, never the organizer's — the field
+/// <see cref="BookingResponse.TimeZone"/> carries, for the same reason. The proposal mail formats
+/// against <c>booker.TimeZoneId</c> and the manage page renders <c>booking.timeZone</c>, so the
+/// organizer's zone here would print a different clock time for the same instant.
 /// </param>
 public sealed record ProposalResponse(
     Guid BookingId,
@@ -403,14 +401,13 @@ public static class BookingsEndpoints
 
         var timeZoneId = await OrganizerZoneAsync(context, cancellationToken);
 
-        // After the claim and never before it. The claim is what decides whether this request is
-        // the one that answered, and a mail sent ahead of it would tell the operator about a
-        // refusal that another caller had already turned into an acceptance.
+        // After the claim and never before it: the claim decides whether this request is the one
+        // that answered, and a mail ahead of it would tell the operator about a refusal another
+        // caller had already turned into an acceptance.
         //
-        // Uncancellable, for the reason CloseIfOpenAsync is: the decline is committed by the time
-        // this runs. The mailer's rule-14 swallow is guarded by the caller's token, so an invitee
-        // who closes the tab would push the failure back out through here instead — and there is
-        // no sweep to catch it, since the sweep only ever looks at holds that lapsed.
+        // Uncancellable, for CloseIfOpenAsync's reason: the decline is committed by the time this
+        // runs. The mailer's rule-14 swallow is guarded by the caller's token, so an invitee who
+        // closes the tab pushes the failure back out through here, and no sweep catches it.
         await operators.SendAsync(
             proposal.Booking, proposal, OperatorNotice.Declined, timeZoneId, CancellationToken.None);
 
@@ -484,12 +481,12 @@ public static class BookingsEndpoints
     /// </summary>
     private static void RequireOpen(BookingProposal proposal, Instant now)
     {
-        // Through StateAt rather than comparing ExpiresAt here, which is what this used to do.
-        // That comparison was a second copy of the fold, four hundred lines from the one whose own
-        // docstring says two copies drift — and it had already drifted in one direction: a hold
-        // the sweeper HAD closed answered proposal_closed while an identical unswept one answered
-        // proposal_expired, so which sentence the invitee read depended on whether a background
-        // service had been round yet. Now the state decides and the sweeper cannot change it.
+        // Through StateAt rather than comparing ExpiresAt here, which is what this used to do. That
+        // comparison was a second copy of the fold, four hundred lines from the one whose docstring
+        // says two copies drift — and it had drifted: a hold the sweeper HAD closed answered
+        // proposal_closed while an identical unswept one answered proposal_expired, so the sentence
+        // the invitee read depended on whether a background service had been round. Now the state
+        // decides.
         var state = ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now);
 
         if (state == ProposalState.Expired)
@@ -511,11 +508,10 @@ public static class BookingsEndpoints
     /// Untracked, rule 8: every write to a proposal on these routes is its own conditional UPDATE,
     /// so nothing needs a tracked row and nothing can accidentally save the booking in the Include.
     ///
-    /// The participants ride along for two readers now — <see cref="BookerZoneOf"/>, which every
-    /// response here is rendered in, and <see cref="OperatorMailer"/>, which names the invitee.
-    /// The second is the one that fails quietly: an absent collection makes the composer throw
-    /// inside the mailer's own rule-14 swallow, so the decline still succeeds and the operator is
-    /// simply never told.
+    /// The participants ride along for two readers now — <see cref="BookerZoneOf"/>, which renders
+    /// every response here, and <see cref="OperatorMailer"/>, which names the invitee. The second
+    /// fails quietly: an absent collection makes the composer throw inside the mailer's rule-14
+    /// swallow, so the decline succeeds and the operator is never told.
     /// </remarks>
     private static async Task<BookingProposal> FindProposalAsync(
         KairosDbContext context,

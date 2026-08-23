@@ -68,20 +68,17 @@ public sealed record ProposeMeetingRequest
 public sealed record MeetingLinkResponse(Guid Id, string Name);
 
 /// <summary>
-/// The newest proposal on a meeting, whatever became of it, or absent when nobody ever suggested
-/// anything.
+/// The newest proposal on a meeting, whatever became of it, or absent when there was never one.
 /// </summary>
 /// <remarks>
 /// The newest and only the newest, because the row draws one thing: an open hold is a Withdraw
-/// button, and a closed one is at most a sentence saying what happened. An operator who proposed
-/// again after a decline is asking about the new suggestion, so answering with the old one would
-/// print "they declined" over a question still being asked.
+/// button, a closed one at most a sentence. Answering with an older one would print "they declined"
+/// over a question the operator is still asking.
 /// </remarks>
 /// <param name="State">
-/// The lower-cased <see cref="ProposalState"/> as of now, with the clock folded in exactly as
-/// <c>GET /bookings/proposals/{token}</c> folds it — see <see cref="ProposalWriter.StateAt"/>. It
-/// is never <c>accepted</c> on a row the operator is looking at without the row also having moved,
-/// since accepting is what moves it.
+/// The lower-cased <see cref="ProposalState"/> as of now, with the clock folded in as
+/// <see cref="ProposalWriter.StateAt"/> folds it. Never <c>accepted</c> on a row the operator is
+/// looking at, since accepting is what moves the meeting.
 /// </param>
 public sealed record MeetingProposalResponse(Guid Id, string Start, string ExpiresAt, string State);
 
@@ -98,10 +95,9 @@ public sealed record MeetingProposalResponse(Guid Id, string Start, string Expir
 /// question asked after a no-show.
 /// </param>
 /// <param name="Slug">
-/// The link's slug, beside its id and not instead of it. The row's propose panel reads the times
-/// it may offer from <c>GET /links/{slug}/slots</c>, which is keyed on the slug and takes no id at
-/// all — so without this the operator's picker cannot ask the question, and the alternative is a
-/// second round trip per row to turn an id back into the slug the list already had in hand.
+/// The link's slug, beside its id and not instead of it: the row's propose panel reads the times it
+/// may offer from <c>GET /links/{slug}/slots</c>, which takes no id at all. Without it the picker
+/// cannot ask, and the alternative is a round trip per row to turn an id back into the slug.
 /// </param>
 /// <param name="Proposal">
 /// The newest hold on this meeting, or null when there has never been one. Null is what the row

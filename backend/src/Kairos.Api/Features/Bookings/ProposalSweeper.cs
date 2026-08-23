@@ -8,29 +8,23 @@ using NodaTime;
 
 namespace Kairos.Api.Features.Bookings;
 
-/// <summary>
-/// Turns lapsed proposals into closed ones and tells the operator.
-/// </summary>
+/// <summary>Turns lapsed proposals into closed ones and tells the operator.</summary>
 /// <remarks>
-/// It is not what makes the expiry correct, and that is the design. Every conflict reader compares
-/// <see cref="BookingProposal.ExpiresAt"/> against the clock itself, so a hold stops holding at the
-/// instant it lapses whether or not this has run — a sweeper that is late, dead, or never started
-/// makes mail late and never makes availability wrong. What it owns is the part a WHERE clause
-/// cannot do: noticing, so somebody can be told.
+/// It is not what makes the expiry correct, and that is the design: every conflict reader compares
+/// <see cref="BookingProposal.ExpiresAt"/> against the clock itself, so a hold stops holding the
+/// instant it lapses whether or not this has run, and a sweeper that is late or dead makes mail
+/// late rather than availability wrong. What it owns is what a WHERE clause cannot do: noticing.
 ///
 /// Nor does re-proposing wait on it, though for one pull request it did. The filtered unique index
-/// over BookingId WHERE State = Open is a row rather than a predicate, so it is the one reader a
-/// clock cannot be folded into: a lapsed hold left Open goes on occupying the single slot the next
-/// suggestion needs. <see cref="ProposalWriter.ExpireLapsedAsync"/> closes it on the propose route
-/// itself, and deliberately leaves <see cref="BookingProposal.NotifiedAt"/> null — which hands the
-/// notice to this service rather than swallowing it, and is why the query below asks about that
-/// column rather than about the state alone. So nothing waits on this tick: a row it has not
-/// reached yet costs a late mail and nothing else.
+/// over BookingId WHERE State = Open is a row rather than a predicate, so a lapsed hold left Open
+/// occupies the single slot the next suggestion needs;
+/// <see cref="ProposalWriter.ExpireLapsedAsync"/> closes it on the propose route and leaves
+/// <see cref="BookingProposal.NotifiedAt"/> null, which is why the query below asks about that
+/// column rather than the state alone.
 ///
 /// Registered beside <see cref="Integrations.Webhooks.MeetingEndedPoller"/> and ticking on its
-/// minute. It does not copy that service's sweep-at-startup and does not need to: a tick missed
-/// there is a meeting.ended nobody queued, and a tick missed here is a late mail about a meeting
-/// that has not moved.
+/// minute, without that service's sweep-at-startup: a tick missed there is a meeting.ended nobody
+/// queued, and a tick missed here is a late mail about a meeting that has not moved.
 /// </remarks>
 public sealed class ProposalSweeper(
     IServiceScopeFactory scopes,
@@ -39,20 +33,17 @@ public sealed class ProposalSweeper(
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
 
-    /// <summary>
-    /// How many notices one tick will attempt.
-    /// </summary>
+    /// <summary>How many notices one tick will attempt.</summary>
     /// <remarks>
-    /// Derived rather than picked. A send to a relay that never answers costs the whole of
-    /// <see cref="EmailSender.SendTimeout"/> and they are made one at a time, so this is the
-    /// largest batch whose worst case still fits inside the interval that schedules it. What it
-    /// buys is the one bound this service needs: a dead relay costs one tick's work per tick,
-    /// whatever the backlog is and however old the deployment is — where an uncapped sweep would
-    /// retry every unannounced lapse ever recorded, every minute, each attempt blocking for
-    /// fifteen seconds.
+    /// Derived rather than picked: a send to a relay that never answers costs the whole of
+    /// <see cref="EmailSender.SendTimeout"/> and they go one at a time, so this is the largest batch
+    /// whose worst case still fits the interval that schedules it. That buys the one bound this
+    /// service needs — a dead relay costs one tick's work per tick, whatever the backlog, where an
+    /// uncapped sweep would retry every unannounced lapse ever recorded, every minute, each attempt
+    /// blocking for fifteen seconds.
     ///
-    /// The cap delays and does not starve, because the batch is taken oldest lapse first: a
-    /// backlog drains at this rate per minute as soon as the relay answers again.
+    /// The cap delays and does not starve: the batch is oldest lapse first, so a backlog drains at
+    /// this rate per minute once the relay answers again.
     /// </remarks>
     public static readonly int MaxNoticesPerTick = (int)(TickInterval / EmailSender.SendTimeout);
 
@@ -76,8 +67,7 @@ public sealed class ProposalSweeper(
     }
 
     /// <summary>
-    /// One pass. Public so a test can drive it without a timer — the loop above is the schedule,
-    /// this is the work.
+    /// One pass. Public so a test can drive it without a timer: the loop above is the schedule.
     /// </summary>
     public async Task SweepAsync(CancellationToken cancellationToken)
     {
@@ -91,15 +81,13 @@ public sealed class ProposalSweeper(
         var now = clock.GetCurrentInstant().ToUnixTimeSeconds();
 
         // Open and lapsed, plus anything already Expired that nobody has been told about — a tick
-        // that crashed between the save and the send left exactly that, and it is the reason
-        // NotifiedAt exists rather than the state alone deciding. An answered proposal is not on
-        // this list however long ago its expiry ran out: nobody needs telling that nobody replied
-        // to a suggestion that was declined.
-        // Tracked, and the one read in this feature that is — every other proposal read is
-        // AsNoTracking under rule 8, because every other one writes through a conditional UPDATE
-        // that names its own predicate. This one has no predicate to write: it closes rows it has
-        // already decided about, twice each, and a change tracker is what lets the second write
-        // touch the marker alone instead of restating the state beside it.
+        // that crashed between the save and the send leaves exactly that, which is why NotifiedAt
+        // exists rather than the state alone deciding. An answered proposal is never on this list:
+        // nobody needs telling that nobody replied to a suggestion that was declined.
+        // Tracked, the one read in this feature that is: every other proposal read is AsNoTracking
+        // under rule 8 because it writes through a conditional UPDATE naming its own predicate.
+        // This one closes rows it has already decided about, twice each, and the change tracker is
+        // what lets the second write touch the marker alone.
         var lapsed = await context.BookingProposals
             .Include(proposal => proposal.Booking)
             .ThenInclude(booking => booking.Link)
@@ -120,19 +108,17 @@ public sealed class ProposalSweeper(
             return;
         }
 
-        // The organizer's own zone, because the organizer is who these messages are addressed to.
-        // Read once per sweep rather than once per proposal: it is one row that changes when the
-        // operator changes it, and a sweep is a single moment.
+        // The organizer's own zone, since these messages are addressed to the organizer. Read once
+        // per sweep rather than once per proposal: one row, and a sweep is a single moment.
         var timeZoneId = await context.Settings
             .Where(row => row.Id == Settings.SingletonId)
             .Select(row => row.TimeZoneId)
             .SingleAsync(cancellationToken);
 
         // Two saves per row rather than two per sweep, and it is the MARKER save that makes the
-        // difference. Batch that one and its rows have all had their messages sent already, so a
-        // single failed save loses every marker in the batch at once and the next tick mails the
-        // lot a second time. Per row, a marker lands with the message it belongs to and a failure
-        // costs the row it happened on.
+        // difference: batched, its rows have all been sent already, so one failed save loses every
+        // marker at once and the next tick mails the lot again. Per row, a marker lands with the
+        // message it belongs to and a failure costs the row it happened on.
         foreach (var proposal in lapsed)
         {
             proposal.State = ProposalState.Expired;
@@ -147,20 +133,17 @@ public sealed class ProposalSweeper(
 
             if (!announced)
             {
-                // The relay would not take it. The row keeps a null marker, which is the honest
-                // record — nobody has been told — and the next tick finds it on the query's second
-                // arm and tries again. Writing the marker here anyway is the failure this whole
-                // ordering exists to prevent, and it is the likelier one by far: a process dying
-                // between two adjacent saves is rare, and a relay having a bad minute is a Tuesday.
+                // The relay would not take it. The row keeps a null marker, the honest record, and
+                // the next tick finds it on the query's second arm. Writing the marker anyway is the
+                // failure this ordering exists to prevent, and the likelier one by far: a process
+                // dying between two adjacent saves is rare, a relay having a bad minute is a Tuesday.
                 continue;
             }
 
-            // The marker last, and only now. A process that dies in the gap above leaves the row
-            // Expired and unmarked, which the second arm picks up in exactly the same way — so
-            // both failures land on the same side. This is at-least-once on purpose: a duplicate
-            // "nobody answered your suggestion" is an annoyance, and a lost one is an operator who
-            // never learns their suggestion died over a meeting they still believe is being
-            // decided.
+            // The marker last, and only now. A process dying in the gap above leaves the row Expired
+            // and unmarked, which the second arm picks up the same way, so both failures land on the
+            // same side. At-least-once on purpose: a duplicate "nobody answered your suggestion" is
+            // an annoyance, a lost one is an operator who never learns the suggestion died.
             proposal.NotifiedAt = now;
             await context.SaveChangesAsync(cancellationToken);
         }
