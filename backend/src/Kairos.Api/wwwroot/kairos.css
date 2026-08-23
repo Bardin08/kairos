@@ -1672,53 +1672,59 @@
     border-top: var(--border-width) solid var(--border-subtle);
   }
 
-  /* The new rules this surface adds, and the argument for each. Everything
-     inside the panel is existing classes — .card with .card-pad-sm for the
-     surface, .rowgroup for the list, .prose and .fine for the two lines, .btn
-     for the action. What kairos.css had nothing for is a surface that hangs off
-     a control: .card has no positioning at all, and there is no popover, banner
-     or anchored anything in this file. Rule 17 exception, granted deliberately
-     and named here. */
-  .alertpanel { position: relative; }
+  /* Two rules, and the argument for each — rule 17 exception, granted
+     deliberately and named here, as both previous exceptions were.
 
-  /* .icon-btn is a 44x44 grid built for a single child. This trigger has two —
-     the mark and the count — so under place-items they land in two implicit rows
-     and overflow the box. Widened here rather than loosening .icon-btn, which
-     every other icon button in the product shares. */
-  .alertpanel > .icon-btn {
-    grid-auto-flow: column;
-    gap: var(--space-2);
-    width: auto;
-    min-width: var(--tap);
-    padding-inline: var(--space-2);
+     .banner: a tinted strip with a danger border in the content column. `.card`
+     is the closest existing thing and carries neither the tint nor the border
+     colour, and reaching for it plus inline colours would break the
+     `inline-styles` check scripts/measure-ui.mjs enforces.
+
+     .condition-row: the collapsed marker. It cannot reuse `.nav a` — every rule
+     in that block is written for anchors, and this is a button, because it
+     expands the banner rather than navigating anywhere.
+
+     What they replace: four rules including a media query, which existed only to
+     keep an anchored popover legible inside a scroll container. The line count is
+     about even (+48/-45); what actually went is the positioning, the z-index and
+     the second layout for phones — none of which a strip in the content column
+     needs. */
+  .banner {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    margin-bottom: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: var(--status-danger-bg);
+    border: var(--border-width) solid var(--status-danger-fg);
   }
 
-  /* Fixed rather than absolute, and this was measured rather than chosen: .rail
-     is a scroll container (overflow-y: auto, so the operator can always reach
-     Settings), and a scroll container clips an absolutely positioned descendant
-     at its edge — which cut this alert's own sentence in half at 240px. The
-     trigger sits at the bottom of the viewport in both layouts, so anchoring the
-     panel to the viewport costs nothing and cannot be clipped by an ancestor
-     that gains a scrollbar later. */
-  .alertpanel > [role="status"] {
-    position: fixed;
-    bottom: calc(var(--tap) + var(--space-6));
-    inset-inline-start: var(--space-4);
-    width: min(22rem, calc(100vw - var(--space-6)));
-    z-index: 20;
+  .banner-mark { flex: none; color: var(--status-danger-fg); }
+  .banner-mark svg { width: 20px; height: 20px; display: block; }
+  .banner-title { font-weight: var(--weight-semi); color: var(--text-primary); }
+
+  .condition-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 38px;
+    padding-inline: var(--space-3);
+    border-radius: var(--radius-md);
+    color: var(--status-danger-fg);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    background: none;
+    border: 0;
+    cursor: pointer;
   }
 
-  /* On a phone it hangs off the tab bar, which is taller than the rail's foot
-     because the secondary destination sits in a row of its own. Same 900px
-     breakpoint the rail and the tab bar already swap at, so that number stays in
-     one place. */
-  @media (max-width: 899px) {
-    .alertpanel > [role="status"] {
-      bottom: calc((var(--tap) * 2) + var(--space-4));
-      inset-inline-start: var(--space-3);
-      inset-inline-end: var(--space-3);
-      width: auto;
-    }
+  .condition-row svg { width: 17px; height: 17px; flex: none; }
+  .condition-row:hover { background: var(--status-danger-bg); }
+  .condition-row:focus-visible {
+    outline: 2px solid var(--status-danger-fg);
+    outline-offset: -2px;
   }
 
   .nav { display: grid; gap: 2px; }
