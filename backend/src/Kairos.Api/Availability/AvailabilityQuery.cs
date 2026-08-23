@@ -49,7 +49,7 @@ public sealed class AvailabilityQuery(KairosDbContext context)
                     && replacement.Date >= from
                     && replacement.Date <= to));
 
-    /// <summary>Windows in the organizer's wall-clock time, for the inclusive range from..to.</summary>
+    /// <summary>The range is inclusive of both ends.</summary>
     public async Task<LocalWindow[]> GetWindowsAsync(
         Guid patternId,
         LocalDate from,
