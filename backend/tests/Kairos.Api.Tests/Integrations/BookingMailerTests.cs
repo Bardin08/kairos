@@ -31,6 +31,14 @@ namespace Kairos.Api.Tests.Integrations;
 public class BookingMailerTests
 {
     private const string ManageToken = "3f2504e04f8911d39a0c0305e82c3301";
+    private const string ProposalToken = "0f1e2d3c";
+
+    /// <summary>
+    /// <see cref="ProposalExpiry"/> as the invitee reads it — 17:00Z is 19:00 in Warsaw. Spelled
+    /// out rather than formatted here on purpose: formatting it would be this test carrying its
+    /// own copy of the patterns under test, and would pass whatever they were changed to.
+    /// </summary>
+    private const string Deadline = "do not answer by Monday 7 September 2026, 19:00";
     private const string BaseUrl = "https://kairos.example.com";
     private const string ManageUrlFragment = "/manage/";
     private const string CancellationReason = "The client moved the workshop a week.";
@@ -62,6 +70,16 @@ public class BookingMailerTests
     private const string BlankLineRun = "\n\n\n";
 
     private static readonly Instant Start = Instant.FromUtc(2026, 9, 7, 7, 0);
+
+    /// <summary>A day after the booking, and at an hour Warsaw renders differently from UTC.</summary>
+    private static readonly Instant ProposedStart = Instant.FromUtc(2026, 9, 8, 11, 0);
+
+    /// <summary>
+    /// After the meeting the proposal is about and before the time it offers, which is the only
+    /// window a deadline can honestly sit in. It was a day BEFORE the booking until the sentence
+    /// below started being asserted, and nothing noticed.
+    /// </summary>
+    private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 7, 17, 0);
 
     [Fact]
     public void Compose_Always_AttachesTheIcsAsACalendarRequest()
@@ -132,6 +150,26 @@ public class BookingMailerTests
         ics.ShouldContain("SEQUENCE:2");
         CalendarPart(message).ContentType.Parameters["method"].ShouldBe("CANCEL");
         message.Subject.ShouldStartWith("Cancelled:");
+    }
+
+    /// <summary>
+    /// The mail an accepted proposal sends. It has no manage token either — the invitee arrived
+    /// holding the proposal's token, not theirs — and the block is dropped the same way. What must
+    /// survive that is the whole reason the message goes: a REQUEST at the advanced SEQUENCE is
+    /// what moves the event already sitting in their calendar.
+    /// </summary>
+    [Fact]
+    public void Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
+    {
+        var booking = Booking(sequence: 1);
+
+        var message = Compose(booking, notice: BookingNotice.Reschedule, manageToken: null);
+        var ics = Ics(message);
+
+        Plain(message).ShouldNotContain(ManageUrlFragment);
+        ics.ShouldContain($"UID:{booking.Id}");
+        ics.ShouldContain("SEQUENCE:1");
+        ics.ShouldContain("METHOD:REQUEST");
     }
 
     /// <summary>
@@ -300,6 +338,44 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// The load-bearing assertion of the whole notice: a proposal carries NO calendar part. An
+    /// .ics in this message is the move it is asking permission for — the invitee's client would
+    /// apply it, and the meeting would have moved without anybody agreeing to it.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_CarriesNoCalendarPartAndTheDecisionLink()
+    {
+        var message = ComposeProposal();
+
+        message.BodyParts.ShouldHaveSingleItem().ShouldBe(PlainPart(message));
+        message.Attachments.ShouldBeEmpty();
+        Plain(message).ShouldContain($"{BaseUrl}/proposal/{ProposalToken}");
+    }
+
+    /// <summary>
+    /// The booker's zone again, and pinned separately from the confirmation's because this is a
+    /// second composer resolving it a second time. 11:00Z is 13:00 in Warsaw, and an hour the
+    /// invitee is asked to agree to is the one thing on the page they act on.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_RendersTheProposedTimesInTheBookersOwnZone()
+    {
+        var body = Plain(ComposeProposal());
+
+        body.ShouldContain("13:00-13:25");
+        body.ShouldContain(BookerZone);
+    }
+
+    /// <summary>
+    /// The sentence the whole hold rests on. An invitee who is not told when the offer lapses has
+    /// no reason to answer today, and the deadline is the only thing in the message that says the
+    /// meeting stays put if they do nothing.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_SaysWhenTheOfferLapses() =>
+        Plain(ComposeProposal()).ShouldContain(Deadline);
+
+    /// <summary>
     /// This deployment's state today, and the one that must never throw: no relay configured at
     /// all. The mailer is called on the booking's own request, so anything it raises here is a
     /// booking that answers 500 because nobody has set up SMTP yet.
@@ -391,6 +467,33 @@ public class BookingMailerTests
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }
+
+    /// <summary>Composed, written and parsed back, exactly as <see cref="Compose"/> is.</summary>
+    private static MimeMessage ComposeProposal()
+    {
+        var booking = Booking();
+        using var stream = new MemoryStream();
+        Mailer(Options(BaseUrl))
+            .ComposeProposal(booking, Proposal(booking), ProposalToken)
+            .WriteTo(stream);
+        stream.Position = 0;
+        return MimeMessage.Load(stream);
+    }
+
+    /// <summary>
+    /// An open proposal against <paramref name="booking"/>. Only the instants the composer reads
+    /// carry anything; the hash is required by the entity and never looked at here, because
+    /// nothing in this file resolves a token.
+    /// </summary>
+    private static BookingProposal Proposal(Booking booking) =>
+        new()
+        {
+            BookingId = booking.Id,
+            StartUtc = ProposedStart.ToUnixTimeSeconds(),
+            EndUtc = (ProposedStart + Duration.FromMinutes(DurationMinutes)).ToUnixTimeSeconds(),
+            ExpiresAt = ProposalExpiry.ToUnixTimeSeconds(),
+            TokenHash = string.Empty,
+        };
 
     /// <summary>
     /// The calendar part's bytes as they were transmitted. Deliberately not <c>TextPart.Text</c>:

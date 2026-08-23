@@ -1,9 +1,9 @@
 namespace Kairos.Api.Integrations.Email;
 
 /// <summary>
-/// Which moment in a booking's life this message is about. Three, because three things happen to
-/// a meeting that the invitee has to be told, and each needs a different iCalendar METHOD and a
-/// different sentence.
+/// Which moment in a booking's life this message is about. One per thing that happens to a
+/// meeting the invitee has to be told about, each needing its own sentence and its own iCalendar
+/// METHOD — or, for a proposal, no calendar part at all.
 /// </summary>
 /// <remarks>
 /// Passed in rather than inferred from the booking, and that is the whole reason this type
@@ -19,4 +19,10 @@ public enum BookingNotice
     Confirmation = 10,
     Reschedule = 20,
     Cancellation = 30,
+
+    /// <summary>
+    /// A new time is being offered and nothing has changed yet. The only notice with no
+    /// iCalendar method, because a calendar part here would perform the move it is asking about.
+    /// </summary>
+    Proposal = 40,
 }

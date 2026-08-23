@@ -1,13 +1,16 @@
 using System.ComponentModel.DataAnnotations;
 
+using Kairos.Api.Availability;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
+using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 using NodaTime;
 using NodaTime.Text;
@@ -51,6 +54,14 @@ public sealed record CancelMeetingRequest
 
     [StringLength(MaxReasonLength)]
     public string Reason { get; init; } = string.Empty;
+}
+
+/// <summary>Where the operator would like the meeting to move. Its length does not change.</summary>
+public sealed record ProposeMeetingRequest
+{
+    /// <summary>One of the strings <c>GET /links/{slug}/slots</c> returned, verbatim.</summary>
+    [Required]
+    public required string Start { get; init; }
 }
 
 /// <summary>One link, as the filter's option list needs it. Not the link admin's shape.</summary>
@@ -125,6 +136,18 @@ public static class MeetingsAdminEndpoints
     /// <summary><c>to</c> is before <c>from</c>. An empty list would answer it as "no meetings".</summary>
     public const string RangeInvertedCode = "range_inverted";
 
+    /// <summary>A proposal for this meeting is already open and unanswered.</summary>
+    public const string ProposalOpenCode = "proposal_open";
+
+    /// <summary>
+    /// No relay is configured, so a proposal could be minted and never delivered — and its token
+    /// exists nowhere else, so it could never be answered either.
+    /// </summary>
+    public const string MailUnconfiguredCode = "mail_unconfigured";
+
+    /// <summary>The relay refused it. The hold was handed back rather than left unanswerable.</summary>
+    public const string ProposalUndeliverableCode = "proposal_undeliverable";
+
     private const string FromParameter = "from";
     private const string ToParameter = "to";
 
@@ -134,6 +157,9 @@ public static class MeetingsAdminEndpoints
     {
         group.MapGet("/meetings", ListAsync).WithName("ListMeetings");
         group.MapPost("/meetings/{id:guid}/cancel", CancelAsync).WithName("CancelMeeting");
+        group.MapPost("/meetings/{id:guid}/proposals", ProposeAsync).WithName("ProposeMeeting");
+        group.MapDelete("/meetings/{id:guid}/proposals/{proposalId:guid}", WithdrawAsync)
+            .WithName("WithdrawProposal");
         return group;
     }
 
@@ -269,6 +295,190 @@ public static class MeetingsAdminEndpoints
             ?? throw DomainException.NotFound("Meeting");
 
         await canceller.CancelAsync(booking, request.Reason, manageToken: null, cancellationToken);
+
+        return await OneAsync(context, booking, cancellationToken);
+    }
+
+    /// <summary>
+    /// Offers the invitee a new time and holds it until they answer. Nothing about the meeting
+    /// changes here — that is the whole design: the invitee agreed to a time, so the operator
+    /// proposes and the invitee decides.
+    /// </summary>
+    /// <remarks>
+    /// The instant is run through the same check the public create path uses, so a proposal cannot
+    /// land on an hour the link does not offer or inside another meeting's margin. That is what
+    /// keeps this feature from being a way to write bookings the availability rules would never
+    /// have produced.
+    ///
+    /// Release, check, re-place — <see cref="BookingsEndpoints.RescheduleAsync"/>'s shape, and it
+    /// has to be: a confirmed meeting pads its own slot by the margin, so checking with it still
+    /// confirmed refuses the hour directly after it, and "push it back half an hour" is the
+    /// commonest thing an operator wants to propose. Every path out re-confirms, the failing ones
+    /// included, through the same uncancellable <see cref="BookingsEndpoints.ConfirmAsync"/> the
+    /// invitee's reschedule compensates with.
+    ///
+    /// SAME KNOWN HOLE, and it is not fixed here either. Between the release and the re-place this
+    /// booking is Cancelled on disk while nobody has cancelled it, and
+    /// <see cref="Bookings.BookingCanceller"/> reads that as "off already" and returns having done
+    /// nothing — so a cancel landing in the window answers 200, is undone by the re-confirm, and
+    /// leaves the meeting standing with nothing announced and nobody told. It is the window
+    /// RescheduleAsync already documents; this route widens it to a second caller rather than
+    /// creating it. Closing it means a release distinguishable from a cancellation, which is a
+    /// change with its own tests.
+    /// </remarks>
+    private static async Task<MeetingResponse> ProposeAsync(
+        Guid id,
+        ProposeMeetingRequest request,
+        KairosDbContext context,
+        BookingMover mover,
+        ProposalWriter proposals,
+        BookingMailer mailer,
+        IOptions<EmailOptions> email,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        // Before anything is read and well before anything is released. A proposal is a question,
+        // and the only channel that can carry it is the mail — its token exists nowhere but inside
+        // this call. Minting one on a deployment that cannot send is minting a hold that nobody
+        // can ever lift, so the honest answer is to refuse rather than to swallow.
+        if (!email.Value.IsConfigured)
+        {
+            throw DomainException.Conflict(
+                MailUnconfiguredCode,
+                $"A new time cannot be suggested until {EmailOptions.SectionName} is configured: "
+                + "the invitee is asked by email, and there is no other way to ask them.");
+        }
+
+        var now = clock.GetCurrentInstant();
+        var start = BookingMover.ParseInstant(request.Start);
+
+        var booking = await context.Bookings
+            .Include(row => row.Link)
+            .Include(row => row.Participants)
+            .FirstOrDefaultAsync(row => row.Id == id, cancellationToken)
+            ?? throw DomainException.NotFound("Meeting");
+
+        BookingMover.RequireMovable(booking);
+
+        // Asked before the release rather than left to the index below. A double-submitted form is
+        // the ordinary way this arrives, and answering it without ever setting the booking
+        // Cancelled keeps it out of the window that release opens — the one where a cancel landing
+        // at the same moment reads the meeting as already off and quietly does nothing.
+        if (await HasOpenProposalAsync(context, id, cancellationToken))
+        {
+            throw DomainException.Conflict(
+                ProposalOpenCode, "A proposal for this meeting is already open.");
+        }
+
+        var settings = await context.Settings.AsNoTracking()
+            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
+
+        await mover.ReleaseAndCheckAsync(booking, start, now, compensate: null, cancellationToken);
+
+        var (proposal, token) = proposals.Add(booking, start, settings.ProposalHoldHours);
+
+        try
+        {
+            // The restore carries the insert with it. A hold is invisible while the booking under
+            // it is not confirmed, so committing these apart would leave a window in which the
+            // slot just promised to the invitee is held by nothing at all. The booking goes back
+            // where it was rather than moving: proposing is asking, and asking moves nothing.
+            await mover.RestoreAsync(booking);
+        }
+        catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
+        {
+            // The filtered unique index, and now genuinely the backstop: the check above answers
+            // the ordinary case, so reaching here means two requests were inside this method
+            // together. The insert is dropped and the booking put back on its own, since the save
+            // that failed carried both.
+            //
+            // Detaching the proposal alone is enough only because Booking has no navigation to its
+            // proposals — a fact that lives in another file. Add one, and EF will fix it up on
+            // detach and the row will ride along on the restore's save after all.
+            context.Entry(proposal).State = EntityState.Detached;
+            await mover.RestoreAsync(booking);
+
+            // WHICH index fired matters, because this method can violate two. The filtered one on
+            // BookingId means somebody proposed first; the one on TokenHash means 32 random bytes
+            // repeated, and reporting that as "a proposal is already open" would send the operator
+            // looking for a proposal that does not exist.
+            if (!await HasOpenProposalAsync(context, id, cancellationToken))
+            {
+                throw;
+            }
+
+            throw DomainException.Conflict(
+                ProposalOpenCode, "A proposal for this meeting is already open.", exception);
+        }
+
+        // After the commit, so nothing mails a proposal that does not exist. The plaintext token
+        // is in hand only here, for the length of this call — the database holds its SHA-256,
+        // which is exactly why the send happens on this thread rather than behind the outbox.
+        if (!await mailer.SendProposalAsync(booking, proposal, token, cancellationToken))
+        {
+            // And exactly why a swallowed failure cannot stand here. The hold is committed, the
+            // token is already gone, and there is no second chance to reach the invitee — so the
+            // slot goes straight back and the operator is told. Uncancellable for ConfirmAsync's
+            // reason: this compensates a write the request has already made, and a caller who hung
+            // up must not leave a hold standing that nothing can ever answer.
+            proposal.State = ProposalState.Withdrawn;
+            proposal.DecidedAt = now.ToUnixTimeSeconds();
+            await context.SaveChangesAsync(CancellationToken.None);
+
+            throw DomainException.Conflict(
+                ProposalUndeliverableCode,
+                "The suggestion could not be sent, so nothing is being held. Try again.");
+        }
+
+        return await OneAsync(context, booking, cancellationToken);
+    }
+
+    private static Task<bool> HasOpenProposalAsync(
+        KairosDbContext context,
+        Guid bookingId,
+        CancellationToken cancellationToken) =>
+        context.BookingProposals.AsNoTracking()
+            .AnyAsync(
+                row => (row.BookingId == bookingId) && (row.State == ProposalState.Open),
+                cancellationToken);
+
+    /// <summary>
+    /// Takes a proposal back. Without it, an operator who names the wrong time holds a slot
+    /// hostage for the whole hold and cannot offer the right one, because only one proposal may be
+    /// open at a time.
+    /// </summary>
+    private static async Task<MeetingResponse> WithdrawAsync(
+        Guid id,
+        Guid proposalId,
+        KairosDbContext context,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var exists = await context.BookingProposals.AsNoTracking()
+            .AnyAsync(row => (row.Id == proposalId) && (row.BookingId == id), cancellationToken);
+
+        if (!exists)
+        {
+            throw DomainException.NotFound("Proposal");
+        }
+
+        // Conditional on the row still being Open rather than on a read a statement earlier, so an
+        // invitee answering at the same moment cannot have their answer written over by this. The
+        // count is deliberately not checked: withdrawing something already closed is what a
+        // double-clicked button asks for, and the honest answer to it is the row as it stands.
+        var decidedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+        await context.BookingProposals
+            .Where(row => (row.Id == proposalId) && (row.State == ProposalState.Open))
+            .ExecuteUpdateAsync(
+                set => set
+                    .SetProperty(row => row.State, ProposalState.Withdrawn)
+                    .SetProperty(row => row.DecidedAt, decidedAt),
+                cancellationToken);
+
+        var booking = await context.Bookings.AsNoTracking()
+            .Include(row => row.Link)
+            .Include(row => row.Participants)
+            .SingleAsync(row => row.Id == id, cancellationToken);
 
         return await OneAsync(context, booking, cancellationToken);
     }

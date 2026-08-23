@@ -38,6 +38,9 @@ public sealed class BookingMailer(
     /// <summary>The route the frontend claims: <c>/manage/:token</c>, keyed on the token alone.</summary>
     private const string ManagePath = "manage";
 
+    /// <summary>And <c>/proposal/:token</c>, keyed on the proposal's own token.</summary>
+    private const string ProposalPath = "proposal";
+
     /// <summary>
     /// What the operator's words are printed under. Public so a test can assert its absence: the
     /// claim being made is that an empty reason leaves no heading, and a test spelling the string
@@ -77,9 +80,16 @@ public sealed class BookingMailer(
     /// update without a word, nobody reports a reschedule that did not arrive, and the invitee
     /// turns up at the old time.
     /// </summary>
+    /// <remarks>
+    /// The token is nullable for the same reason a cancellation's is, and it became so when a
+    /// second caller appeared: the invitee's own reschedule arrived holding their manage link, but
+    /// accepting a proposal arrives holding the PROPOSAL's token, and the manage one cannot be
+    /// recovered from a stored SHA-256. The mail goes without the link rather than not going —
+    /// the invitee still has it in the confirmation that minted it.
+    /// </remarks>
     public Task SendRescheduleAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
 
@@ -89,10 +99,10 @@ public sealed class BookingMailer(
     /// one marked CONFIRMED in place however the message was labelled.
     /// </summary>
     /// <remarks>
-    /// The only notice whose token is nullable, and the only one where it can be. A cancellation
-    /// the operator triggered has no plaintext token to put in the mail and no way to recover one.
-    /// The other two keep <c>string</c> deliberately: a confirmation shipped without its manage
-    /// link is unrecoverable, since that token never appears in any later response.
+    /// A cancellation the operator triggered has no plaintext token to put in the mail and no way
+    /// to recover one. The confirmation keeps <c>string</c> deliberately: it is the one message
+    /// that mints the manage token, and shipped without the link that token never appears in any
+    /// later response.
     /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
@@ -101,7 +111,42 @@ public sealed class BookingMailer(
         SendAsync(BookingNotice.Cancellation, booking, manageToken, cancellationToken);
 
     /// <summary>
-    /// Sends the notice, or does not, and either way returns.
+    /// The operator has offered a new time. Nothing has moved; the invitee decides.
+    /// </summary>
+    /// <returns>
+    /// Whether it went. The one notice that reports this, and the one that has to: a proposal's
+    /// token exists only inside the call that minted it, so a hold whose mail was swallowed can
+    /// never be answered by anybody and holds its slot for the whole window. The other three
+    /// describe a booking that stands on its own whether or not the message arrived, which is what
+    /// rule 14 is about; this one IS the message.
+    /// </returns>
+    public Task<bool> SendProposalAsync(
+        Booking booking,
+        BookingProposal proposal,
+        string proposalToken,
+        CancellationToken cancellationToken) =>
+        SendComposedAsync(
+            BookingNotice.Proposal,
+            booking,
+            () => ComposeProposal(booking, proposal, proposalToken),
+            cancellationToken);
+
+    /// <summary>
+    /// Every notice <see cref="Compose"/> builds — the ones that carry an .ics, and a manage link
+    /// wherever the caller has the plaintext token to build one from.
+    /// </summary>
+    private Task SendAsync(
+        BookingNotice notice,
+        Booking booking,
+        string? manageToken,
+        CancellationToken cancellationToken) =>
+        SendComposedAsync(notice, booking, () => Compose(booking, manageToken, notice), cancellationToken);
+
+    /// <summary>
+    /// Sends the notice, or does not, and says which. Composition is deferred rather than
+    /// passed in already done, so that this stays the one home for the configured check, the try
+    /// and the logging: rule 14 is a promise about every notice, and a second copy of the swallow
+    /// is a second place for one of them to stop keeping it.
     /// </summary>
     /// <remarks>
     /// Ground rule 14, at the only place it can be enforced: the booking has been written, moved
@@ -114,17 +159,17 @@ public sealed class BookingMailer(
     /// What that trades away, said plainly: a failed send is not retried and the invitee gets
     /// nothing. It is logged at Warning with the booking id so the organizer can resend by hand.
     /// The outbox would give retries for free and is the right home for the webhook, but not for
-    /// this: an email row would have to carry the raw manage token in its payload, and Part A
-    /// stores only that token's SHA-256 on purpose. Persisting the plaintext to buy a retry would
-    /// make one database read worth cancel-and-reschedule on every booking in the file. That is
-    /// why all three of these run on the request that caused them, where the plaintext is already
-    /// in hand — from the 201 for a confirmation, and from the URL the invitee just opened for the
-    /// other two.
+    /// this: an email row would have to carry a raw token in its payload, and Part A stores only
+    /// those tokens' SHA-256 on purpose. Persisting the plaintext to buy a retry would make one
+    /// database read worth cancel-and-reschedule on every booking in the file. That is why every
+    /// send runs on the request that caused it, where the plaintext is already in hand — from the
+    /// 201 for a confirmation, from the URL the invitee just opened for a cancel or a move, and
+    /// from the mint itself for a proposal.
     /// </remarks>
-    private async Task SendAsync(
+    private async Task<bool> SendComposedAsync(
         BookingNotice notice,
         Booking booking,
-        string? manageToken,
+        Func<MimeMessage> compose,
         CancellationToken cancellationToken)
     {
         if (!options.Value.IsConfigured)
@@ -134,12 +179,12 @@ public sealed class BookingMailer(
                 EmailOptions.SectionName,
                 booking.Id,
                 notice);
-            return;
+            return false;
         }
 
         try
         {
-            var message = Compose(booking, manageToken, notice);
+            var message = compose();
             var response = await sender.SendAsync(message, cancellationToken);
 
             // Said at Information, not Debug. Silence on the happy path is what let a message
@@ -156,6 +201,7 @@ public sealed class BookingMailer(
                 booking.Sequence,
                 message.MessageId,
                 response);
+            return true;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -165,6 +211,7 @@ public sealed class BookingMailer(
                 + "the invitee has not been told; there is no retry, so resend by hand if it matters.",
                 notice,
                 booking.Id);
+            return false;
         }
     }
 
@@ -252,23 +299,85 @@ public sealed class BookingMailer(
             FileName = AttachmentFileName,
         };
 
-        var message = new MimeMessage
-        {
-            Subject = Subject(notice, booking.Link.Name, start, zone),
-            Body = new Multipart(MixedSubtype)
+        return Envelope(
+            Subject(notice, booking.Link.Name, start, zone),
+            new Multipart(MixedSubtype)
             {
                 new Multipart(AlternativeSubtype) { body, invitation },
                 attachment,
             },
+            organizer,
+            booker);
+    }
+
+    /// <summary>
+    /// The proposal, as plain text and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// No <c>text/calendar</c> part and no attachment, and that is the design rather than an
+    /// omission: a calendar part is applied by the client, so attaching one would move the meeting
+    /// the message exists to ask about. The link is the whole interface — the decision is made by
+    /// opening it, not by an RSVP control the invitee's client would draw.
+    /// </remarks>
+    public MimeMessage ComposeProposal(Booking booking, BookingProposal proposal, string proposalToken)
+    {
+        var settings = options.Value;
+        var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
+        var organizer = MailboxAddress.Parse(settings.From!);
+        var zone = DateTimeZoneProviders.Tzdb[booker.TimeZoneId];
+
+        var current = Instant.FromUnixTimeSeconds(booking.StartUtc).InZone(zone);
+        var proposed = Instant.FromUnixTimeSeconds(proposal.StartUtc).InZone(zone);
+        var proposedEnd = Instant.FromUnixTimeSeconds(proposal.EndUtc).InZone(zone);
+        var expires = Instant.FromUnixTimeSeconds(proposal.ExpiresAt).InZone(zone);
+        var url = ProposalUrl(settings.PublicBaseUrl!, proposalToken);
+
+        var body = new TextPart(TextFormat.Plain);
+        body.SetText(Encoding.UTF8, $"""
+            Hi {booker.Name},
+
+            {booking.Link.Name} is currently {DatePattern.Format(current)} at {TimePattern.Format(current)} ({zone.Id}).
+
+            A new time is being suggested:
+
+            {DatePattern.Format(proposed)}
+            {TimePattern.Format(proposed)}-{TimePattern.Format(proposedEnd)} ({zone.Id})
+
+            Nothing has changed yet. Accept or decline here:
+            {url}
+
+            If you do not answer by {DatePattern.Format(expires)}, {TimePattern.Format(expires)} ({zone.Id}),
+            the suggestion lapses and the meeting stays exactly where it is.
+            """);
+
+        return Envelope($"A new time for {booking.Link.Name}?", body, organizer, booker);
+    }
+
+    /// <summary>
+    /// The parts of a message that do not depend on what it says: who it is from, who it is to,
+    /// and the Message-Id. Shared by both composers because it is identical between them and
+    /// because the Message-Id is the one line here with a reason that is easy to forget.
+    /// </summary>
+    /// <remarks>
+    /// MimeKit otherwise derives the Message-Id's right-hand side from the machine's hostname,
+    /// which in a container is a random hex string and not a resolvable domain. Filters read that
+    /// as a forgery signal, and this whole feature is judged on inbox placement. The sending
+    /// domain is the honest answer and costs one line.
+    /// </remarks>
+    private static MimeMessage Envelope(
+        string subject,
+        MimeEntity body,
+        MailboxAddress organizer,
+        BookingParticipant booker)
+    {
+        var message = new MimeMessage
+        {
+            Subject = subject,
+            Body = body,
         };
 
         message.From.Add(organizer);
         message.To.Add(new MailboxAddress(booker.Name, booker.Email));
-
-        // MimeKit otherwise derives the Message-Id's right-hand side from the machine's hostname,
-        // which in a container is a random hex string and not a resolvable domain. Filters read
-        // that as a forgery signal, and this whole task is about landing in an inbox. The sending
-        // domain is the honest answer and costs one line.
         message.MessageId = MimeUtils.GenerateMessageId(organizer.Domain);
 
         return message;
@@ -282,6 +391,22 @@ public sealed class BookingMailer(
     /// </summary>
     private static string ManageUrl(string baseUrl, string manageToken) =>
         $"{baseUrl.TrimEnd('/')}/{ManagePath}/{Uri.EscapeDataString(manageToken)}";
+
+    /// <summary>The same shape one path along: the proposal's token, and nothing else.</summary>
+    private static string ProposalUrl(string baseUrl, string proposalToken) =>
+        $"{baseUrl.TrimEnd('/')}/{ProposalPath}/{Uri.EscapeDataString(proposalToken)}";
+
+    /// <summary>
+    /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
+    /// <see cref="ComposeProposal"/> instead. It is spelled out anyway because the discard arm's
+    /// "unknown booking notice" is a lie for this one — the notice is known and this is the wrong
+    /// composer for it, which is an instruction rather than a puzzle.
+    /// </summary>
+    private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice) =>
+        new(
+            nameof(notice),
+            notice,
+            $"A proposal carries no calendar part; compose it with {nameof(ComposeProposal)}.");
 
     /// <summary>
     /// A confirmation and a reschedule are both REQUEST — the second is the first at a new time,
@@ -304,6 +429,7 @@ public sealed class BookingMailer(
             BookingNotice.Confirmation => "Confirmed",
             BookingNotice.Reschedule => "Moved",
             BookingNotice.Cancellation => "Cancelled",
+            BookingNotice.Proposal => throw ComposedElsewhere(notice),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
@@ -351,6 +477,7 @@ public sealed class BookingMailer(
             BookingNotice.Cancellation =>
                 ($"{linkName} has been cancelled. It was:",
                     "The attached invitation removes it from your calendar."),
+            BookingNotice.Proposal => throw ComposedElsewhere(notice),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 

@@ -5,8 +5,12 @@ namespace Kairos.Api.Shared;
 /// code and knows nothing about HTTP — no status code, no ASP.NET types, nothing that would
 /// stop this exception being thrown from a background job or a CLI.
 /// </summary>
-public sealed class DomainException(DomainErrorKind kind, string code, string message)
-    : Exception(message)
+public sealed class DomainException(
+    DomainErrorKind kind,
+    string code,
+    string message,
+    Exception? innerException = null)
+    : Exception(message, innerException)
 {
     public DomainErrorKind Kind { get; } = kind;
 
@@ -24,6 +28,12 @@ public sealed class DomainException(DomainErrorKind kind, string code, string me
     public static DomainException Invalid(string code, string message) =>
         new(DomainErrorKind.Invalid, code, message);
 
-    public static DomainException Conflict(string code, string message) =>
-        new(DomainErrorKind.Conflict, code, message);
+    /// <summary>
+    /// A conflict, optionally carrying what made it one. The inner exception never reaches the
+    /// caller — <see cref="DomainExceptionHandler"/> answers with the code and the message alone —
+    /// but it is what the log line has to say when the conflict was recognised from a database
+    /// error rather than decided in the open.
+    /// </summary>
+    public static DomainException Conflict(string code, string message, Exception? cause = null) =>
+        new(DomainErrorKind.Conflict, code, message, cause);
 }

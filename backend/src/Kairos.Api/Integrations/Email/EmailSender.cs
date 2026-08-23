@@ -22,8 +22,14 @@ namespace Kairos.Api.Integrations.Email;
 /// A connection per message rather than a pooled one. A self-hosted single-organizer scheduler
 /// sends a handful of messages a day, and a client held open across hours is a client that has
 /// to notice the relay dropped it.
+///
+/// Open and <see cref="SendAsync"/> virtual, which does not contradict the paragraph above. What
+/// is refused is a mock standing in for this class in a test OF this class; what is allowed is a
+/// substitute in a test of a caller that has to do something with the answer. The propose route
+/// is one: it gives a held slot back when the relay refuses, and reaching that branch through a
+/// real socket would mean a test that waits out a connect timeout to assert a compensation.
 /// </remarks>
-public sealed class EmailSender(IOptions<EmailOptions> options)
+public class EmailSender(IOptions<EmailOptions> options)
 {
     /// <summary>
     /// Bounded because this runs on the booking's own request thread. Long enough that a relay
@@ -43,7 +49,7 @@ public sealed class EmailSender(IOptions<EmailOptions> options)
     /// nothing on this path said otherwise; a queue id in the log is what makes that question
     /// answerable instead of arguable.
     /// </remarks>
-    public async Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken)
+    public virtual async Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken)
     {
         var relay = options.Value;
 
