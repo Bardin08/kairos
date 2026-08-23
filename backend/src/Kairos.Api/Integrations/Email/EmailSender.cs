@@ -37,7 +37,12 @@ public class EmailSender(IOptions<EmailOptions> options)
     /// costs the booker a pause rather than a browser timeout on a booking that was already
     /// written.
     /// </summary>
-    private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(15);
+    /// <remarks>
+    /// Public because it is the cost of one send against a relay that never answers, and a caller
+    /// on a schedule has to budget against it rather than guess —
+    /// <see cref="Features.Bookings.ProposalSweeper"/> sizes its batch on this and on nothing else.
+    /// </remarks>
+    public static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// Sends, and returns the relay's own response to the message.

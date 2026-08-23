@@ -126,9 +126,4 @@ public class IcsBuilderTests
         ics.ShouldEndWith(LineBreak);
         ics.Replace(LineBreak, string.Empty, StringComparison.Ordinal).ShouldNotContain("\n");
     }
-
-    private sealed class FixedClock(Instant now) : IClock
-    {
-        public Instant GetCurrentInstant() => now;
-    }
 }

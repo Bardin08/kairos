@@ -37,6 +37,23 @@ public sealed class ProposalSweeper(
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How many notices one tick will attempt.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than picked. A send to a relay that never answers costs the whole of
+    /// <see cref="EmailSender.SendTimeout"/> and they are made one at a time, so this is the
+    /// largest batch whose worst case still fits inside the interval that schedules it. What it
+    /// buys is the one bound this service needs: a dead relay costs one tick's work per tick,
+    /// whatever the backlog is and however old the deployment is — where an uncapped sweep would
+    /// retry every unannounced lapse ever recorded, every minute, each attempt blocking for
+    /// fifteen seconds.
+    ///
+    /// The cap delays and does not starve, because the batch is taken oldest lapse first: a
+    /// backlog drains at this rate per minute as soon as the relay answers again.
+    /// </remarks>
+    public static readonly int MaxNoticesPerTick = (int)(TickInterval / EmailSender.SendTimeout);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TickInterval);
@@ -90,6 +107,8 @@ public sealed class ProposalSweeper(
                 (proposal.NotifiedAt == null)
                 && (((proposal.State == ProposalState.Open) && (proposal.ExpiresAt <= now))
                     || (proposal.State == ProposalState.Expired)))
+            .OrderBy(proposal => proposal.ExpiresAt)
+            .Take(MaxNoticesPerTick)
             .ToListAsync(cancellationToken);
 
         if (lapsed.Count == 0)
@@ -107,11 +126,11 @@ public sealed class ProposalSweeper(
             .Select(row => row.TimeZoneId)
             .SingleAsync(cancellationToken);
 
-        // Two saves per row rather than two per sweep, which is the stronger of the two orderings
-        // here. Batched, a single row that failed to save would roll back the whole sweep's state
-        // changes AFTER their messages had already gone out — so the next tick would find every
-        // one of them open again and mail the lot a second time. Per row, a failure costs the row
-        // it happened on and leaves every row already finished finished.
+        // Two saves per row rather than two per sweep, and it is the MARKER save that makes the
+        // difference. Batch that one and its rows have all had their messages sent already, so a
+        // single failed save loses every marker in the batch at once and the next tick mails the
+        // lot a second time. Per row, a marker lands with the message it belongs to and a failure
+        // costs the row it happened on.
         foreach (var proposal in lapsed)
         {
             proposal.State = ProposalState.Expired;
@@ -121,16 +140,25 @@ public sealed class ProposalSweeper(
             proposal.DecidedAt ??= proposal.ExpiresAt;
             await context.SaveChangesAsync(cancellationToken);
 
-            await mailer.SendAsync(
+            var announced = await mailer.SendAsync(
                 proposal.Booking, proposal, OperatorNotice.Expired, timeZoneId, cancellationToken);
 
-            // The marker last, and that ordering is the whole failure story. A process that dies
-            // in the gap above leaves the row Expired with a null marker, which is exactly what
-            // the query's second arm picks up — so the notice is re-sent rather than lost. This
-            // fails at-least-once on purpose: a duplicate "nobody answered your suggestion" is an
-            // annoyance, and a lost one is an operator who never learns their suggestion died over
-            // a meeting they still believe is being decided. Marking first would trade that the
-            // other way and there is nothing here worth buying with silence.
+            if (!announced)
+            {
+                // The relay would not take it. The row keeps a null marker, which is the honest
+                // record — nobody has been told — and the next tick finds it on the query's second
+                // arm and tries again. Writing the marker here anyway is the failure this whole
+                // ordering exists to prevent, and it is the likelier one by far: a process dying
+                // between two adjacent saves is rare, and a relay having a bad minute is a Tuesday.
+                continue;
+            }
+
+            // The marker last, and only now. A process that dies in the gap above leaves the row
+            // Expired and unmarked, which the second arm picks up in exactly the same way — so
+            // both failures land on the same side. This is at-least-once on purpose: a duplicate
+            // "nobody answered your suggestion" is an annoyance, and a lost one is an operator who
+            // never learns their suggestion died over a meeting they still believe is being
+            // decided.
             proposal.NotifiedAt = now;
             await context.SaveChangesAsync(cancellationToken);
         }

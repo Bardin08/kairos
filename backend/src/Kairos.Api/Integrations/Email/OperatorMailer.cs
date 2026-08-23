@@ -42,7 +42,20 @@ public sealed class OperatorMailer(
     /// The proposal has already been closed before this runs, and nothing here can reach back and
     /// reopen it.
     /// </summary>
-    public async Task SendAsync(
+    /// <returns>
+    /// Whether the caller has anything left to do about this notice. True when the relay took it
+    /// AND when there is no relay to take it, which are the same answer from where the caller
+    /// stands: nothing is outstanding. False only for a message that was meant to go and did not.
+    ///
+    /// Reporting it does not weaken rule 14 — that rule is about a provider failure never failing
+    /// a BOOKING, and nothing upstream of here is a booking. It is the same carve-out
+    /// <see cref="BookingMailer.SendProposalAsync"/> takes: a caller that can do something with
+    /// the answer should be given it, and this one can. The sweeper writes its idempotency marker
+    /// on a true and leaves the row for the next tick on a false, which is the only thing standing
+    /// between a relay having a bad minute and every lapse in that minute being recorded as
+    /// announced for good.
+    /// </returns>
+    public async Task<bool> SendAsync(
         Booking booking,
         BookingProposal proposal,
         OperatorNotice notice,
@@ -56,7 +69,7 @@ public sealed class OperatorMailer(
                 EmailOptions.SectionName,
                 proposal.Id,
                 notice);
-            return;
+            return true;
         }
 
         try
@@ -69,14 +82,16 @@ public sealed class OperatorMailer(
                 proposal.Id,
                 message.MessageId,
                 response);
+            return true;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(
                 exception,
                 "Could not tell the operator about proposal {Proposal}. The proposal is closed and "
-                + "the meeting is unchanged; there is no retry.",
+                + "the meeting is unchanged.",
                 proposal.Id);
+            return false;
         }
     }
 

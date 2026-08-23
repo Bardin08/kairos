@@ -139,37 +139,38 @@ public class OperatorMailerTests
     }
 
     /// <summary>
-    /// A fresh deployment's state, and the one that must never throw. The sweeper closes the
-    /// proposal before it calls this, so anything raised here is a hold marked Expired by a tick
-    /// that then died on the way out.
+    /// A fresh deployment's state, and the one that must never throw. It answers true, which is
+    /// not a claim that a message went: there was never going to be one, so the caller has nothing
+    /// left to do. A false here would have the sweeper re-reading the same rows every minute for
+    /// the life of a deployment that has no relay.
     /// </summary>
     [Fact]
-    public async Task SendAsync_NoRelayConfigured_DoesNothingAndDoesNotThrow() =>
-        await Should.NotThrowAsync(() => Mailer(new EmailOptions()).SendAsync(
+    public async Task SendAsync_NoRelayConfigured_ReportsNothingLeftToDo() =>
+        (await Mailer(new EmailOptions()).SendAsync(
             Booking(),
             Proposal(),
             OperatorNotice.Expired,
             OrganizerZone,
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken)).ShouldBeTrue();
 
     /// <summary>
-    /// Ground rule 14 against a real socket. The proposal is already closed and the meeting is
-    /// already where it belongs; a relay that refuses must cost the operator a message rather than
-    /// leave a hold half-closed for the next tick to find.
+    /// Ground rule 14 against a real socket, and the answer that makes the sweeper's guarantee
+    /// reach past the relay. The refusal is swallowed — nothing upstream fails — and it is
+    /// reported, so the caller can decline to record a notice that was never delivered.
     /// </summary>
     [Fact]
-    public async Task SendAsync_RelayRefusesTheConnection_SwallowsItSoTheProposalStaysClosed()
+    public async Task SendAsync_RelayRefusesTheConnection_SwallowsItAndSaysTheNoticeDidNotGo()
     {
         var unreachable = Options();
         unreachable.Host = "127.0.0.1";
         unreachable.Port = PortNothingListensOn;
 
-        await Should.NotThrowAsync(() => Mailer(unreachable).SendAsync(
+        (await Mailer(unreachable).SendAsync(
             Booking(),
             Proposal(),
             OperatorNotice.Declined,
             OrganizerZone,
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken)).ShouldBeFalse();
     }
 
     /// <summary>Composed, written and parsed back, so what is read is what a relay would hand on.</summary>

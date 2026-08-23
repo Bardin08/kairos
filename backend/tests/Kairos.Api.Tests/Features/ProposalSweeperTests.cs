@@ -53,9 +53,20 @@ public class ProposalSweeperTests
 
     private const int LapsesTomorrow = OneDaySeconds;
 
+    private const int OneMinuteSeconds = 60;
+
     private const int NoNotices = 0;
     private const int OneNotice = 1;
     private const int TwoNotices = 2;
+
+    /// <summary>Two that went and the refused one, retried and taken on the second sweep.</summary>
+    private const int ThreeAttempts = 3;
+
+    /// <summary>The row the relay refused, still carrying no marker after the first sweep.</summary>
+    private const int OneUnannounced = 1;
+
+    /// <summary>One more lapse than <see cref="ProposalSweeper.MaxNoticesPerTick"/> will take.</summary>
+    private const int OneOverTheCap = 1;
 
     /// <summary>Which send the refusing relay refuses. One-based, so this is the first.</summary>
     private const int FirstAttempt = 1;
@@ -159,7 +170,7 @@ public class ProposalSweeperTests
     public async Task Sweep_Always_SendsBeforeItMarksTheRowNotified()
     {
         using var database = new TestDatabase();
-        var relay = new ObservingRelay(database);
+        var relay = new ObservingRelay(database.ConnectionString);
         await using var provider = NewHost(database, relay);
         SeedProposal(database, LapsedAnHourAgo);
 
@@ -210,34 +221,95 @@ public class ProposalSweeperTests
     }
 
     /// <summary>
-    /// One bad row must not strand the rest of the sweep. The relay refuses the first message and
-    /// takes the second; both holds still close, both are marked told, and the second tick sends
-    /// nothing at all.
+    /// One bad row must not strand the rest of the sweep, and must not be recorded as told. The
+    /// relay refuses the first message and takes the second: both holds close, the row that got
+    /// through is marked, the refused one is not — and the next tick finds it and retries it.
     /// </summary>
     /// <remarks>
-    /// The refusal is absorbed inside <see cref="OperatorMailer"/> — rule 14 — so what this pins
-    /// is that the sweep never sees it and never has to. Without that swallow the throw leaves the
-    /// loop, the first row keeps a null marker, and every row after it in the batch is untouched
-    /// until a tick happens to run when the relay is healthy.
+    /// The refusal is absorbed inside <see cref="OperatorMailer"/> — rule 14 — so the sweep never
+    /// sees a throw. What it does see is the answer, which is the whole point: without it the two
+    /// rows are indistinguishable here, and a relay having a bad minute marks every lapse in that
+    /// window as announced forever.
     /// </remarks>
     [Fact]
-    public async Task Sweep_ARelayThatRefusesTheFirstOfTwo_ClosesBothAndRetriesNeither()
+    public async Task Sweep_ARelayThatRefusesTheFirstOfTwo_ClosesBothAndRetriesOnlyTheRefused()
     {
         using var database = new TestDatabase();
         var relay = new RefusingFirstRelay();
         await using var provider = NewHost(database, relay);
         SeedProposal(database, LapsedAnHourAgo);
-        SeedProposal(database, LapsedAnHourAgo);
+        SeedProposal(database, LapsedAnHourAgo - OneMinuteSeconds);
 
         var sweeper = NewSweeper(provider);
         await sweeper.SweepAsync(TestContext.Current.CancellationToken);
+
+        using (var afterFirst = database.CreateContext())
+        {
+            var swept = afterFirst.BookingProposals.AsNoTracking().ToList();
+            swept.ShouldAllBe(row => row.State == ProposalState.Expired);
+            swept.Count(row => row.NotifiedAt is null).ShouldBe(OneUnannounced);
+        }
+
         await sweeper.SweepAsync(TestContext.Current.CancellationToken);
 
+        using var afterSecond = database.CreateContext();
+        afterSecond.BookingProposals.AsNoTracking().ToList().ShouldAllBe(row => row.NotifiedAt != null);
+        relay.Attempts.ShouldBe(ThreeAttempts);
+    }
+
+    /// <summary>
+    /// The ordinary state of a fresh install: no relay at all. There is nothing to send, so the
+    /// row is done and must be marked done — a sweeper that held it open for a message that will
+    /// never exist would re-read the same rows every minute for the life of the process.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_NoRelayConfigured_MarksTheLapseDoneRatherThanRescanningIt()
+    {
+        using var database = new TestDatabase();
+        var relay = new CountingRelay();
+        await using var provider = NewHost(database, relay, new EmailOptions());
+        var proposal = SeedProposal(database, LapsedAnHourAgo);
+
+        await NewSweeper(provider).SweepAsync(TestContext.Current.CancellationToken);
+
         using var context = database.CreateContext();
-        var swept = context.BookingProposals.AsNoTracking().ToList();
-        swept.ShouldAllBe(row => row.State == ProposalState.Expired);
-        swept.ShouldAllBe(row => row.NotifiedAt != null);
-        relay.Attempts.ShouldBe(TwoNotices);
+        var swept = context.BookingProposals.Single(row => row.Id == proposal);
+        swept.State.ShouldBe(ProposalState.Expired);
+        swept.NotifiedAt.ShouldNotBeNull();
+        relay.Sent.ShouldBe(NoNotices);
+    }
+
+    /// <summary>
+    /// The bound on a dead relay. A send to a relay that never answers costs the whole of
+    /// <see cref="EmailSender.SendTimeout"/>, so a tick attempts only as many as fit inside the
+    /// interval that schedules it — otherwise a backlog of lapses turns every tick into an
+    /// overrun, and the overrun grows with the deployment's age.
+    /// </summary>
+    /// <remarks>
+    /// Oldest lapse first, so the cap delays rather than starves: the row left behind here is the
+    /// one that lapsed most recently, and the next tick takes it.
+    /// </remarks>
+    [Fact]
+    public async Task Sweep_MoreLapsedHoldsThanOneTickWillAttempt_TakesTheOldestAndLeavesTheRest()
+    {
+        using var database = new TestDatabase();
+        var relay = new CountingRelay();
+        await using var provider = NewHost(database, relay);
+
+        // Staggered, so "oldest" is a fact about the rows rather than about insertion order.
+        var lapses = Enumerable.Range(0, ProposalSweeper.MaxNoticesPerTick + OneOverTheCap)
+            .Select(index => SeedProposal(database, LapsedAnHourAgo + (index * OneMinuteSeconds)))
+            .ToList();
+
+        await NewSweeper(provider).SweepAsync(TestContext.Current.CancellationToken);
+
+        relay.Sent.ShouldBe(ProposalSweeper.MaxNoticesPerTick);
+
+        // Hoisted: EF cannot translate a from-end index inside an expression tree.
+        var newest = lapses[^1];
+
+        using var context = database.CreateContext();
+        context.BookingProposals.Single(row => row.Id == newest).State.ShouldBe(ProposalState.Open);
     }
 
     private static ProposalSweeper NewSweeper(ServiceProvider provider) =>
@@ -252,7 +324,7 @@ public class ProposalSweeperTests
     /// EF model. <see cref="Integrations.MeetingEndedPollerTests"/> records what AddDbContext costs
     /// here.
     /// </summary>
-    private static ServiceProvider NewHost(TestDatabase database, EmailSender relay)
+    private static ServiceProvider NewHost(TestDatabase database, EmailSender relay, EmailOptions? email = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(
@@ -260,7 +332,7 @@ public class ProposalSweeperTests
         services.AddScoped<KairosDbContext>();
         services.AddSingleton<IClock>(new FixedClock(Now));
         services.AddSingleton<ILogger<OperatorMailer>>(NullLogger<OperatorMailer>.Instance);
-        services.AddSingleton(Options.Create(new EmailOptions
+        services.AddSingleton(Options.Create(email ?? new EmailOptions
         {
             Host = RelayHost,
             From = RelayFrom,
@@ -349,11 +421,6 @@ public class ProposalSweeperTests
         return link;
     }
 
-    private sealed class FixedClock(Instant now) : IClock
-    {
-        public Instant GetCurrentInstant() => now;
-    }
-
     /// <summary>A relay that takes everything and says how much.</summary>
     private sealed class CountingRelay() : EmailSender(Options.Create(new EmailOptions()))
     {
@@ -388,14 +455,18 @@ public class ProposalSweeperTests
     /// what it sees is what is committed at the moment of the send — the sweeper's change tracker
     /// would answer a different and less interesting question.
     /// </summary>
-    private sealed class ObservingRelay(TestDatabase database)
+    private sealed class ObservingRelay(string connectionString)
         : EmailSender(Options.Create(new EmailOptions()))
     {
         public List<(ProposalState State, long? NotifiedAt)> Rows { get; } = [];
 
         public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken)
         {
-            using var context = database.CreateContext();
+            // Constructed rather than taken from TestDatabase, which migrates on every call: a
+            // schema probe on a second connection, in the middle of the one test whose subject is
+            // what is committed at this instant, is a way to find out about SQLite locking.
+            using var context = new KairosDbContext(
+                new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(connectionString).Options);
             Rows.AddRange(context.BookingProposals.AsNoTracking()
                 .Select(row => new { row.State, row.NotifiedAt })
                 .AsEnumerable()

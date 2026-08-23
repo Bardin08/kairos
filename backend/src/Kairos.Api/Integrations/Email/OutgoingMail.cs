@@ -69,5 +69,11 @@ public static class OutgoingMail
     /// written with a trailing slash does not produce a double one that some mail clients decline
     /// to linkify.
     /// </summary>
+    /// <param name="path">
+    /// Joined as given and NOT escaped, because a caller building a multi-segment path is the only
+    /// one that knows which segments are data. Both callers today escape what they interpolate
+    /// before they get here; a third that does not is how a token with a slash in it becomes two
+    /// segments.
+    /// </param>
     public static string Url(string baseUrl, string path) => $"{baseUrl.TrimEnd('/')}/{path}";
 }
