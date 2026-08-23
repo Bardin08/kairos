@@ -1,23 +1,16 @@
 namespace Kairos.Api.Integrations.Email;
 
-/// <summary>
-/// The relay a confirmation goes through, and the address it comes from.
-/// </summary>
 /// <remarks>
-/// Six settings because six have a reader, and no <c>Enabled</c> flag: an absent
-/// <see cref="Host"/> already says off, the same way an absent
-/// <see cref="Webhooks.WebhookOptions.Url"/> does. Four of these are deliberately not secrets —
-/// a hostname, a port, a username and a sending address are reviewable configuration and belong
-/// in git. <see cref="Password"/> is the only one that has to arrive from a secret store, which
-/// is how the operator's identity stack already splits the same relay.
-///
-/// It is also configuration all the way down: the password is read from the environment and
-/// never written to a row, so <see cref="Kairos.Api.Security.SecretProtector"/> — which exists
-/// to keep credentials out of the replicated SQLite file — has nothing to protect here.
+/// No <c>Enabled</c> flag: an absent <see cref="Host"/> already says off, as an absent
+/// <see cref="Webhooks.WebhookOptions.Url"/> does. Only <see cref="Password"/> is a secret — a
+/// hostname, port, username and sending address are reviewable configuration and belong in git,
+/// the way the operator's identity stack already splits the same relay. The password arrives from
+/// the environment and never reaches a row, so <see cref="Kairos.Api.Security.SecretProtector"/>,
+/// which keeps credentials out of the replicated SQLite file, has nothing to protect here.
 /// </remarks>
 public sealed class EmailOptions
 {
-    /// <summary>Binds <c>Email</c>; in the environment, <c>Email__…</c>.</summary>
+    /// <summary>In the environment, <c>Email__…</c>.</summary>
     public const string SectionName = "Email";
 
     /// <summary>
@@ -34,15 +27,11 @@ public sealed class EmailOptions
     /// <summary>Blank skips authentication outright, for a relay that accepts by network instead.</summary>
     public string? Username { get; set; }
 
-    /// <summary>
-    /// The only value here that is a secret. It reaches the process from the environment and
-    /// stops there.
-    /// </summary>
     public string? Password { get; set; }
 
     /// <summary>
-    /// Who the mail is from, and — after parsing — the .ics ORGANIZER. Accepts a bare address or
-    /// a display name around one, so naming the sender costs configuration rather than code.
+    /// Also the .ics ORGANIZER, after parsing. Accepts a bare address or a display name around
+    /// one, so naming the sender costs configuration rather than code.
     /// </summary>
     public string? From { get; set; }
 
@@ -50,20 +39,17 @@ public sealed class EmailOptions
     /// The origin the manage link is built on, without a trailing path.
     /// </summary>
     /// <remarks>
-    /// The one setting in this class that is not the relay's. It lives here because the
-    /// confirmation is the only thing in Kairos that has to name this instance from outside a
-    /// request — every other URL is relative to the browser that asked. It moves to a section of
-    /// its own the day a second reader appears, and not before.
-    ///
-    /// Required rather than optional: the body's whole job is to carry the manage link, and a
-    /// confirmation whose only route to cancelling is a relative path is worse than no
-    /// confirmation, because the invitee has no way to tell it is broken.
+    /// Not the relay's setting, but the confirmation is the only thing in Kairos that names this
+    /// instance from outside a request — every other URL is relative to the browser that asked. It
+    /// moves to its own section the day a second reader appears. Required rather than optional: a
+    /// confirmation whose only route to cancelling is a relative path is worse than none, because
+    /// the invitee cannot tell it is broken.
     /// </remarks>
     public string? PublicBaseUrl { get; set; }
 
     /// <summary>
-    /// Whether there is enough here to send at all. Read once per booking, and once at startup so
-    /// the answer is in the log rather than inferred from mail that never arrives.
+    /// Read once per booking, and once at startup so the answer is in the log rather than inferred
+    /// from mail that never arrives.
     /// </summary>
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(Host)

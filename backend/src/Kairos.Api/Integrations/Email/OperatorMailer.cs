@@ -15,15 +15,14 @@ namespace Kairos.Api.Integrations.Email;
 /// What the organizer is told about their own suggestions. Plain text, no calendar part, no token.
 /// </summary>
 /// <remarks>
-/// A second class rather than a branch in <see cref="BookingMailer"/>, and the reason is that
-/// nothing about the two messages is the same: different recipient, no manage URL, no .ics, and a
-/// link to the workbench rather than to a token page. Three orthogonal conditionals through one
-/// composer is how the MIME shape that Part B spent a week getting right gets broken by somebody
-/// editing a sentence.
+/// A second class rather than a branch in <see cref="BookingMailer"/>, because nothing about the
+/// two messages is the same: different recipient, no manage URL, no .ics, and a link to the
+/// workbench rather than a token page. Three orthogonal conditionals through one composer is how
+/// the MIME shape Part B spent a week getting right gets broken by somebody editing a sentence.
 ///
 /// The recipient is <see cref="EmailOptions.From"/> — the organizer's own mailbox and the only
-/// operator address Kairos has. A second configuration key for it would be a deployment surface
-/// for a feature nobody has asked for.
+/// operator address Kairos has. A second configuration key would be a deployment surface for a
+/// feature nobody has asked for.
 /// </remarks>
 public sealed class OperatorMailer(
     EmailSender sender,
@@ -44,16 +43,14 @@ public sealed class OperatorMailer(
     /// </summary>
     /// <returns>
     /// Whether the caller has anything left to do about this notice. True when the relay took it
-    /// AND when there is no relay to take it, which are the same answer from where the caller
-    /// stands: nothing is outstanding. False only for a message that was meant to go and did not.
+    /// AND when there is no relay to take it — the same answer from where the caller stands.
+    /// False only for a message that was meant to go and did not.
     ///
-    /// Reporting it does not weaken rule 14 — that rule is about a provider failure never failing
-    /// a BOOKING, and nothing upstream of here is a booking. It is the same carve-out
-    /// <see cref="BookingMailer.SendProposalAsync"/> takes: a caller that can do something with
-    /// the answer should be given it, and this one can. The sweeper writes its idempotency marker
-    /// on a true and leaves the row for the next tick on a false, which is the only thing standing
-    /// between a relay having a bad minute and every lapse in that minute being recorded as
-    /// announced for good.
+    /// Reporting it does not weaken rule 14, which is about a provider failure never failing a
+    /// BOOKING, and nothing upstream of here is a booking — the same carve-out
+    /// <see cref="BookingMailer.SendProposalAsync"/> takes. The sweeper writes its idempotency
+    /// marker on a true and leaves the row for the next tick on a false, which is all that stands
+    /// between a relay having a bad minute and every lapse in it recorded as announced for good.
     /// </returns>
     public async Task<bool> SendAsync(
         Booking booking,
@@ -95,14 +92,10 @@ public sealed class OperatorMailer(
         }
     }
 
-    /// <summary>
-    /// The message, exactly as it goes on the wire.
-    /// </summary>
     /// <param name="timeZoneId">
     /// The organizer's own zone, because the organizer is who this is addressed to — the same rule
-    /// <see cref="BookingMailer"/> follows in the other direction, where the booker's zone is used
-    /// for the booker's mail. It is passed in rather than read here because this is a singleton
-    /// with no database of its own, and every caller has already read the settings row.
+    /// <see cref="BookingMailer"/> follows in the other direction. Passed in rather than read here
+    /// because this is a singleton with no database of its own.
     /// </param>
     public MimeMessage Compose(
         Booking booking,
@@ -122,9 +115,8 @@ public sealed class OperatorMailer(
             : $"{booker.Name} did not answer the new time for {booking.Link.Name}.";
 
         // The reassurance, or the correction. A cancel closes an OPEN hold and nothing else, so a
-        // row already Expired outlives its meeting being called off — and this notice can reach
-        // the operator a tick later, about a meeting they themselves cancelled. Telling them it
-        // stays where it is would be the one sentence here that is flatly untrue.
+        // row already Expired can reach the operator about a meeting they themselves cancelled —
+        // where telling them it stays put would be the one sentence here that is flatly untrue.
         var standing = booking.Status == BookingStatus.Confirmed
             ? $"The meeting stays where it is: {When(current)}."
             : $"The meeting has since been cancelled; it was {When(current)}.";

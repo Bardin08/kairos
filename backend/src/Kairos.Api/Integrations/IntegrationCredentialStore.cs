@@ -20,9 +20,8 @@ namespace Kairos.Api.Integrations;
 /// </summary>
 /// <remarks>
 /// The serialised payload exists as a local in <see cref="ReadAsync{TPayload}"/> and
-/// <see cref="WriteAsync{TPayload}"/> and nowhere else in the process: it is never a field, never
-/// a response, never a log argument. What crosses the boundary is a typed payload the provider
-/// defined, which is what keeps "the refresh token" out of every layer that has no use for it.
+/// <see cref="WriteAsync{TPayload}"/> and nowhere else: never a field, never a response, never a
+/// log argument. What crosses the boundary is a typed payload the provider defined.
 /// </remarks>
 public sealed class IntegrationCredentialStore(
     KairosDbContext context,
@@ -38,15 +37,14 @@ public sealed class IntegrationCredentialStore(
 
     /// <summary>
     /// How stale a proven success may get before a fresh one is worth a write. The success path
-    /// runs on every token refresh, and a token refresh runs on every booking page load — so an
-    /// unthrottled stamp is a SQLite write per page view for a value nobody read. Five minutes is
-    /// far finer than any screen renders this to.
+    /// runs on every token refresh, and a refresh runs on every booking page load, so an
+    /// unthrottled stamp is a SQLite write per page view. Five minutes is finer than any screen.
     /// </summary>
     private const int SuccessRefreshSeconds = 300;
 
     /// <summary>
-    /// Every connected provider, for the page's status column. The rows carry ciphertext and the
-    /// caller has no way to read it, which is why handing back the entity is safe here.
+    /// The rows carry ciphertext and the caller has no way to read it, which is why handing back
+    /// the entity is safe here.
     /// </summary>
     public async Task<IReadOnlyList<IntegrationCredential>> ListAsync(CancellationToken cancellationToken) =>
         await context.IntegrationCredentials.AsNoTracking().ToListAsync(cancellationToken);
@@ -75,12 +73,11 @@ public sealed class IntegrationCredentialStore(
                 or OverflowException)
         {
             // AES-GCM authenticates, so a row written under a different Security:SecretKey does
-            // not decrypt to nonsense — it throws. Left to reach the pipeline it is a 500 whose
-            // ProblemDetails title is the framework's own "An error occurred while processing
-            // your request.", which is what the Integrations page rendered: an admin screen
-            // reporting a nameable, operator-fixable condition as an unexplained fault. Named
-            // here instead, so it arrives as the same reported failure every other admin slice
-            // sends — a sentence and a code — rather than as a trip to the logs.
+            // not decrypt to nonsense — it throws. Left to the pipeline it becomes a 500 titled
+            // with the framework's "An error occurred while processing your request.", which is
+            // what the Integrations page rendered: an operator-fixable condition as an unexplained
+            // fault. Named here so it arrives as a sentence and a code, like every other admin
+            // slice.
             throw DomainException.Invalid(
                 CredentialUnreadableCode,
                 $"The stored {provider} credential cannot be read: it was encrypted with a "
@@ -124,10 +121,9 @@ public sealed class IntegrationCredentialStore(
         row.ProtectedPayload = protector.Protect(json);
         row.UpdatedAt = now;
 
-        // A connect or a reconnect is the operator asserting that this credential works, and it is
-        // the only thing that clears a fault by hand. All three move together: a state cleared
-        // with a stale error beside it is one screen reading the state and another reading the
-        // error, and they disagree.
+        // A connect or a reconnect is the operator asserting the credential works, and the only
+        // thing that clears a fault by hand. All three move together: a state cleared with a stale
+        // error beside it is two screens disagreeing.
         row.Health = CredentialHealth.Healthy;
         row.LastError = null;
         row.LastSuccessAt = now;
@@ -141,9 +137,7 @@ public sealed class IntegrationCredentialStore(
     }
 
     /// <summary>
-    /// Records that the provider answered. Writes only when something is actually different — the
-    /// state was not healthy, the credential has never succeeded, or the last success has gone
-    /// stale past <see cref="SuccessRefreshSeconds"/>.
+    /// Records that the provider answered, writing only when something is actually different.
     /// </summary>
     /// <remarks>
     /// Uncancellable, like <see cref="MarkUnhealthyAsync"/>: a recovery discovered on a request
@@ -177,8 +171,7 @@ public sealed class IntegrationCredentialStore(
     /// <summary>
     /// Records that the provider refused, with a code a screen can turn into a sentence.
     /// <see cref="IntegrationCredential.LastSuccessAt"/> is left alone: the failure does not
-    /// un-happen the last success, and that timestamp is the half of the alert an operator can act
-    /// on.
+    /// un-happen the last success, and that timestamp is the half of the alert an operator acts on.
     /// </summary>
     /// <remarks>
     /// Uncancellable by design — it runs while a refresh is failing, and the request that
@@ -211,9 +204,8 @@ public sealed class IntegrationCredentialStore(
     /// </summary>
     /// <remarks>
     /// It exists because the Integrations page used to learn this by decrypting through a
-    /// connector method that has since been deleted — the diagnosis was a side effect of a call
-    /// that said something else, and would have vanished with it silently, since a page that
-    /// renders is a page that looks fine.
+    /// connector method since deleted — the diagnosis was a side effect of a call that said
+    /// something else, and would have vanished with it silently.
     /// </remarks>
     public async Task EnsureReadableAsync(IntegrationProvider provider, CancellationToken cancellationToken)
     {

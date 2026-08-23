@@ -12,10 +12,9 @@ namespace Kairos.Api.Integrations;
 /// Every connected provider whose credential has stopped working, as alerts.
 /// </summary>
 /// <remarks>
-/// Read this file's usings when asking what a second provider costs: there is no vendor namespace
-/// among them, and adding one would be the bug. It reads a column and a label — nothing is
-/// decrypted, no adapter is called, and a provider that did not exist when this was written
-/// produces an alert by having a row.
+/// Read this file's usings when asking what a second provider costs: no vendor namespace among
+/// them, and adding one would be the bug. It reads a column and a label — nothing decrypted, no
+/// adapter called — so a provider that did not exist when this was written alerts by having a row.
 /// </remarks>
 public sealed class IntegrationAlertSource(IntegrationCredentialStore store) : IOperatorAlertSource
 {
