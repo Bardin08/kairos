@@ -382,8 +382,11 @@ namespace Kairos.Api.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("Version")
+                    b.Property<int>("OverridesVersion")
                         .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RulesVersion")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");

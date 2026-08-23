@@ -33,6 +33,9 @@ public class PatternsAdminTests
     private const string LinkName = "Consulting call";
     private const int DurationMinutes = 25;
 
+    /// <summary>The pattern a test starts from, whether it is seeded or created through the API.</summary>
+    private const string FirstPatternName = "Weekdays";
+
     /// <summary>A second pattern, so a rename has somewhere to collide from.</summary>
     private const string SecondPatternName = "Evenings";
 
@@ -60,6 +63,15 @@ public class PatternsAdminTests
 
     /// <summary>Two tabs on one date, which is the smallest number that is a race at all.</summary>
     private const int RacingWriters = 2;
+
+    /// <summary>
+    /// How many times the rules race below is run. Whether two requests interleave at all is the
+    /// scheduler's decision, and a round that does not interleave proves nothing — measured with
+    /// the guard's predicate removed, a single round let the union through on 3 of 9 whole-suite
+    /// runs, while five rounds caught it on 6 of 6. Alone the test is far luckier than that, which
+    /// is the trap: the suite is where it will actually run.
+    /// </summary>
+    private const int RacedRounds = 5;
 
     /// <summary>
     /// The 30th of February: date-shaped and not a date, which is why the parse decides and a
@@ -548,6 +560,81 @@ public class PatternsAdminTests
     }
 
     /// <summary>
+    /// The defect this whole change exists for. Two operators saving a week on a pattern that has
+    /// no rules yet: nothing is deleted, so nothing raises the way it does on a pattern that
+    /// already has rules, and both sets used to land — measured here with the guard removed, both
+    /// writers answered 200 and the stored week held Monday and Wednesday, which is a pattern open
+    /// on days neither operator asked for.
+    /// </summary>
+    [Fact]
+    public async Task ReplaceRules_FromTwoWritersAtOnceOnAPatternWithNoRules_KeepsOneWritersWeek()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        var created = await PatternOfAsync(await client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/admin/patterns",
+            new { name = FirstPatternName },
+            TestContext.Current.CancellationToken));
+
+        for (var round = 0; round < RacedRounds; round++)
+        {
+            // The hole is specific to a week holding nothing, and the round before this one left
+            // it holding a day, so every round starts the pattern empty again.
+            (await ReplaceRulesAsync(client, created, [])).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+            using var barrier = new Barrier(RacingWriters);
+            var monday = ReplaceRulesWhenReleasedAsync(client, created, Monday, barrier);
+            var wednesday = ReplaceRulesWhenReleasedAsync(client, created, Wednesday, barrier);
+
+            var answers = await Task.WhenAll(monday, wednesday);
+
+            foreach (var refused in answers.Where(answer => answer.StatusCode != HttpStatusCode.OK))
+            {
+                refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+                (await CodeOfAsync(refused)).ShouldBe(PatternsAdminEndpoints.PatternChangedCode);
+            }
+
+            // One writer's week, never both. The union is the defect this closes.
+            var stored = (await StoredPatternAsync(client, created.Id)).Rules;
+            stored.ShouldHaveSingleItem().IsoDayOfWeek.ShouldBeOneOf(Monday, Wednesday);
+        }
+    }
+
+    /// <summary>
+    /// The reason there are two columns rather than one. On a single token a weekly-rules save and
+    /// a date's save raced each other, so an operator blocking a holiday could be refused because
+    /// somebody else was editing Tuesday's hours — unrelated edits to unrelated days, refusing
+    /// each other. Both answers are 200 here, and neither writer's work is the other's problem.
+    /// </summary>
+    /// <remarks>
+    /// One round, unlike the race above, and the difference is not an oversight: the loser of this
+    /// one waits on the write lock rather than racing for it, so once the barrier releases the
+    /// interleave happens every time. Measured — with RulesVersion made a concurrency token, this
+    /// fails on all ten runs of a single round.
+    /// </remarks>
+    [Fact]
+    public async Task ReplaceRulesAndSaveOverride_AtOnce_DoNotRefuseEachOther()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var pattern = await SeededPatternAsync(client);
+        var day = Day();
+
+        using var barrier = new Barrier(RacingWriters);
+        var week = ReplaceRulesWhenReleasedAsync(client, pattern, Wednesday, barrier);
+        var date = Task.Run(async () =>
+        {
+            barrier.SignalAndWait();
+            return await SaveOverrideAsync(
+                client, day, [new { startMinute = NineAm, endMinute = Noon }]);
+        });
+
+        var answers = await Task.WhenAll(week, date);
+
+        answers.ShouldAllBe(answer => answer.StatusCode == HttpStatusCode.OK);
+    }
+
+    /// <summary>
     /// The name is how the operator picks a pattern out of a list, so two patterns wearing one
     /// name is a workbench where the wrong availability gets attached to a link. The refusal comes
     /// from the unique index by way of <see cref="ConcurrentWrite"/> rather than from a SELECT this
@@ -619,7 +706,7 @@ public class PatternsAdminTests
     {
         var created = await client.PostAsJsonAsync(
             $"{ApiVersions.V1}/admin/patterns",
-            new { name = "Weekdays" },
+            new { name = FirstPatternName },
             TestContext.Current.CancellationToken);
 
         var ruled = await ReplaceRulesAsync(
@@ -692,13 +779,36 @@ public class PatternsAdminTests
             endMinute = NineAm + (((rule / PatternsAdminEndpoints.DaysInWeek) + 1) * MinutesPerHour),
         })];
 
+    /// <summary>One writer, held at the barrier until the other is ready to send too.</summary>
+    private static Task<HttpResponseMessage> ReplaceRulesWhenReleasedAsync(
+        HttpClient client,
+        PatternResponse pattern,
+        int isoDayOfWeek,
+        Barrier barrier) =>
+        Task.Run(() =>
+        {
+            barrier.SignalAndWait();
+            return ReplaceRulesAsync(
+                client,
+                pattern,
+                [new { isoDayOfWeek, startMinute = NineAm, endMinute = FivePm }]);
+        });
+
     /// <summary>The seeded pattern read back through the list, for what a refused write left.</summary>
-    private static async Task<PatternResponse> SeededPatternAsync(HttpClient client)
+    private static Task<PatternResponse> SeededPatternAsync(HttpClient client) =>
+        StoredPatternAsync(client, PatternId);
+
+    /// <summary>
+    /// The same read for a pattern a test created rather than seeded. Through the list rather
+    /// than through the write's own answer, because what a refused write left behind is only
+    /// visible in a read that did not take part in it.
+    /// </summary>
+    private static async Task<PatternResponse> StoredPatternAsync(HttpClient client, Guid patternId)
     {
         var patterns = await client.GetFromJsonAsync<IReadOnlyList<PatternResponse>>(
             $"{ApiVersions.V1}/admin/patterns", TestContext.Current.CancellationToken);
 
-        return patterns!.Single(candidate => candidate.Id == PatternId);
+        return patterns!.Single(candidate => candidate.Id == patternId);
     }
 
     /// <summary>The public read, unauthenticated, exactly as an invitee's browser makes it.</summary>
@@ -734,7 +844,7 @@ public class PatternsAdminTests
     /// </summary>
     private static void Seed(KairosDbContext context)
     {
-        context.Patterns.Add(new Pattern { Id = PatternId, Name = "Weekdays" });
+        context.Patterns.Add(new Pattern { Id = PatternId, Name = FirstPatternName });
         context.PatternRules.Add(new PatternRule
         {
             Id = Guid.CreateVersion7(),

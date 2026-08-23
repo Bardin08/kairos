@@ -189,7 +189,7 @@ public class SchemaTests
     /// both of their windows.
     /// </summary>
     [Fact]
-    public void SaveChanges_WhenTwoWritersBothRaiseThePatternVersion_RaisesConcurrency()
+    public void SaveChanges_WhenTwoWritersBothRaiseTheOverridesVersion_RaisesConcurrency()
     {
         using var database = new TestDatabase();
         var patternId = Guid.CreateVersion7();
@@ -206,11 +206,119 @@ public class SchemaTests
         var read = first.Patterns.Single(pattern => pattern.Id == patternId);
         var alsoRead = second.Patterns.Single(pattern => pattern.Id == patternId);
 
-        read.Version++;
+        read.OverridesVersion++;
         first.SaveChanges();
 
-        alsoRead.Version++;
+        alsoRead.OverridesVersion++;
         Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
+    }
+
+    /// <summary>
+    /// Why RulesVersion is raised by an explicit UPDATE rather than by carrying
+    /// IsConcurrencyToken like the column above. EF builds an update's WHERE clause from the key
+    /// plus EVERY concurrency token on the entity, not only the tokens whose properties changed —
+    /// so a tracked save that touches nothing but RulesVersion is still refused by an override
+    /// write that moved OverridesVersion under it, on a date the week has nothing to do with.
+    /// Make RulesVersion a token as well and this stops being a demonstration and becomes the
+    /// shipping behaviour of both routes; ReplaceRulesAsync sidesteps it entirely by writing
+    /// through ExecuteUpdate, which is generated from its own predicate and reads no token
+    /// metadata at all.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WhenARulesWriterSavesUnderAnOverrideWriter_StillCollides()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.SaveChanges();
+        }
+
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var overrideWriter = first.Patterns.Single(pattern => pattern.Id == patternId);
+        var rulesWriter = second.Patterns.Single(pattern => pattern.Id == patternId);
+
+        overrideWriter.OverridesVersion++;
+        first.SaveChanges();
+
+        // A different column, and not a token at all. If the WHERE clause held only what this
+        // save changed, it would commit.
+        rulesWriter.RulesVersion++;
+        Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
+    }
+
+    /// <summary>
+    /// The other side of the same fact, and the one <see cref="Kairos.Api.Features.Admin.PatternsAdminEndpoints"/>
+    /// leans on: the same raise written as a conditional UPDATE goes through, because
+    /// ExecuteUpdate is generated from the predicate it is given and nothing else. One row
+    /// affected is the week claimed, under an override writer that has already moved the token
+    /// this update carries no knowledge of.
+    /// </summary>
+    [Fact]
+    public void ExecuteUpdate_RaisingRulesVersionUnderAnOverrideWriter_ClaimsTheWeekAnyway()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.SaveChanges();
+        }
+
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var overrideWriter = first.Patterns.Single(pattern => pattern.Id == patternId);
+        var seenRulesVersion = second.Patterns.AsNoTracking()
+            .Single(pattern => pattern.Id == patternId).RulesVersion;
+
+        overrideWriter.OverridesVersion++;
+        first.SaveChanges();
+
+        var claimed = second.Patterns
+            .Where(row => row.Id == patternId && row.RulesVersion == seenRulesVersion)
+            .ExecuteUpdate(update => update.SetProperty(row => row.RulesVersion, row => row.RulesVersion + 1));
+
+        claimed.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The branch the endpoint actually reports on. Zero rows affected is another rules writer
+    /// having claimed the week between this one's read and its update — nothing raises, nothing
+    /// throws, and the count is the only thing that says so, which is why ReplaceRulesAsync
+    /// refuses on it rather than on an exception it would never see.
+    /// </summary>
+    [Fact]
+    public void ExecuteUpdate_RaisingARulesVersionAnotherWriterAlreadyRaised_ClaimsNothing()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.SaveChanges();
+        }
+
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var seenRulesVersion = second.Patterns.AsNoTracking()
+            .Single(pattern => pattern.Id == patternId).RulesVersion;
+
+        // The other writer, claiming the same week first and by the same means.
+        first.Patterns
+            .Where(row => row.Id == patternId && row.RulesVersion == seenRulesVersion)
+            .ExecuteUpdate(update => update.SetProperty(row => row.RulesVersion, row => row.RulesVersion + 1))
+            .ShouldBe(1);
+
+        var claimed = second.Patterns
+            .Where(row => row.Id == patternId && row.RulesVersion == seenRulesVersion)
+            .ExecuteUpdate(update => update.SetProperty(row => row.RulesVersion, row => row.RulesVersion + 1));
+
+        claimed.ShouldBe(0);
     }
 
     /// <summary>
