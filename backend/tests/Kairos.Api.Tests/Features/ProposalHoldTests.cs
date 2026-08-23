@@ -94,6 +94,27 @@ public class ProposalHoldTests
     }
 
     /// <summary>
+    /// The invitee said no, and the slot they said no to goes back on offer at that moment rather
+    /// than at the end of the hold window. The ordinary outcome of a proposal, and the one the
+    /// State predicate exists for: Declined leaves the row in place with its expiry still in the
+    /// future, so nothing but that predicate can stop it holding.
+    /// </summary>
+    [Fact]
+    public async Task GetSlots_AHoldOnADeclinedProposal_IsOfferedAgain()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(
+            app,
+            expiresInHours: SchedulingDefaults.ProposalHoldHours,
+            state: ProposalState.Declined);
+
+        var offered = await ReadSlotsAsync(app);
+
+        offered.ShouldContain(Held);
+    }
+
+    /// <summary>
     /// The write path's own answer, and the one that matters: BookingWriter counts clashes inside
     /// BEGIN IMMEDIATE and is the authority on what exists. A page that stopped offering the slot
     /// while the writer still accepted it would be a hold that holds nothing under contention.
@@ -135,6 +156,20 @@ public class ProposalHoldTests
             app,
             expiresInHours: SchedulingDefaults.ProposalHoldHours,
             bookingStatus: BookingStatus.Cancelled);
+
+        WriteAsync(app).Success.ShouldBeTrue();
+    }
+
+    /// <summary>The same question at the writer, which is the authority.</summary>
+    [Fact]
+    public void TryCreate_AHoldOnADeclinedProposal_IsAccepted()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(
+            app,
+            expiresInHours: SchedulingDefaults.ProposalHoldHours,
+            state: ProposalState.Declined);
 
         WriteAsync(app).Success.ShouldBeTrue();
     }
@@ -203,14 +238,18 @@ public class ProposalHoldTests
     });
 
     /// <summary>
-    /// A booking on an unrelated day carrying an open proposal for <see cref="Held"/>. The booking
-    /// is elsewhere on purpose: what is being asserted is that the HOLD removes the slot, and a
-    /// booking in the same place would remove it whether the hold worked or not.
+    /// A booking elsewhere on the same day — 15:00 against the 11:00 it proposes — carrying one
+    /// proposal for <see cref="Held"/>. The booking sits away from the held slot on purpose: what
+    /// is being asserted is that the HOLD removes the slot, and a booking in the same place would
+    /// remove it whether the hold worked or not. The three parameters are the three things that
+    /// decide whether a hold still holds, one per predicate: how long until it lapses, whether the
+    /// meeting under it is still on, and whether the invitee has answered.
     /// </summary>
     private static void SeedProposal(
         KairosApp app,
         long expiresInHours,
-        BookingStatus bookingStatus = BookingStatus.Confirmed) => app.Seed(context =>
+        BookingStatus bookingStatus = BookingStatus.Confirmed,
+        ProposalState state = ProposalState.Open) => app.Seed(context =>
     {
         var link = context.Links.Single(candidate => candidate.Slug == Slug);
         var elsewhere = InstantPattern.ExtendedIso.Parse($"{Day}{ElsewhereTime}").Value.ToUnixTimeSeconds();
@@ -248,7 +287,7 @@ public class ProposalHoldTests
             EndUtc = held + (DurationMinutes * SecondsPerMinute),
             ExpiresAt = now + (expiresInHours * SecondsPerHour),
             CreatedAt = now,
-            State = ProposalState.Open,
+            State = state,
             TokenHash = Guid.CreateVersion7().ToString("N"),
         });
     });
