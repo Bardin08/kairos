@@ -45,8 +45,8 @@ public sealed class IntegrationCredentialStore(
     private const int SuccessRefreshSeconds = 300;
 
     /// <summary>
-    /// Every connected provider, for the page's status column. The rows carry ciphertext and the
-    /// caller has no way to read it, which is why handing back the entity is safe here.
+    /// The rows carry ciphertext and the caller has no way to read it, which is why handing back
+    /// the entity is safe here.
     /// </summary>
     public async Task<IReadOnlyList<IntegrationCredential>> ListAsync(CancellationToken cancellationToken) =>
         await context.IntegrationCredentials.AsNoTracking().ToListAsync(cancellationToken);
@@ -141,9 +141,7 @@ public sealed class IntegrationCredentialStore(
     }
 
     /// <summary>
-    /// Records that the provider answered. Writes only when something is actually different — the
-    /// state was not healthy, the credential has never succeeded, or the last success has gone
-    /// stale past <see cref="SuccessRefreshSeconds"/>.
+    /// Records that the provider answered, writing only when something is actually different.
     /// </summary>
     /// <remarks>
     /// Uncancellable, like <see cref="MarkUnhealthyAsync"/>: a recovery discovered on a request

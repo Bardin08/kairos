@@ -14,7 +14,7 @@ namespace Kairos.Api.Integrations.Webhooks;
 
 /// <summary>
 /// The other half of the outbox: everything queued and not yet delivered, POSTed oldest-first
-/// and signed, and marked dispatched only once the receiver has accepted it.
+/// and signed.
 /// </summary>
 /// <remarks>
 /// The mark comes after the send, never before. A crash in the gap therefore redelivers, which
@@ -109,7 +109,7 @@ public sealed class OutboxDispatcher(
         }
     }
 
-    /// <summary>One drain, then the wait. Returns false when the host is shutting down.</summary>
+    /// <summary>Returns false when the host is shutting down.</summary>
     private async Task<bool> TickAsync(
         PeriodicTimer timer,
         WebhookSigner signer,
@@ -166,9 +166,8 @@ public sealed class OutboxDispatcher(
     }
 
     /// <summary>
-    /// One POST and the bookkeeping that follows it. Saved either way — a success writes
-    /// <see cref="OutboxMessage.DispatchedAt"/>, a failure writes the attempt and the reason and
-    /// leaves the row for the next tick.
+    /// Saved either way: a success writes <see cref="OutboxMessage.DispatchedAt"/>, a failure
+    /// writes the attempt and the reason and leaves the row for the next tick.
     /// </summary>
     private async Task DeliverAsync(
         KairosDbContext context,
