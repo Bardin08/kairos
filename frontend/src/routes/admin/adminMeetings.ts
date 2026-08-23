@@ -28,6 +28,31 @@ export type MeetingLink = {
 }
 
 /**
+ * The newest hold on a meeting, whatever became of it.
+ *
+ * One per row and never a list: an open hold is a Withdraw button, and a closed
+ * one is at most a sentence saying what happened. An operator who proposed
+ * again after a decline is asking about the new suggestion.
+ */
+export type MeetingProposal = {
+  id: string
+  /** ISO UTC instant of the suggested time. Render it in the organizer's zone. */
+  start: string
+  /** When it lapses and the meeting stays put. */
+  expiresAt: string
+  /**
+   * `open`, `declined`, `expired` or `withdrawn` — `accepted` does not appear
+   * on a row that has not also moved, since accepting is what moves it.
+   *
+   * The server folds the clock in: a hold whose expiry has passed arrives as
+   * `expired` whether or not the sweeper has been round to mark it. Nothing
+   * here re-derives that, because the expiry is the organizer's clock and not
+   * the browser's.
+   */
+  state: string
+}
+
+/**
  * One meeting as the operator's list draws it.
  *
  * `calendarSynced` is the whole of the sync question: false covers a booking
@@ -45,6 +70,12 @@ export type Meeting = {
   linkId: string
   /** The link this was booked through — the one fact a calendar cannot supply. */
   linkName: string
+  /**
+   * That link's slug, beside its id and not instead of it. The propose panel
+   * reads what it may offer from `GET /links/{slug}/slots`, which takes no link
+   * id at all.
+   */
+  slug: string
   participantName: string
   participantEmail: string
   /** The PARTICIPANT's zone, as they gave it. Never the organizer's. */
@@ -53,6 +84,8 @@ export type Meeting = {
   /** Lowercase provider name, or null when nothing was ever written. */
   calendarProvider: string | null
   calendarError: string | null
+  /** Null when nobody has ever suggested a new time for this meeting. */
+  proposal: MeetingProposal | null
 }
 
 /**
@@ -102,6 +135,45 @@ export function cancelMeeting(id: string, reason: string, signal?: AbortSignal):
     method: 'POST',
     headers: JSON_HEADERS,
     body: JSON.stringify({ reason }),
+    signal,
+  })
+}
+
+/**
+ * Offers the invitee a new time and holds it until they answer. Nothing about
+ * the meeting changes here: the invitee agreed to a time, so the operator
+ * proposes and the invitee decides.
+ *
+ * `start` is one of the strings `getSlots` returned, verbatim — rebuilt as an
+ * offset form it is refused as `instant_invalid`. Answers 409 for a meeting
+ * that already has an open hold (`proposal_open`), for a deployment with no
+ * mail relay (`mail_unconfigured`), and for a relay that refused the send
+ * (`proposal_undeliverable`); nothing is held in any of the three.
+ */
+export function proposeMeeting(id: string, start: string, signal?: AbortSignal): Promise<Meeting> {
+  return adminRequest<Meeting>(`/admin/meetings/${id}/proposals`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ start }),
+    signal,
+  })
+}
+
+/**
+ * Takes a suggestion back and gives its slot up.
+ *
+ * Without it an operator who named the wrong time holds a slot hostage for the
+ * whole window and cannot offer the right one, because only one hold may be
+ * open at a time. Idempotent: withdrawing something already answered answers
+ * with the row as it stands rather than a 409.
+ */
+export function withdrawProposal(
+  id: string,
+  proposalId: string,
+  signal?: AbortSignal,
+): Promise<Meeting> {
+  return adminRequest<Meeting>(`/admin/meetings/${id}/proposals/${proposalId}`, {
+    method: 'DELETE',
     signal,
   })
 }

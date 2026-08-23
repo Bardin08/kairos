@@ -108,6 +108,14 @@ public sealed record BookingResponse(
 /// the lower-cased <see cref="ProposalState"/>, so a page can render an answered proposal as
 /// finished rather than as an error.
 /// </summary>
+/// <param name="TimeZone">
+/// The BOOKER's own zone, as they gave it, and never the organizer's — the same field
+/// <see cref="BookingResponse.TimeZone"/> carries and for the same reason. This is the third
+/// surface an invitee sees about one booking: the proposal mail formats against
+/// <c>booker.TimeZoneId</c>, the manage page renders <c>booking.timeZone</c>, and a page that
+/// answered the organizer's here would print a different clock time for the same instant in the
+/// tab opened from that mail.
+/// </param>
 public sealed record ProposalResponse(
     Guid BookingId,
     string LinkName,
@@ -311,7 +319,6 @@ public static class BookingsEndpoints
         CancellationToken cancellationToken) =>
         Describe(
             await FindProposalAsync(context, token, cancellationToken),
-            await TimeZoneIdAsync(context, cancellationToken),
             clock.GetCurrentInstant());
 
     /// <summary>
@@ -415,7 +422,7 @@ public static class BookingsEndpoints
         RequireOpen(proposal, now);
         await ClaimAsync(context, proposal, ProposalState.Declined, now, cancellationToken);
 
-        return Describe(proposal, await TimeZoneIdAsync(context, cancellationToken), now);
+        return Describe(proposal, now);
     }
 
     /// <summary>
@@ -490,14 +497,22 @@ public static class BookingsEndpoints
     /// </summary>
     private static void RequireOpen(BookingProposal proposal, Instant now)
     {
-        if (proposal.State != ProposalState.Open)
-        {
-            throw DomainException.Conflict(ProposalClosedCode, "This suggestion has already been answered.");
-        }
+        // Through StateAt rather than comparing ExpiresAt here, which is what this used to do.
+        // That comparison was a second copy of the fold, four hundred lines from the one whose own
+        // docstring says two copies drift — and it had already drifted in one direction: a hold
+        // the sweeper HAD closed answered proposal_closed while an identical unswept one answered
+        // proposal_expired, so which sentence the invitee read depended on whether a background
+        // service had been round yet. Now the state decides and the sweeper cannot change it.
+        var state = ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now);
 
-        if (proposal.ExpiresAt <= now.ToUnixTimeSeconds())
+        if (state == ProposalState.Expired)
         {
             throw DomainException.Conflict(ProposalExpiredCode, "This suggestion has lapsed.");
+        }
+
+        if (state != ProposalState.Open)
+        {
+            throw DomainException.Conflict(ProposalClosedCode, "This suggestion has already been answered.");
         }
     }
 
@@ -519,16 +534,19 @@ public static class BookingsEndpoints
         return await context.BookingProposals.AsNoTracking()
             .Include(proposal => proposal.Booking)
             .ThenInclude(booking => booking.Link)
+            .Include(proposal => proposal.Booking)
+            .ThenInclude(booking => booking.Participants)
             .FirstOrDefaultAsync(proposal => proposal.TokenHash == hash, cancellationToken)
             ?? throw DomainException.NotFound("Proposal");
     }
 
     /// <summary>
-    /// The proposal as the invitee's page draws it. The organizer's zone rides along because both
-    /// times on that page are the organizer's calendar, and a column of times belonging to nobody
-    /// in particular is how a call gets missed.
+    /// The proposal as the invitee's page draws it, in the invitee's own zone — see
+    /// <see cref="ProposalResponse.TimeZone"/> for why it is theirs and not the organizer's. Taken
+    /// off the booking this proposal already carries rather than read separately, so it cannot
+    /// disagree with the mail that sent them here.
     /// </summary>
-    private static ProposalResponse Describe(BookingProposal proposal, string timeZoneId, Instant now) =>
+    private static ProposalResponse Describe(BookingProposal proposal, Instant now) =>
         new(
             proposal.BookingId,
             proposal.Booking.Link.Name,
@@ -537,27 +555,27 @@ public static class BookingsEndpoints
             InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.StartUtc)),
             InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.EndUtc)),
             InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.ExpiresAt)),
-            timeZoneId,
+            BookerZoneOf(proposal.Booking),
             StateOf(proposal, now));
 
     /// <summary>
-    /// The state as every other reader computes it: a hold whose expiry has passed has stopped
-    /// holding, whether or not the sweeper has been round to mark it. Answering "open" for one is
-    /// a page that draws Accept and Decline over a suggestion that will refuse either.
+    /// The zone the booker gave. Empty when a booking somehow carries no booker, which the page
+    /// answers by falling back rather than by failing — <c>Intl</c> refuses an empty zone and the
+    /// whole page would go down over one missing row.
+    /// </summary>
+    private static string BookerZoneOf(Booking booking) =>
+        booking.Participants
+            .FirstOrDefault(participant => participant.Role == ParticipantRole.Booker)
+            ?.TimeZoneId ?? string.Empty;
+
+    /// <summary>
+    /// The state as every other reader computes it — <see cref="ProposalWriter.StateAt"/> — as the
+    /// lower-cased word the page branches on. Answering "open" for a hold that has stopped holding
+    /// is a page that draws Accept and Decline over a suggestion that will refuse either.
     /// </summary>
     private static string StateOf(BookingProposal proposal, Instant now) =>
-        ((proposal.State == ProposalState.Open) && (proposal.ExpiresAt <= now.ToUnixTimeSeconds())
-            ? ProposalState.Expired
-            : proposal.State)
-        .ToString().ToLowerInvariant();
+        ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now).ToString().ToLowerInvariant();
 
-    private static async Task<string> TimeZoneIdAsync(
-        KairosDbContext context,
-        CancellationToken cancellationToken) =>
-        await context.Settings.AsNoTracking()
-            .Where(row => row.Id == Settings.SingletonId)
-            .Select(row => row.TimeZoneId)
-            .SingleAsync(cancellationToken);
 
     /// <summary>
     /// The manage token is never stored, so the lookup is by its hash against the unique index.

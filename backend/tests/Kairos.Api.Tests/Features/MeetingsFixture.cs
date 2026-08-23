@@ -43,7 +43,9 @@ public static class MeetingsFixture
     private const int FivePm = 17 * 60;
     private const string BookerName = "Ada Lovelace";
     private const string BookerEmail = "ada@example.com";
-    private const string BookerZone = "Europe/Warsaw";
+    /// <summary>Deliberately not the organizer's, which is UTC. Public because the proposal read is
+    /// asserted to answer THIS zone rather than the organizer's.</summary>
+    public const string BookerZone = "Europe/Warsaw";
 
     /// <summary>Seeds the world and books <see cref="BookedInstant"/>. Returns the booking's id.</summary>
     public static async Task<Guid> BookAsync(KairosApp app, HttpClient client)

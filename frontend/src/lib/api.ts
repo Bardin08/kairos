@@ -1,7 +1,7 @@
-// The HTTP surface of every page the entry chunk carries: the booking page uses
-// the first three, the manage page the three after those, the integrations page
-// the last two. None reimplements a fetch, because the two failure shapes below
-// are the part that is easy to get wrong twice.
+// The HTTP surface of every page the entry chunk carries — the booking page,
+// the manage page, the invitee's proposal page and integrations. None
+// reimplements a fetch, because the two failure shapes below are the part that
+// is easy to get wrong twice.
 //
 // The workbench's own calls are NOT here. They live in the admin chunk —
 // routes/admin/patterns.ts, adminLinks.ts, adminSettings.ts, adminMeetings.ts —
@@ -295,6 +295,58 @@ export function rescheduleBooking(
     { start },
     signal,
   )
+}
+
+/**
+ * What the invitee is being asked, and what they would be leaving.
+ *
+ * Every instant here is the ORGANIZER's calendar, which is why `timeZone`
+ * travels with them: a column of times belonging to nobody in particular is how
+ * a call gets missed.
+ */
+export type Proposal = {
+  bookingId: string
+  /** ISO UTC instants — where the meeting is now, and where it is offered. */
+  currentStart: string
+  currentEnd: string
+  proposedStart: string
+  proposedEnd: string
+  linkName: string
+  /** When the suggestion lapses and the meeting stays put. */
+  expiresAt: string
+  /** The ORGANIZER's zone, the one every time on the page is drawn in. */
+  timeZone: string
+  /**
+   * `open`, `accepted`, `declined`, `expired` or `withdrawn`.
+   *
+   * The server folds the clock into this: a hold whose expiry has passed reads
+   * `expired` whether or not anything has been round to mark it. Nothing on the
+   * client re-derives that — the expiry is the organizer's clock, not the
+   * browser's, and a second opinion about it would draw Accept over a
+   * suggestion that will refuse it.
+   */
+  state: string
+}
+
+/** The suggestion behind an accept/decline link. 404 for a token matching nothing. */
+export function getProposal(token: string, signal?: AbortSignal): Promise<Proposal> {
+  return request<Proposal>(`/bookings/proposals/${encodeURIComponent(token)}`, { signal })
+}
+
+/**
+ * Moves the meeting, and answers the booking as it now stands.
+ *
+ * 409 if somebody already answered or if the hold lapsed — the two are separate
+ * codes on the wire and neither is worth a separate sentence to a reader, since
+ * what to do about both is to look at where things now stand.
+ */
+export function acceptProposal(token: string, signal?: AbortSignal): Promise<Booking> {
+  return post<Booking>(`/bookings/proposals/${encodeURIComponent(token)}/accept`, undefined, signal)
+}
+
+/** Leaves the meeting exactly where it is, and answers the closed proposal. */
+export function declineProposal(token: string, signal?: AbortSignal): Promise<Proposal> {
+  return post<Proposal>(`/bookings/proposals/${encodeURIComponent(token)}/decline`, undefined, signal)
 }
 
 /**

@@ -1401,6 +1401,98 @@ const main = async () => {
     })
   }
 
+  // ---- 14. The propose panel: whether the operator's time picker fits the
+  // width it is actually given. It was first written into the Actions cell of
+  // RecordTable, and this check is what caught it — `.calendar-cols` resolved
+  // its month track to 55px at 1280 and 18px at 899, because minmax(0, 300px)
+  // has a zero minimum and shrinks silently rather than refusing, which put
+  // seven day columns and their weekday headings on top of each other at 8px
+  // and then 3px a square. The panel now swaps in over the list the way
+  // LinkEditor does, and what this asserts is that every square stays at the
+  // 44px tap floor's own 40px box and nothing scrolls sideways.
+  for (const [label, viewport] of [
+    ['propose-2560', WIDE],
+    ['propose-1440', LAPTOP],
+    ['propose-1280', DESKTOP],
+    ['propose-899', TABBAR],
+    ['propose-759', RECORDS],
+    ['propose-440', PHONE],
+  ]) {
+    await withPage(browser, { viewport }, async (page) => {
+      await adminReady(page, '/meetings')
+      const opener = await page.$('button:has-text("Suggest a new time")')
+      if (opener === null) {
+        record(label, { opened: false, reason: 'no confirmed meeting on /admin/meetings to propose against' })
+        return
+      }
+      await opener.click()
+      await page.waitForSelector('.calendar-cols', { timeout: 10000 })
+      // The slot column resolves after the month's slots read.
+      await page.waitForTimeout(1500)
+      await page.screenshot({ path: `${OUT}/${label}.png`, fullPage: true })
+
+      // Picked, because the commit button only exists once a time is chosen and
+      // its visibility is the second half of this check. Manage.tsx's
+      // `.desktop-cta` is display:none below 861px — it pairs with a fixed
+      // action bar the admin shell does not have — so a panel that borrowed it
+      // would leave the operator on a phone with a selection and no way to send
+      // it, at exactly the widths no unit test can see.
+      const slot = await page.$('.slot')
+      if (slot !== null) {
+        await slot.click()
+        await page.waitForTimeout(300)
+      }
+
+      record(label, await page.evaluate((describe) => {
+        const describeOne = eval(describe)
+        const box = (el) => {
+          if (el === null) return null
+          const r = el.getBoundingClientRect()
+          return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }
+        }
+        const cols = document.querySelector('.calendar-cols')
+        const days = document.querySelector('.days')
+        const slots = document.querySelector('.slots')
+        const doc = document.scrollingElement
+        return {
+          opened: true,
+          viewportWidth: window.innerWidth,
+          gridTemplateColumns: cols ? getComputedStyle(cols).gridTemplateColumns : null,
+          calendarCols: box(cols),
+          days: box(days),
+          // The square is the whole question: seven columns in a track too
+          // narrow for them is a calendar nobody can read, and no test with
+          // no layout engine can see it.
+          // A button rather than any .day: the leading blanks are spans, and
+          // the question is the size of a square somebody has to press.
+          firstDay: document.querySelector('button.day')
+            ? describeOne(document.querySelector('button.day'))
+            : null,
+          slots: box(slots),
+          firstSlot: document.querySelector('.slot') ? describeOne(document.querySelector('.slot')) : null,
+          documentOverflowsHorizontally: doc.scrollWidth > doc.clientWidth,
+          // A table left on screen under the picker would mean the swap did
+          // not happen and the panel is back inside a cell.
+          tableStillOnScreen: document.querySelector('.table') !== null,
+          commit: (() => {
+            const button = [...document.querySelectorAll('button')].find(
+              (n) => /suggest this time/i.test(n.textContent ?? ''),
+            )
+            if (button === undefined) return { present: false }
+            const r = button.getBoundingClientRect()
+            return {
+              present: true,
+              visible: r.width > 0 && r.height > 0,
+              width: Math.round(r.width),
+              height: Math.round(r.height),
+              display: getComputedStyle(button.parentElement).display,
+            }
+          })(),
+        }
+      }, DESCRIBE))
+    })
+  }
+
   await browser.close()
   writeFileSync(`${OUT}/results.json`, JSON.stringify(results, null, 2))
   console.log(`\nwrote ${OUT}/results.json and screenshots to ${OUT}/`)

@@ -4,12 +4,20 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import Meetings from '../src/routes/admin/Meetings'
-import { ApiError } from '../src/lib/api'
+import { ApiError, getSlots } from '../src/lib/api'
 import { cancelMeeting, listMeetings } from '../src/routes/admin/adminMeetings'
-import type { Meeting, Meetings as List } from '../src/routes/admin/adminMeetings'
+import type { Meeting, MeetingProposal, Meetings as List } from '../src/routes/admin/adminMeetings'
 
-// ApiError and asApiError are never mocked and are not in this module: the page
+// The propose panel reads the PUBLIC slots endpoint. Mocked here so opening the
+// panel from a row makes no fetch, and so the argument the row hands it can be
+// asserted — that argument is the row's own slug, and nothing else on the page
+// would notice it being wrong. ApiError and asApiError stay real: the page
 // reads a failure through `asApiError`, which branches on `instanceof`.
+vi.mock('../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/api')>()),
+  getSlots: vi.fn(),
+}))
+
 vi.mock('../src/routes/admin/adminMeetings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/adminMeetings')>()),
   listMeetings: vi.fn(),
@@ -34,6 +42,7 @@ const BOOKER_TIME = '18:00'
 const BOOKER_ZONE = 'Asia/Tokyo'
 
 const LINK_NAME = 'Mentorship'
+const SLUG = 'mentorship'
 
 const synced: Meeting = {
   id: '0199a1f0-0000-7000-8000-000000000001',
@@ -43,12 +52,14 @@ const synced: Meeting = {
   status: 'confirmed',
   linkId: '0199a1f0-0000-7000-8000-00000000000a',
   linkName: LINK_NAME,
+  slug: SLUG,
   participantName: 'Ada Lovelace',
   participantEmail: 'ada@example.com',
   participantTimeZone: BOOKER_ZONE,
   calendarSynced: true,
   calendarProvider: 'google',
   calendarError: null,
+  proposal: null,
 }
 
 /** The provider was asked and refused. Part B recorded why; the row has to say it. */
@@ -94,6 +105,7 @@ async function rowFor(meeting: Meeting): Promise<HTMLElement> {
 
 beforeEach(() => {
   vi.mocked(listMeetings).mockResolvedValue(answer([synced]))
+  vi.mocked(getSlots).mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -204,7 +216,7 @@ test('a confirmed meeting can be called off from its own row', async () => {
 
   // The whole reason this tab stopped being read-only: the alternative was
   // editing the calendar by hand, which leaves it disagreeing with Kairos.
-  expect(within(row).getByRole('button', { name: 'Cancel' })).toBeDefined()
+  expect(within(row).queryByRole('button', { name: 'Cancel' })).not.toBeNull()
 })
 
 test('cancelling a row redraws that row from the answer rather than reloading the table', async () => {
@@ -295,4 +307,128 @@ test('a failure the shell cannot fix is reported in place, and no table under it
 
   expect(await screen.findByText('The database is busy.')).toBeDefined()
   expect(screen.queryByRole('table')).toBeNull()
+})
+
+// The day after the meeting, and the hold running out the day after that.
+const SUGGESTED = '2026-09-08T09:00:00Z'
+const LAPSES = '2026-09-10T09:00:00Z'
+
+const closedProposal: MeetingProposal = {
+  id: '0199a1f0-0000-7000-8000-00000000000b',
+  start: SUGGESTED,
+  expiresAt: LAPSES,
+  state: 'declined',
+}
+
+/** The invitee was offered a new time and said no. The meeting stands. */
+const declined: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000005',
+  proposal: closedProposal,
+}
+
+/** Nobody answered before the hold ran out. Not the same thing as a refusal. */
+const lapsed: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000006',
+  proposal: { ...closedProposal, state: 'expired' },
+}
+
+test('a declined suggestion says so on the row, and offers another one', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([declined]))
+  render(<Meetings />)
+
+  const row = await rowFor(declined)
+
+  expect(within(row).getByText(/declined/i)).toBeDefined()
+  // The recovery is on the row beside the news: the operator's next move after
+  // a refusal is almost always a second suggestion.
+  expect(within(row).queryByRole('button', { name: /suggest a new time/i })).not.toBeNull()
+})
+
+test('a lapsed suggestion does not read as a refusal', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([lapsed]))
+  render(<Meetings />)
+
+  const row = await rowFor(lapsed)
+
+  // Nobody answered, which is a different fact about the invitee from "they
+  // said no" — and the difference decides whether the operator chases them.
+  expect(within(row).getByText(/nobody answered|no answer|lapsed/i)).toBeDefined()
+  expect(within(row).queryByText(/declined/i)).toBeNull()
+})
+
+test('a meeting nobody ever proposed anything for says nothing about proposals', async () => {
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+
+  expect(within(row).queryByText(/declined|lapsed|no answer/i)).toBeNull()
+  expect(within(row).queryByRole('button', { name: /suggest a new time/i })).not.toBeNull()
+})
+
+/** 13:00 UTC, which is 09:00 in New York and 15:00 in Warsaw. */
+const SUGGESTED_AT_ONE = '2026-09-08T13:00:00Z'
+
+/** Under an open hold, so its row offers to take the suggestion back. */
+const proposed: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000007',
+  proposal: { ...closedProposal, start: SUGGESTED_AT_ONE, state: 'open' },
+}
+
+// A third zone, used by the hold test alone. ORGANIZER_ZONE above is Warsaw,
+// which is also the zone of the machine this suite was written on — so an
+// assertion against it cannot tell the stored setting apart from the browser's
+// guess, which is exactly what that test is about. It still cannot on a runner
+// sitting in New York; there is no zone that is nobody's.
+const REMOTE_ZONE = 'America/New_York'
+const PROPOSED_REMOTE_TIME = '09:00'
+const PROPOSED_WARSAW_TIME = '15:00'
+
+test('the row opens the picker over the list, for the link that row was booked through', async () => {
+  render(<Meetings />)
+  const row = await rowFor(synced)
+
+  fireEvent.click(within(row).getByRole('button', { name: /suggest a new time/i }))
+
+  // Over the list rather than inside the cell: a month grid measured 8px a
+  // square in the Actions column at 1280, so the picker takes the page the way
+  // LinkEditor does. The table is gone while it is up.
+  expect(await screen.findByRole('heading', { name: /suggest a new time/i })).toBeDefined()
+  expect(screen.queryByRole('table')).toBeNull()
+
+  // The slug and not the link id: GET /links/{slug}/slots takes no id, so a row
+  // handing its id down would ask about a link that does not exist — and would
+  // do it silently, since an empty answer looks like a full calendar.
+  await waitFor(() =>
+    expect(getSlots).toHaveBeenCalledWith(
+      SLUG,
+      expect.objectContaining({ duration: synced.durationMinutes }),
+      expect.anything(),
+    ),
+  )
+})
+
+test('backing out of the picker brings the list back rather than reloading it', async () => {
+  render(<Meetings />)
+  const row = await rowFor(synced)
+  const reads = vi.mocked(listMeetings).mock.calls.length
+
+  fireEvent.click(within(row).getByRole('button', { name: /suggest a new time/i }))
+  fireEvent.click(await screen.findByRole('button', { name: /back/i }))
+
+  expect(await screen.findByRole('table')).toBeDefined()
+  // The rows never left the page's own state, so coming back costs nothing.
+  expect(vi.mocked(listMeetings).mock.calls.length).toBe(reads)
+})
+
+test('an open hold is drawn on the row in the organizer zone, not the browser', async () => {
+  vi.mocked(listMeetings).mockResolvedValue({ ...answer([proposed]), timeZone: REMOTE_ZONE })
+  render(<Meetings />)
+
+  const row = await rowFor(proposed)
+
+  expect(within(row).getByText(new RegExp(PROPOSED_REMOTE_TIME))).toBeDefined()
+  expect(within(row).queryByText(new RegExp(PROPOSED_WARSAW_TIME))).toBeNull()
 })

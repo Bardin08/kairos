@@ -3,6 +3,7 @@ import { Route, Switch } from 'wouter'
 import Book from './pages/Book'
 import Integrations from './pages/Integrations'
 import Manage from './pages/Manage'
+import Proposal from './pages/Proposal'
 
 // The workbench is split out of the entry chunk deliberately. An invitee opens
 // /book/:slug from a link somebody pasted into a message, on a phone, on mobile
@@ -29,6 +30,12 @@ export default function App() {
           the URL the booking page shows after a booking; the two have to agree
           or nothing is manageable. */}
       <Route path="/manage/:token" component={Manage} />
+      {/* Keyed on the PROPOSAL's token, which is not the manage token and
+          cannot be exchanged for one: it answers a single question and is
+          closed by the answer. The path is BookingMailer.ProposalPath, and the
+          mail is the only place this URL is ever built — rename this route and
+          every suggestion already sent lands on the not-found page. */}
+      <Route path="/proposal/:token" component={Proposal} />
       {/* Fixed, and not a preference: IntegrationEndpoints.ReturnPath is this
           string, and every OAuth callback redirects to it carrying
           ?connected= or ?error=. Rename this route and the provider bounces a

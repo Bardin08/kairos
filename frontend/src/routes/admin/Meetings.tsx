@@ -5,6 +5,7 @@ import { localZone, todayIn, zonedDate, zonedTime } from '../../lib/time'
 import { listMeetings, type Meeting, type Meetings as List } from './adminMeetings'
 import Failure from './Failure'
 import MeetingActions from './MeetingActions'
+import ProposePanel from './ProposePanel'
 import { shiftDays, shortMonth } from './adminTime'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is the
@@ -144,6 +145,12 @@ export default function Meetings() {
   // where the two differ this effect runs once more with corrected dates and
   // settles. Nothing here hard-codes a zone, so Task 6's picker flows through.
   const [zone, setZone] = useState(localZone)
+  // Which meeting the operator is choosing a time for, if any. The picker is a
+  // whole screen rather than a panel in the Actions cell — see ProposePanel for
+  // the measurement that decided it — so the page owns the state and the row
+  // only asks. The meeting itself rather than its id: the picker needs the slug
+  // and the length, and the row already has both in hand.
+  const [proposing, setProposing] = useState<Meeting | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -185,6 +192,23 @@ export default function Meetings() {
               meeting.id === changed.id ? changed : meeting,
             ),
           },
+    )
+  }
+
+  // The picker replaces the list, exactly as LinkEditor replaces it on the links
+  // tab. Rendered before the columns are built, so nothing below it runs while
+  // the table is not on screen.
+  if (proposing !== null) {
+    return (
+      <ProposePanel
+        meeting={proposing}
+        zone={zone}
+        onProposed={(changed) => {
+          applyChange(changed)
+          setProposing(null)
+        }}
+        onCancel={() => setProposing(null)}
+      />
     )
   }
 
@@ -254,7 +278,13 @@ export default function Meetings() {
       kind: 'control',
       cell: (meeting) =>
         meeting.status === CONFIRMED ? (
-          <MeetingActions meetingId={meeting.id} onChanged={applyChange} />
+          <MeetingActions
+            meetingId={meeting.id}
+            zone={zone}
+            proposal={meeting.proposal}
+            onPropose={() => setProposing(meeting)}
+            onChanged={applyChange}
+          />
         ) : null,
     },
   ]
