@@ -5,12 +5,10 @@ using NodaTime;
 namespace Kairos.Api.Availability;
 
 /// <summary>
-/// One booking-page query: the slots, and everything the query had to resolve to produce them.
-/// The resolved fields are returned rather than recomputed, because the create path re-checks
-/// availability through this same call and then writes with
-/// <c>BookingWriter.TryCreate(linkId, ..., queryingMargin)</c>. Resolving the link and its limits
-/// again in the endpoint would duplicate eight lines across the two paths that must never
-/// disagree, and when they drift the page offers a slot the writer refuses.
+/// One booking-page query: the slots, and everything resolved to produce them. Returned rather
+/// than recomputed because the create path re-checks availability through this same call, then
+/// writes with <c>BookingWriter.TryCreate(linkId, ..., queryingMargin)</c>. Resolving twice
+/// duplicates eight lines across two paths that must never disagree.
 /// </summary>
 /// <param name="LinkId">The resolved link. The slug is public; this is what writes reference.</param>
 /// <param name="DurationMinutes">The duration actually used — the requested one, or the only one a single-duration link offers.</param>

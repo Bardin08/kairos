@@ -114,15 +114,14 @@ public sealed class SlotQuery(
     }
 
     /// <summary>
-    /// The one duration this query is for. A link with no durations at all is reachable — the
-    /// rule spans two tables and SQLite has no deferred CHECK — and <c>Durations.Default</c> is
+    /// The one duration this query is for. A link with no durations is reachable — the rule spans
+    /// two tables and SQLite has no deferred CHECK — and <c>Durations.Default</c> is
     /// <c>durations[0]</c>, so without this the public page dies on an
-    /// <see cref="ArgumentOutOfRangeException"/> that names "index" and nothing else.
+    /// <see cref="ArgumentOutOfRangeException"/> naming "index" and nothing else.
     /// </summary>
     /// <remarks>
-    /// No slug reaches these three messages, by <see cref="Features.Links.LinksEndpoints"/>'s rule:
-    /// the caller's value is never reflected into a response body. It costs the sentence nothing —
-    /// the slug is in the URL the caller just sent.
+    /// No slug reaches these three messages, by <see cref="Features.Links.LinksEndpoints"/>'s rule.
+    /// It costs the sentence nothing: the slug is in the URL the caller just sent.
     /// </remarks>
     private static int Resolve(IReadOnlyList<int> offered, int? requested)
     {

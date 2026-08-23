@@ -3,15 +3,14 @@ using System.Security.Claims;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// Who counts as the operator. The policy this feeds was <c>RequireAuthenticatedUser()</c> and
-/// nothing else, which is not an authorization decision but the absence of one: it made every
-/// account the identity provider would authenticate a full operator.
+/// Who counts as the operator. The policy this feeds was <c>RequireAuthenticatedUser()</c> alone,
+/// the absence of an authorization decision: every account the provider would authenticate was a
+/// full operator.
 /// </summary>
 /// <remarks>
-/// A group claim rather than a subject list as the mandatory half, because a group is what an
-/// identity provider is for: adding a second operator is a membership change there instead of a
-/// redeployment here. The subject allowlist is the optional second gate, for the deployment whose
-/// provider hands out the group more widely than Kairos should trust.
+/// A group claim as the mandatory half, because adding a second operator is then a membership
+/// change at the provider rather than a redeployment here. The subject allowlist is an optional
+/// second gate, for a provider that hands the group out more widely than Kairos should trust.
 /// </remarks>
 public static class AdminAuthorization
 {

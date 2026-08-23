@@ -31,19 +31,18 @@ public static class SecurityHeaders
     public const string NoSniffing = "nosniff";
 
     /// <summary>
-    /// The whole URL, withheld from everybody. It does not keep the manage token out of a log —
-    /// the origin server already writes <c>GET /manage/&lt;token&gt;</c> as its request line. What
-    /// it stops is the token travelling as <c>Referer</c> on every OTHER request the manage page
-    /// makes, which is where the weaker <c>strict-origin-when-cross-origin</c> leaks: it still
-    /// sends the full URL same-origin, so each fetch would carry the token into a log line of its
-    /// own, and any outbound link would carry the origin off this host entirely.
+    /// The whole URL, withheld from everybody. Not to keep the manage token out of a log — the
+    /// origin server already writes <c>GET /manage/&lt;token&gt;</c> — but to stop it travelling as
+    /// <c>Referer</c> on every OTHER request the manage page makes. That is where
+    /// <c>strict-origin-when-cross-origin</c> leaks: still the full URL same-origin, so every fetch
+    /// buys a log line of its own.
     /// </summary>
     public const string NoReferrer = "no-referrer";
 
     /// <summary>
     /// Kairos asks for none of the three, so the page is refused them rather than merely never
-    /// calling for them. Named individually because an empty allowlist is per-feature; there is no
-    /// spelling of "deny everything".
+    /// asking. Named individually: an empty allowlist is per-feature, and there is no spelling of
+    /// "deny everything".
     /// </summary>
     public const string NoDeviceAccess = "camera=(), microphone=(), geolocation=()";
 

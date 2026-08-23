@@ -9,16 +9,13 @@ using NodaTime;
 namespace Kairos.Api.Availability;
 
 /// <summary>
-/// The organizer's own confirmed bookings, and the slots held by open proposals. Every link's,
-/// not just the queried one: availability is one calendar, and a link that could only see its own
-/// would happily sell an hour another link already sold.
+/// The organizer's own confirmed bookings and the slots held by open proposals — every link's, not
+/// just the queried one, because availability is one calendar.
 /// </summary>
 /// <remarks>
 /// A hold is busy while its proposal is open, its expiry is in the future and the meeting behind it
-/// is still on. The expiry is compared here rather than trusted to the sweeper that marks lapsed
-/// rows: a hold whose expiry has passed or whose meeting was cancelled underneath it stops holding
-/// at that instant, so a sweeper that is late, dead or never started makes the mail late and never
-/// makes availability wrong.
+/// is still on. The expiry is compared here rather than trusted to the sweeper, so a sweeper that
+/// is late, dead or never started makes the mail late and never availability wrong.
 /// </remarks>
 public sealed class LocalBusySource(KairosDbContext context, IClock clock) : IBusySource
 {

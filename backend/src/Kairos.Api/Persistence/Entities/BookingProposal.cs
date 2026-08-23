@@ -7,9 +7,8 @@ namespace Kairos.Api.Persistence.Entities;
 /// <remarks>
 /// While <see cref="State"/> is <see cref="ProposalState.Open"/> and <see cref="ExpiresAt"/> is in
 /// the future, this row's interval is busy for everyone — otherwise a stranger books the proposed
-/// slot while the invitee is reading the mail, and the acceptance fails on a slot that no longer
-/// exists. The booking's own slot stays confirmed throughout, so a meeting under proposal holds
-/// two intervals and gives one of them back whichever way the invitee answers.
+/// slot while the invitee reads the mail. The booking's own slot stays confirmed throughout, so a
+/// meeting under proposal holds two intervals and gives one back either way.
 /// </remarks>
 public sealed class BookingProposal
 {

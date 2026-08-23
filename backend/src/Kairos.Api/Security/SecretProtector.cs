@@ -4,15 +4,14 @@ using System.Text;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// AES-GCM for the handful of values that must not sit in the database in the clear.
-/// The key arrives from configuration, sourced from 1Password by External Secrets Operator;
-/// it is never generated at runtime, because a key the app invents cannot survive a restart.
+/// AES-GCM for the handful of values that must not sit in the database in the clear. The key comes
+/// from configuration, via 1Password and External Secrets Operator, never generated at runtime — an
+/// invented key cannot survive a restart.
 /// </summary>
 /// <remarks>
-/// The reason this exists rather than a plain column: Litestream 0.5.x cannot encrypt and
-/// silently ignores an age: block, so a refresh token written in the clear would be streamed
-/// to object storage in the clear by a tool that accepted an encryption directive and dropped
-/// it. Encrypting in the column makes the backup path's behaviour stop being load-bearing.
+/// Why a column and not the backup: Litestream 0.5.x cannot encrypt and silently ignores an age:
+/// block, so a clear refresh token would be streamed to object storage in the clear by a tool that
+/// accepted the directive and dropped it. Encrypting here stops the backup path being load-bearing.
 /// </remarks>
 public sealed class SecretProtector
 {

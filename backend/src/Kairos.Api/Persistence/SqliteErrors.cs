@@ -2,18 +2,12 @@ using Microsoft.Data.Sqlite;
 
 namespace Kairos.Api.Persistence;
 
-/// <summary>
-/// Reads what SQLite actually said, through however many layers wrapped it.
-/// </summary>
+/// <summary>Reads what SQLite actually said, through however many layers wrapped it.</summary>
 /// <remarks>
-/// The outbox leans on a unique index to do the work an application-level "have I already done
-/// this?" check would, so two callers have to recognise the constraint firing and treat it as an
-/// answer rather than a fault. One error number written down twice is one of them going stale.
-/// <para>
-/// SQLITE_BUSY has two readers of its own: the exception handler that turns a contended write into
-/// a 503 with a Retry-After, and the readiness check that answers the opposite way for the same
-/// condition — busy is a queue, so the process stays in service. Two answers, one number.
-/// </para>
+/// The outbox leans on a unique index instead of an application-level "have I already done this?",
+/// so two callers must read the constraint firing as an answer rather than a fault. SQLITE_BUSY has
+/// two readers of its own, the busy handler and the readiness check, which answer it opposite ways.
+/// One error number written down twice is one of them going stale.
 /// </remarks>
 public static class SqliteErrors
 {

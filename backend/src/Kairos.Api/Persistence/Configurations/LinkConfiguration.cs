@@ -39,19 +39,17 @@ public sealed class LinkConfiguration : IEntityTypeConfiguration<Link>
         });
 
         // A link must offer at least one duration — Durations.Default is durations[0] and throws
-        // on an empty list, which every public booking-page load hits. Deliberately not enforced
-        // here, and not for want of a way to express it.
+        // on an empty list. Deliberately not enforced here, and not for want of a way.
         //
-        // Nothing cheap reaches it: a CHECK cannot span two tables, and the foreign key forces the
-        // parent row in before any child, so an immediate constraint would reject the very insert
-        // that creates the link. SQLite's DEFERRABLE applies to foreign keys only, so there is no
-        // deferred CHECK to postpone to commit. What would work is the mandatory-one trick — a NOT
-        // NULL DefaultDurationMinutes column on Links carrying a circular composite foreign key to
-        // LinkDurations(LinkId, Minutes), declared DEFERRABLE INITIALLY DEFERRED so the cycle
-        // resolves at commit. It costs a column and a hand-edited migration, because EF's SQLite
-        // provider does not emit DEFERRABLE, and it buys a rule the writer has to check anyway.
+        // Nothing cheap reaches it: a CHECK cannot span two tables, and the foreign key puts the
+        // parent row in first, so an immediate constraint would reject the insert that creates the
+        // link. SQLite's DEFERRABLE covers foreign keys only, so there is no deferred CHECK. What
+        // works is the mandatory-one trick — a NOT NULL DefaultDurationMinutes column carrying a
+        // circular composite foreign key to LinkDurations(LinkId, Minutes), DEFERRABLE INITIALLY
+        // DEFERRED so the cycle resolves at commit — and it costs a column and a hand-edited
+        // migration, EF's SQLite provider not emitting DEFERRABLE, to buy a rule the writer checks
+        // anyway.
         //
-        // So the invariant belongs to whoever writes links: the handler must reject a create or
-        // update that leaves a link with zero durations.
+        // So the invariant is the writer's: reject a create or update leaving zero durations.
     }
 }
