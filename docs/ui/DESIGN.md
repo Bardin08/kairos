@@ -148,12 +148,12 @@ components:
 
 A departure board exists for one reason: a stranger, under time pressure, in bad light, has to become certain of one thing. It does not decorate. Everything on it is either a time, a destination, or the mark showing which row is yours. Kairos is built to that standard. An invitee arrives from a link someone pasted into a message, on a phone, with ninety seconds of attention and no intention of ever learning the interface. They need to see which times are real, understand which one they have selected, and leave.
 
-The system is therefore quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, and it is spent on exactly two things: the time the invitee has selected, and the action that commits it. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is Source Sans 3, self-hosted and subset so that an English invitee pays 28.7 KB for it and a Polish one pays for the accents only when a Polish name is actually on the page. The single place typography is load-bearing is numerals, and it is treated that way: figures come from a 2.3 KB digits-only cut of IBM Plex Mono, scoped by `unicode-range` so it can lead the global stack while every letter behind it stays Source Sans. A time on a departure board is not the same kind of thing as a word, and here it does not look like one.
+The system is therefore quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, and it is spent on three things: the time the invitee has selected, the action that commits it, and the current tab in the operator's phone tab bar. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is Source Sans 3, self-hosted and subset so that an English invitee pays 28.7 KB for it and a Polish one pays for the accents only when a Polish name is actually on the page. The single place typography is load-bearing is numerals, and it is treated that way: figures come from a 2.3 KB digits-only cut of IBM Plex Mono, scoped by `unicode-range` so it can lead the global stack while every letter behind it stays Source Sans. A time on a departure board is not the same kind of thing as a word, and here it does not look like one.
 
 The same vocabulary carries the operator's workbench without a second design. Density rises — tables, patterns, records — but nothing new is introduced: the same ramp, the same hairlines, the same accent discipline, the same figures. A screen that needs a device this system does not have is usually a screen that has misunderstood the task.
 
 **Key Characteristics:**
-- One accent, spent only on the selection and the primary action
+- One accent, spent only on the selection, the primary action and the current tab
 - Hairlines and tonal layering carry structure; shadow is reserved for what floats
 - Tabular figures everywhere a number appears
 - 44px minimum touch target on every viewport, not only touch ones
@@ -181,7 +181,14 @@ Cool neutrals at a single hue with one saturated accent; nothing else is coloure
 
 ### Named Rules
 
-**The Two Jobs Rule.** The accent has exactly two jobs: mark the selected time, and mark the action that commits it. A hover state, a link, a badge, an icon or a heading tinted with the accent has taken a job that is not its own.
+**The Two Jobs Rule.** The accent has exactly three jobs: mark the selected time, mark the action that commits it, and mark where you are — which on this product means the current tab in the phone tab bar, and nothing else that navigates. The rail marks its own current destination with an inset fill and heavier weight rather than with the accent, and that is not a gap to be filled. The wordmark is the single exemption: a brand mark is not a control and holds no state, so it takes no job at all. The third job was decided 2026-08-16, after a measurement read the tab bar as a violation and the Navigation section below turned out to be the document that was right; this rule was rewritten to say so on 2026-08-23. The code changed on neither date. A hover state, a link, a badge, an icon or a heading tinted with the accent has still taken a job that is not its own. The name stays: the rule is known by it, and a rule nobody can cite by name is a rule nobody cites.
+
+Four uses that predate the third job were judged against the amended wording on 2026-08-23 rather than assumed compliant. Each gets a verdict, because "it has always looked like that" is not one:
+
+- **`.wordmark-glyph` — exempt, and identity is an exemption rather than a fourth job.** A job is something the accent does to a control the reader can act on; the mark is the one place the colour is the brand rather than a signal. Nothing acquires the exemption by resembling it — an icon tinted to look like the mark is still an icon tinted with the accent.
+- **`.pattern-day[data-on="true"]` — compliant, job one at the scale a pattern is edited in.** The weekday chips say which days a pattern opens, which is the selected time seen a week at a time rather than a slot at a time, and they say it in the wash, which the palette already defines as the register where the accent is present without competing with a selection. The chips are `aria-hidden` and the same days are named in words on the line below, so the fill is a picture of a fact stated elsewhere and the Second Channel Rule holds too.
+- **`a { color: var(--accent-text) }` — violation, not closed here.** Argued under *Open against the Two Jobs Rule* at the end of this document, with what closing it costs.
+- **`.slot:hover` — violation, not closed here.** Same section, same reason: the declaration is one line and the decision behind it is not.
 
 **The Second Channel Rule.** No state is carried by hue alone. An available day carries a dot as well as its ink; a live link carries a filled dot and a paused one carries a hollow dot of the same size; an invalid field carries a message and an icon, not just a red border. Every state must survive a monochrome screenshot.
 
@@ -297,7 +304,7 @@ A day is a number, not a tile. The 44px cell is a hit area; paint appears only o
 ## Do's and Don'ts
 
 ### Do:
-- **Do** spend the accent only on the selected time and the primary action.
+- **Do** spend the accent only on the selected time, the action that commits it, and the tab the operator is currently on.
 - **Do** set every time, date, duration and count in tabular figures.
 - **Do** give every state a second channel — a dot, a shape, a weight, a message.
 - **Do** keep 44px targets everywhere, and put the committing action at the bottom edge on phones.
@@ -313,3 +320,11 @@ A day is a number, not a tile. The 44px cell is a hit area; paint appears only o
 - **Don't** set layout in JavaScript. Composition belongs in a media query and must survive with JS off.
 - **Don't** add a second entrance animation. There is exactly one authored motion moment: the slot list re-staggering when the day or duration changes, 14ms per item on an exponential ease-out. Everything else is state feedback under 140ms.
 - **Don't** nest cards, and don't reach for a modal for a task that needs neither interruption nor protected focus.
+
+## Open against the Two Jobs Rule
+
+Two accent uses were judged violations on 2026-08-23 and deliberately left standing by the pull request that judged them: in both the declaration is one line and the decision behind it is not. The third entry is not a violation at all — it is this document's own superseded wording, left standing in a file that copies it. They are listed here as well as in the verdicts under the rule, because a follow-up that lives only inside a paragraph is a follow-up nobody schedules.
+
+- **`kairos.css:526` — `a { color: var(--accent-text) }`.** The rule names a link. Closing it means deciding what a link looks like once it is not accent-tinted — ink, with the underline it already carries doing the work — and reading that on a real page in both themes before it is typed, because the declaration governs every link the product will ever have rather than the one inline prose anchor it has today — `Integrations.tsx:350`. The other two anchors wear `.btn`, which sets its own `--btn-fg` and never sees the tint, which is why the exposure looked smaller than the decision is.
+- **`kairos.css:1123` — `.slot:hover`.** The rule names a hover state, and this one is on the single control where the accent already means *chosen*. The defence — that a wash on hover is job one at lower intensity — is exactly the ambiguity the rule exists to prevent, on the one element that cannot afford it. Closing it means moving the hover into the neutral ramp and then showing that hover, selected and unavailable are still three legibly different things at a 44px target in both themes. That is a look at the signature component, not a token swap.
+- **`.impeccable/design.json:133`, `:135`, `:143` — the machine-readable sidecar, still saying two.** Not a violation of the rule but a copy of the superseded wording, in the one file another tool reads instead of this one. The open part is not what it should say — it should say what `:184`, `:151`, `:156` and `:307` now say — but whether it is regenerated from this document or corrected by hand, which nobody has established. Answer that first; the edit is the easy half.

@@ -423,9 +423,23 @@ export default function Manage() {
 
               {chosen !== null && (
                 <div className="desktop-cta">
-                  <button className="btn btn-primary" type="button" data-loading={busy || undefined} onClick={runReschedule}>
-                    Move to {chosen.long}
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    data-loading={busy || undefined}
+                    onClick={runReschedule}
+                    // The label is a verb now, so the destination has to reach a
+                    // screen reader some other way or the control announces
+                    // "Move" and nothing else. Described by, not labelled by:
+                    // the button is still named "Move", and the date follows it.
+                    aria-describedby="reschedule-when"
+                  >
+                    Move
                   </button>
+                  {/* Beside the button rather than inside its label, exactly as
+                      Book.tsx:573 does it: figures set in the numeric face, and
+                      a button that does not resize as the date changes. */}
+                  <span className="muted t-sm numeric" id="reschedule-when">{chosen.long}</span>
                 </div>
               )}
             </div>
@@ -439,10 +453,19 @@ export default function Manage() {
             instead of jolting the list the moment a time is picked. */}
         <div className="actionbar" hidden={chosen === null}>
           <div className="grow">
-            <p className="actionbar-when numeric">{chosen?.short}</p>
+            {/* Its own id rather than the desktop CTA's: both bars stay mounted
+                at every width and only one is painted, so a shared id would put
+                two of them in the document at once. */}
+            <p className="actionbar-when numeric" id="reschedule-when-phone">{chosen?.short}</p>
             <p className="actionbar-meta numeric">{meta}</p>
           </div>
-          <button className="btn btn-primary" type="button" data-loading={busy || undefined} onClick={runReschedule}>
+          <button
+            className="btn btn-primary"
+            type="button"
+            data-loading={busy || undefined}
+            onClick={runReschedule}
+            aria-describedby="reschedule-when-phone"
+          >
             Move
           </button>
         </div>

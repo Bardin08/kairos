@@ -160,8 +160,8 @@
     --gray-950: #0E1014;
 
     /* ---- primitives: accent ---------------------------------------------
-       Spent on exactly two things: the selected time, and the primary action.
-       Anywhere else it is a bug. */
+       Three jobs: the selected time, the action that commits it, the current
+       destination. The wordmark is the one exemption; anywhere else, a bug. */
     --indigo-50:  #EEF0FE;
     --indigo-100: #DFE3FD;
     --indigo-200: #C3C9FA;
@@ -1199,8 +1199,21 @@
   }
   .input::placeholder, .textarea::placeholder { color: var(--text-tertiary); }
   .input:hover, .textarea:hover, .select:hover { border-color: var(--border-strong); }
-  .input:focus, .textarea:focus, .select:focus {
-    outline: none;
+  /* Two rings meet here and only one of them is this block's. The outline is
+     the product's single focus ring, set at :533 and never removed there; what
+     removed it was an `outline: none` in this block, and deleting that line is
+     the whole of the fix. The accent border and 3px wash below are the
+     control's own treatment, the one DESIGN.md's Inputs section specifies, and
+     they sit inside the outline rather than standing in for it.
+
+     :focus-visible rather than :focus leaves the question of when a ring is
+     warranted to the engine. On these controls the engine's answer is always:
+     measured 2026-08-23, an .input, a .textarea and a .select each match
+     :focus-visible on a pointer click as well as on Tab, in Chromium and in
+     WebKit — so a clicked field rings too, and the rename is not what put the
+     ring back. A clicked button matches neither, which is the distinction the
+     pseudo-class exists to draw. */
+  .input:focus-visible, .textarea:focus-visible, .select:focus-visible {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);
   }
@@ -1231,9 +1244,9 @@
   .field-row[data-invalid="true"] .input {
     border-color: var(--status-danger-fg);
   }
-  .field[data-invalid="true"] .input:focus,
-  .field[data-invalid="true"] .textarea:focus,
-  .field-row[data-invalid="true"] .input:focus {
+  .field[data-invalid="true"] .input:focus-visible,
+  .field[data-invalid="true"] .textarea:focus-visible,
+  .field-row[data-invalid="true"] .input:focus-visible {
     box-shadow: 0 0 0 3px var(--status-danger-bg);
   }
   /* `--measure` is not decoration on this one. Beside a form field the error is
@@ -1460,7 +1473,9 @@
     border: var(--border-width) dashed var(--border-default);
     background: transparent;
     /* Dresses a <select>, which is the one control here that arrives with an
-       arrow painted on. */
+       arrow painted on — and which, being a form control, takes .input's focus
+       treatment below: accent border and wash inside the outline, never
+       instead of it. */
     background-image: none;
     color: var(--text-secondary);
     font-size: var(--text-sm);
@@ -1468,7 +1483,6 @@
   }
   .chip-add:hover { border-color: var(--border-strong); color: var(--text-primary); }
   .chip-add:focus-visible {
-    outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);
   }

@@ -36,8 +36,20 @@ test('the invalid-state border and focus ring cover the row shape, not only the 
     `.field[data-invalid="true"] .input,\n  .field[data-invalid="true"] .textarea,\n  ${ROW_INVALID_INPUT} {\n    border-color: var(--status-danger-fg);`,
   )
   expect(css).toContain(
-    `.field[data-invalid="true"] .input:focus,\n  .field[data-invalid="true"] .textarea:focus,\n  ${ROW_INVALID_INPUT}:focus {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
+    `.field[data-invalid="true"] .input:focus-visible,\n  .field[data-invalid="true"] .textarea:focus-visible,\n  ${ROW_INVALID_INPUT}:focus-visible {\n    box-shadow: 0 0 0 3px var(--status-danger-bg);`,
   )
+})
+
+// The substance of the focus fix rather than its mechanics. `outline: none` on
+// the form controls is what actually removed the ring DESIGN.md says is never
+// removed; moving those selectors to :focus-visible was bookkeeping beside it,
+// and only the rename is pinned above. Comments are stripped first, because the
+// block explaining the fix names the declaration in prose and prose about a bug
+// is not the bug.
+test('no rule in the stylesheet removes the focus outline', () => {
+  const css = readFileSync(stylesheet, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  expect(css).not.toContain('outline: none')
 })
 
 // A margin or notice in minutes can legitimately run past 999. .ctl-num's

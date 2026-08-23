@@ -181,3 +181,47 @@ test('a refused reschedule reports beside the times, not as a banner above them'
   // And the time that was refused is gone, so it cannot be picked twice.
   expect(screen.queryByRole('button', { name: '13:00' })).toBeNull()
 })
+
+/**
+ * The phase-1 condition that did not hold: the date rendered inside the button's
+ * own label, in the proportional face, where `Book.tsx:573` puts the same date
+ * in a `numeric` span beside its button. Figures are the one place typography is
+ * load-bearing on this product — and a button whose width follows the date is
+ * the visible half of the same mistake.
+ */
+test('the reschedule CTA sets its date in the numeric face, beside the button', async () => {
+  vi.mocked(getBooking).mockResolvedValue(confirmed)
+  vi.mocked(getSlots).mockResolvedValue(['2026-09-07T11:00:00Z', '2026-09-07T11:30:00Z'])
+
+  renderManage()
+
+  fireEvent.click(await screen.findByRole('button', { name: /^reschedule$/i }))
+  fireEvent.click(await screen.findByRole('button', { name: '13:00' }))
+
+  // The verb alone. Every CTA on this page reads "Move" and none of them carries
+  // a figure in its label.
+  for (const cta of screen.getAllByRole('button', { name: /^move/i })) {
+    expect(cta.textContent).toBe('Move')
+  }
+
+  // And the date is on the page, in the face figures are set in. The time the
+  // click above chose, not merely a digit: /\d/ would pass on the date alone
+  // and on a stale label from the previous selection.
+  const when = document.querySelector('.desktop-cta .numeric')
+  expect(when?.textContent).toContain('13:00')
+
+  // Named by the verb, described by the date — otherwise the control announces
+  // "Move" and never says where to. Both bars, because both render a button
+  // with that label: the phone one is display:none beside this one at this
+  // width, never absent, and an accessible name is not a thing a media query
+  // gets to differ on.
+  for (const [bar, date] of [
+    ['.desktop-cta', '.desktop-cta .numeric'],
+    ['.actionbar', '.actionbar-when'],
+  ]) {
+    const cta = document.querySelector(`${bar} .btn-primary`)
+    const describes = document.querySelector(date)
+    expect(describes?.id).toBeTruthy()
+    expect(cta?.getAttribute('aria-describedby')).toBe(describes?.id)
+  }
+})
