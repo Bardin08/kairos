@@ -12,17 +12,15 @@ namespace Kairos.Api.Shared;
 /// <param name="Since">When the thing last worked, where that is known at all.</param>
 /// <param name="Link">
 /// A path inside this application, rooted at '/', never absolute: the screen makes it an href, and
-/// <see cref="Features.Admin.AlertsAdminEndpoints"/> refuses another origin rather than trusting
-/// every future source. Null where there is nothing to press.
+/// <see cref="Features.Admin.AlertsAdminEndpoints"/> refuses another origin. Null if nothing to press.
 /// </param>
 /// <param name="Details">
-/// What the copy interpolates and the fixed fields cannot hold — an account label, a count, a
-/// recipient. Three rules keep it from becoming a second untyped API:
+/// What the copy interpolates and the fixed fields cannot hold — a label, a count, a recipient.
+/// Three rules keep it from becoming a second untyped API:
 /// <list type="number">
 /// <item>Labels, codes and numbers, never prose, which <paramref name="Code"/> exists to prevent.</item>
 /// <item>Never a secret, or anything derived from one. The only reader is a browser.</item>
-/// <item>Keys are documented beside the code that emits them; an undocumented key is one no screen
-/// will read.</item>
+/// <item>Keys are documented beside the code emitting them; an undocumented key is unread.</item>
 /// </list>
 /// Empty rather than null, so nothing downstream null-checks it.
 /// </param>

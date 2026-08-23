@@ -17,10 +17,9 @@ namespace Kairos.Api.Security;
 /// </para>
 /// <para>
 /// The count is approximate under concurrency, in the direction of letting a request through: two
-/// requests missing the cache at the same instant both build a counter, one wins the entry, and the
-/// loser's increment lands on an object nobody reads. At most one extra request per concurrent
-/// first-arrival, in the opening instant of a window. Exactness would cost a lock on the hot path
-/// of every anonymous request.
+/// requests missing the cache at once both build a counter, one wins the entry, and the loser's
+/// increment lands on an object nobody reads. At most one extra request per concurrent
+/// first-arrival. Exactness would cost a lock on the hot path of every anonymous request.
 /// </para>
 /// </remarks>
 public sealed class RateLimitBudget(IClock clock, ILogger<RateLimitBudget> logger) : IDisposable

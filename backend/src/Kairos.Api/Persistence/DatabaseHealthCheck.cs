@@ -15,10 +15,8 @@ namespace Kairos.Api.Persistence;
 /// <para>
 /// A table is queried rather than <c>CanConnectAsync</c>: on SQLite the provider CREATES the file
 /// it is pointed at, so connecting to a database deleted out from under the process opens happily
-/// and reports a healthy, empty one. Only a query through the schema tells the two apart.
-/// </para>
-/// <para>
-/// Pending migrations are deliberately not part of the answer: <c>Program.cs</c> migrates before
+/// and reports a healthy, empty one. Only a query through the schema tells the two apart. Pending
+/// migrations are deliberately not part of the answer — <c>Program.cs</c> migrates before
 /// <c>app.Run()</c>, so anything left to apply means this endpoint is never served.
 /// </para>
 /// <para>
@@ -41,9 +39,9 @@ public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
     private const int QueryTimeoutSeconds = 1;
 
     /// <summary>
-    /// The registration's ceiling, a multiple so the commands below fire first: the health check
-    /// service reports a registration timeout as unready, undoing the decision above. Three, for a
-    /// probe's two bounded commands — the pragmas on opening a connection, and the query.
+    /// The registration's ceiling, a multiple so the commands below fire first: a registration
+    /// timeout is reported as unready, undoing the decision above. Three, for a probe's two bounded
+    /// commands — the pragmas on opening a connection, and the query.
     /// </summary>
     /// <remarks>
     /// A backstop, not the bound: a blocked SQLite call retries inside the native library, on the

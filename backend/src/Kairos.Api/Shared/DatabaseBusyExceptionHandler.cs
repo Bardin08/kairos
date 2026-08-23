@@ -16,12 +16,9 @@ namespace Kairos.Api.Shared;
 /// A separate handler ahead of <see cref="DomainExceptionHandler"/>, not a branch inside it or a
 /// catch at the call site. Inside, that handler would answer for something that is not a domain
 /// concept, and touching nothing but a <see cref="DomainException"/> is what keeps a bug a 500. At
-/// the call site it would add a failure branch to three endpoints written to have none.
-/// <para>
-/// Recognising the code lives in <see cref="SqliteErrors"/>, because
-/// <see cref="Persistence.DatabaseHealthCheck"/> recognises the same condition and answers it the
-/// other way round — coherent only while both read the same number.
-/// </para>
+/// the call site it would add a failure branch to three endpoints written to have none. Recognising
+/// the code lives in <see cref="SqliteErrors"/>, because
+/// <see cref="Persistence.DatabaseHealthCheck"/> reads the same number and answers it the other way.
 /// </remarks>
 public sealed class DatabaseBusyExceptionHandler(IProblemDetailsService problemDetails)
     : IExceptionHandler

@@ -41,14 +41,11 @@ public sealed class LinkConfiguration : IEntityTypeConfiguration<Link>
         // A link must offer at least one duration — Durations.Default is durations[0] and throws
         // on an empty list. Deliberately not enforced here, and not for want of a way.
         //
-        // Nothing cheap reaches it: a CHECK cannot span two tables, and the foreign key puts the
-        // parent row in first, so an immediate constraint would reject the insert that creates the
-        // link. SQLite's DEFERRABLE covers foreign keys only, so there is no deferred CHECK. What
-        // works is the mandatory-one trick — a NOT NULL DefaultDurationMinutes column carrying a
-        // circular composite foreign key to LinkDurations(LinkId, Minutes), DEFERRABLE INITIALLY
-        // DEFERRED so the cycle resolves at commit — and it costs a column and a hand-edited
-        // migration, EF's SQLite provider not emitting DEFERRABLE, to buy a rule the writer checks
-        // anyway.
+        // Nothing cheap reaches it: a CHECK cannot span two tables, the foreign key puts the parent
+        // row in first, and SQLite's DEFERRABLE covers foreign keys only. What works is the
+        // mandatory-one trick — a NOT NULL DefaultDurationMinutes column with a circular composite
+        // foreign key to LinkDurations(LinkId, Minutes), DEFERRABLE INITIALLY DEFERRED — costing a
+        // column and a hand-edited migration to buy a rule the writer checks anyway.
         //
         // So the invariant is the writer's: reject a create or update leaving zero durations.
     }

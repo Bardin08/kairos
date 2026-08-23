@@ -100,11 +100,10 @@ public static class SecurityHeaders
     }
 
     /// <summary>
-    /// The gate <c>UseHsts</c> applies, applied here instead. That middleware writes eagerly, so
-    /// the exception path clears its header and never rewrites it — measured: a 404 from a
-    /// DomainException went out over HTTPS with no HSTS, while a 404 from an unmapped route carried
-    /// it. Moving it below <c>UseExceptionHandler</c> does not help; that handler re-runs no
-    /// middleware. So the header comes from the callback above, the only thing outliving the clear.
+    /// The gate <c>UseHsts</c> applies, applied here instead. That middleware writes eagerly, so the
+    /// exception path clears its header — measured: a 404 from a DomainException went out over HTTPS
+    /// with no HSTS, while one from an unmapped route carried it. Moving it below
+    /// <c>UseExceptionHandler</c> does not help; that handler re-runs no middleware.
     /// </summary>
     /// <remarks>
     /// The scheme is the forwarded one — <c>UseForwardedHeaders</c> runs first — so this is what the
