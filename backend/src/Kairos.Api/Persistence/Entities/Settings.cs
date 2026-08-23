@@ -21,4 +21,7 @@ public sealed class Settings
     public int DailyCap { get; set; }
 
     public int StartIncrementMinutes { get; set; }
+
+    /// <summary>How long a proposed move holds its slot before it lapses. Hours, not minutes.</summary>
+    public int ProposalHoldHours { get; set; }
 }
