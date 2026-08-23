@@ -92,7 +92,7 @@ export default function AlertPanel({ alerts }: { alerts: Alert[] }) {
       <div id={listId} role="status" aria-live="polite" hidden={!open}>
         {open && (
           <div className="card card-pad-sm">
-            <div className="rowgroup">
+            <div className="group">
               {alerts.map((alert, index) => {
                 const worked = lastWorked(alert.since)
 
