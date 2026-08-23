@@ -32,6 +32,7 @@ public class BookingMailerTests
 {
     private const string ManageToken = "3f2504e04f8911d39a0c0305e82c3301";
     private const string BaseUrl = "https://kairos.example.com";
+    private const string ManageUrlFragment = "/manage/";
     private const string OrganizerAddress = "organizer@example.com";
     private const string BookerAddress = "guest@example.com";
     private const string BookerName = "Vlad";
@@ -121,6 +122,23 @@ public class BookingMailerTests
         ics.ShouldContain("SEQUENCE:2");
         CalendarPart(message).ContentType.Parameters["method"].ShouldBe("CANCEL");
         message.Subject.ShouldStartWith("Cancelled:");
+    }
+
+    /// <summary>
+    /// An operator's cancellation has no manage token to put in the mail, and cannot get one:
+    /// only the SHA-256 is stored. The notice still has to go, so the link is omitted rather than
+    /// invented — and it is worth nothing on a cancelled booking anyway.
+    /// </summary>
+    [Fact]
+    public void Compose_ACancellationWithNoManageToken_OmitsTheLinkAndStillCarriesTheCalendarPart()
+    {
+        var message = Compose(manageToken: null, notice: BookingNotice.Cancellation);
+
+        PlainPart(message).Text.ShouldNotContain(ManageUrlFragment);
+
+        var ics = Ics(message);
+        ics.ShouldContain("METHOD:CANCEL");
+        ics.ShouldContain("STATUS:CANCELLED");
     }
 
     /// <summary>
@@ -309,11 +327,12 @@ public class BookingMailerTests
     private static MimeMessage Compose(
         Booking? booking = null,
         EmailOptions? options = null,
-        BookingNotice notice = BookingNotice.Confirmation)
+        BookingNotice notice = BookingNotice.Confirmation,
+        string? manageToken = ManageToken)
     {
         using var stream = new MemoryStream();
         Mailer(options ?? Options(BaseUrl))
-            .Compose(booking ?? Booking(), ManageToken, notice)
+            .Compose(booking ?? Booking(), manageToken, notice)
             .WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);

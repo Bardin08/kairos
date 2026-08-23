@@ -55,7 +55,7 @@ public sealed class BookingMailer(
     /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
     public Task SendConfirmationAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Confirmation, booking, manageToken, cancellationToken);
 
@@ -69,7 +69,7 @@ public sealed class BookingMailer(
     /// </summary>
     public Task SendRescheduleAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
 
@@ -80,7 +80,7 @@ public sealed class BookingMailer(
     /// </summary>
     public Task SendCancellationAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Cancellation, booking, manageToken, cancellationToken);
 
@@ -108,7 +108,7 @@ public sealed class BookingMailer(
     private async Task SendAsync(
         BookingNotice notice,
         Booking booking,
-        string manageToken,
+        string? manageToken,
         CancellationToken cancellationToken)
     {
         if (!options.Value.IsConfigured)
@@ -169,12 +169,17 @@ public sealed class BookingMailer(
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
     /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
     /// </remarks>
-    public MimeMessage Compose(Booking booking, string manageToken, BookingNotice notice)
+    public MimeMessage Compose(Booking booking, string? manageToken, BookingNotice notice)
     {
         var settings = options.Value;
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
         var organizer = MailboxAddress.Parse(settings.From!);
-        var manageUrl = ManageUrl(settings.PublicBaseUrl!, manageToken);
+
+        // Null for anything the operator triggered. The plaintext token exists only in the request
+        // that minted it or in a URL the invitee opened, and neither is true of a cancel pressed in
+        // the workbench — only the SHA-256 is stored. The mail goes without the link rather than
+        // not going.
+        var manageUrl = manageToken is null ? null : ManageUrl(settings.PublicBaseUrl!, manageToken);
 
         var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
         var end = Instant.FromUnixTimeSeconds(booking.EndUtc);
@@ -193,7 +198,7 @@ public sealed class BookingMailer(
             Start: start,
             End: end,
             Summary: booking.Link.Name,
-            Description: $"Manage or cancel: {manageUrl}",
+            Description: manageUrl is null ? string.Empty : $"Manage or cancel: {manageUrl}",
             OrganizerEmail: organizer.Address,
             AttendeeEmail: booker.Email,
             Sequence: booking.Sequence,
@@ -285,9 +290,11 @@ public sealed class BookingMailer(
     /// text-only body is one fewer thing for a filter to score.
     /// </summary>
     /// <remarks>
-    /// The manage link is in all three, the cancellation included. It costs nothing and it is the
-    /// only way an invitee can check that a cancellation they are reading about is real, rather
-    /// than taking the word of an email — which is the same reason the link exists at all.
+    /// The manage link is in every notice that has a token to build one from, the cancellation
+    /// included: it costs nothing and it is the only way an invitee can check that a cancellation
+    /// they are reading about is real, rather than taking the word of an email — which is the same
+    /// reason the link exists at all. A notice the operator triggered has no token and no way to
+    /// recover one, and drops the whole block rather than printing a heading over nothing.
     /// </remarks>
     private static string Body(
         BookingNotice notice,
@@ -296,7 +303,7 @@ public sealed class BookingMailer(
         Instant start,
         Instant end,
         DateTimeZone zone,
-        string manageUrl)
+        string? manageUrl)
     {
         var (headline, closing) = notice switch
         {
@@ -311,6 +318,12 @@ public sealed class BookingMailer(
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
+        var action = manageUrl is null ? string.Empty : $"""
+
+            {Action(notice)}
+            {manageUrl}
+            """;
+
         return $"""
             Hi {bookerName},
 
@@ -318,9 +331,7 @@ public sealed class BookingMailer(
 
             {DatePattern.Format(start.InZone(zone))}
             {TimePattern.Format(start.InZone(zone))}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
-
-            {Action(notice)}
-            {manageUrl}
+            {action}
 
             {closing}
             """;
