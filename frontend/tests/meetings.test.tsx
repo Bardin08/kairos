@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import Meetings from '../src/routes/admin/Meetings'
 import { ApiError } from '../src/lib/api'
-import { listMeetings } from '../src/routes/admin/adminMeetings'
+import { cancelMeeting, listMeetings } from '../src/routes/admin/adminMeetings'
 import type { Meeting, Meetings as List } from '../src/routes/admin/adminMeetings'
 
 // ApiError and asApiError are never mocked and are not in this module: the page
@@ -13,6 +13,7 @@ import type { Meeting, Meetings as List } from '../src/routes/admin/adminMeeting
 vi.mock('../src/routes/admin/adminMeetings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/adminMeetings')>()),
   listMeetings: vi.fn(),
+  cancelMeeting: vi.fn(),
 }))
 
 // Same file the running app loads, and the authority on which class names exist.
@@ -57,6 +58,13 @@ const refused: Meeting = {
   calendarSynced: false,
   calendarProvider: 'google',
   calendarError: 'Request had insufficient authentication scopes.',
+}
+
+/** Already off. Nothing on this row can be done to it a second time. */
+const cancelled: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000004',
+  status: 'cancelled',
 }
 
 /** Nobody ever connected a calendar. Not synced, and not a fault either. */
@@ -187,6 +195,49 @@ test('the day, the month and the year are all inside the one date chip', async (
   expect(chip?.querySelector('.record-day')?.textContent).toBe('07')
   expect(chip?.querySelector('.record-month')?.textContent).toBe('Sept')
   expect(chip?.querySelector('.record-meta')?.textContent).toBe('2026')
+})
+
+test('a confirmed meeting can be called off from its own row', async () => {
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+
+  // The whole reason this tab stopped being read-only: the alternative was
+  // editing the calendar by hand, which leaves it disagreeing with Kairos.
+  expect(within(row).getByRole('button', { name: 'Cancel' })).toBeDefined()
+})
+
+test('cancelling a row redraws that row from the answer rather than reloading the table', async () => {
+  vi.mocked(cancelMeeting).mockResolvedValue({ ...synced, status: 'cancelled' })
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+  fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }))
+  fireEvent.click(within(row).getByRole('button', { name: 'Call it off' }))
+
+  // The write answers with the row as it now stands, in the shape the list
+  // draws — which is what the server's single-row projection exists for. A page
+  // that threw it away and refetched would ask for every meeting to learn one
+  // fact it already had, and would redraw the whole table under an operator who
+  // changed one line of it.
+  expect(await within(row).findByText('Cancelled')).toBeDefined()
+  expect(within(row).queryByRole('button')).toBeNull()
+
+  const reads = vi.mocked(listMeetings).mock.calls.length
+  await waitFor(() => expect(vi.mocked(cancelMeeting)).toHaveBeenCalledOnce())
+  expect(vi.mocked(listMeetings).mock.calls.length).toBe(reads)
+})
+
+test('a meeting that is already off is offered nothing', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([cancelled]))
+  render(<Meetings />)
+
+  const row = await rowFor(cancelled)
+
+  // A cancel on a cancelled meeting answers 200 and changes nothing, so the
+  // button would work — and would still be a control that does nothing, which
+  // reads as a broken one.
+  expect(within(row).queryByRole('button')).toBeNull()
 })
 
 test('an empty list names which filter closed it', async () => {

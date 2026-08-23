@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations;
 using Kairos.Api.Availability;
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Email;
-using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Security;
@@ -214,83 +213,29 @@ public static class BookingsEndpoints
             context, await FindAsync(context, token, cancellationToken), null, cancellationToken);
 
     /// <summary>
-    /// Idempotent: a manage link opened twice, or a double-clicked button, gets the same answer
-    /// rather than a 404 for a booking the caller can plainly see.
+    /// The invitee calls their own meeting off, with the token they arrived holding.
     /// </summary>
     /// <remarks>
-    /// The <c>booking.cancelled</c> announcement is enqueued here, in this endpoint, and
-    /// deliberately not wherever <see cref="Booking.Status"/> becomes
-    /// <see cref="BookingStatus.Cancelled"/>. <see cref="RescheduleAsync"/> is release, re-check,
-    /// re-place: it sets a booking cancelled and back to confirmed on every path out, so a hook
-    /// on the status change would announce a cancellation for every meeting that merely moved.
-    /// This endpoint is the only place where cancelled is where the booking stays.
+    /// Everything that happens to the booking is <see cref="BookingCanceller"/>'s, and this is
+    /// half of why it exists: the operator's cancel in <see cref="Admin.MeetingsAdminEndpoints"/>
+    /// is the same cancellation asked for by somebody else, and two copies of the status write,
+    /// the sequence, the announcement, the contention rule and the rule-14 tail had already begun
+    /// to differ from one another.
+    ///
+    /// No reason: the invitee knows why, and the null column is what records that this was their
+    /// cancellation rather than the operator's.
     /// </remarks>
     private static async Task<BookingResponse> CancelAsync(
         string token,
         KairosDbContext context,
-        OutboxWriter outbox,
-        CalendarSyncService calendars,
-        BookingMailer mailer,
-        IClock clock,
+        BookingCanceller canceller,
         CancellationToken cancellationToken)
     {
         var booking = await FindAsync(context, token, cancellationToken);
-        if (booking.Status != BookingStatus.Confirmed)
-        {
-            return await ToResponseAsync(context, booking, null, cancellationToken);
-        }
 
-        booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
-
-        // Advanced here for the same reason a reschedule advances it, and the invariant is worth
-        // stating: Sequence is the SEQUENCE of the last iCalendar message composed for this
-        // booking. RFC 5546 requires a CANCEL to outrank the REQUEST it withdraws, and a client
-        // that receives one it does not outrank ignores it — silently, like every other sequence
-        // failure, leaving the meeting in the invitee's calendar for a booking that is off. The
-        // early return above is what keeps a double-clicked button from advancing it twice.
-        booking.Sequence++;
-
-        // One SaveChanges, so the cancellation and the announcement of it commit together or
-        // neither does — the same rule BookingWriter follows for creation, for the same reason.
-        outbox.Enqueue(
-            booking.Id,
-            OutboxMessageType.BookingCancelled,
-            BookingEventPayload.Cancelled(
-                booking.Id,
-                booking.Link.Slug,
-                Instant.FromUnixTimeSeconds(booking.StartUtc),
-                Instant.FromUnixTimeSeconds(booking.EndUtc)).ToJson());
-
-        try
-        {
-            await context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
-        {
-            // Two cancels in flight at once — the double-clicked button this endpoint is
-            // documented to survive. The other one committed first, so the booking is cancelled
-            // and its announcement is queued; this call has nothing left to do but agree. Without
-            // this catch, adding the outbox row would have turned an idempotent 200 into a 500.
-            //
-            // Returned from here rather than falling through, for a reason the withdrawal below
-            // makes concrete: the outbox row this save could not write is still tracked, so the
-            // sync service's own SaveChanges would raise the same violation again and lose the
-            // state change it was making. The other call is withdrawing the event anyway.
-            return await ToResponseAsync(context, booking, null, cancellationToken);
-        }
-
-        // After the cancellation is committed, so nothing withdraws an event for a booking that
-        // is still standing. It cannot fail this request — CancelAsync has no throwing path —
-        // and a Google that refuses leaves a Failed row rather than a 500.
-        await calendars.CancelAsync(booking.Id, cancellationToken);
-
-        // After the withdrawal, so the message describes a calendar that has already let the slot
-        // go. `token` is the plaintext manage token off the route — the invitee opened this URL,
-        // so it is in hand for the length of the request and is never written down. The database
-        // holds only its SHA-256, which is exactly why the mailer runs here rather than behind the
-        // outbox: a queued row would have to carry the plaintext.
-        await mailer.SendCancellationAsync(booking, token, cancellationToken);
+        // `token` is the plaintext manage token off the route — the invitee opened this URL, so it
+        // is in hand for the length of the request and is never written down.
+        await canceller.CancelAsync(booking, reason: null, token, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -322,6 +267,16 @@ public static class BookingsEndpoints
         // otherwise moving a meeting half an hour later is refused by the meeting being moved.
         // Every path out of here puts the row back confirmed, including the failing ones and the
         // ones whose caller has already hung up — which is what ConfirmAsync refusing a token is for.
+        //
+        // KNOWN HOLE, and it is not fixed here. Between this line and ConfirmAsync the booking is
+        // Cancelled on disk while nobody has cancelled it, and BookingCanceller reads that as "off
+        // already" and returns having done nothing. A cancel landing in this window therefore
+        // answers 200 and is then undone by the re-confirm below: the meeting stands, no
+        // announcement was queued, no calendar event was withdrawn and nobody was told. It is old
+        // shape and newly reachable, because until the operator's cancel existed the only caller
+        // who could hit it was the one invitee already inside this method. Fixing it means a
+        // release that is distinguishable from a cancellation — a flag, or a re-read under the
+        // write lock — and that is a change with its own tests, not a rider on this one.
         booking.Status = BookingStatus.Cancelled;
         booking.CancelledAt = now.ToUnixTimeSeconds();
         await context.SaveChangesAsync(cancellationToken);

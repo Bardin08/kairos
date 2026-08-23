@@ -23,17 +23,19 @@ namespace Kairos.Api.Tests.Features;
 /// </summary>
 public class ProposalHoldTests
 {
-    private const string Slug = "consulting";
-    private const string LinkName = "Consulting call";
-    private const string PatternName = "Weekdays";
-    private const int DurationMinutes = 30;
-    private const int NineAm = 9 * 60;
-    private const int FivePm = 17 * 60;
+    /// <summary>
+    /// The world is <see cref="MeetingsFixture"/>'s — same slug, same day, same duration, same
+    /// nine-to-five on every weekday — because it was copied from here in the first place and two
+    /// copies of one seeded world drift. The second link the fixture adds is inert to everything
+    /// below: availability is one calendar, and no test here books or proposes through it.
+    /// </summary>
+    private const string Slug = MeetingsFixture.Slug;
+    private const int DurationMinutes = MeetingsFixture.DurationMinutes;
+    private const string Day = MeetingsFixture.Day;
+
     private const int SecondsPerMinute = 60;
     private const int SecondsPerHour = 60 * SecondsPerMinute;
 
-    /// <summary>Far enough ahead that the real clock's minimum notice never decides a test.</summary>
-    private const string Day = "2030-09-09";
     private const string HeldTime = "T11:00:00Z";
     private const string ElsewhereTime = "T15:00:00Z";
 
@@ -47,7 +49,7 @@ public class ProposalHoldTests
     public async Task GetSlots_ASlotHeldByAnOpenProposal_IsNotOffered()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(app, expiresInHours: SchedulingDefaults.ProposalHoldHours);
 
         var offered = await ReadSlotsAsync(app);
@@ -64,7 +66,7 @@ public class ProposalHoldTests
     public async Task GetSlots_AHoldWhoseExpiryHasPassed_IsOfferedAgain()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(app, expiresInHours: HoursAlreadyLapsed);
 
         var offered = await ReadSlotsAsync(app);
@@ -82,7 +84,7 @@ public class ProposalHoldTests
     public async Task GetSlots_AHoldOnACancelledMeeting_IsOfferedAgain()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(
             app,
             expiresInHours: SchedulingDefaults.ProposalHoldHours,
@@ -103,7 +105,7 @@ public class ProposalHoldTests
     public async Task GetSlots_AHoldOnADeclinedProposal_IsOfferedAgain()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(
             app,
             expiresInHours: SchedulingDefaults.ProposalHoldHours,
@@ -123,7 +125,7 @@ public class ProposalHoldTests
     public void TryCreate_ASlotHeldByAnOpenProposal_IsRefused()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(app, expiresInHours: SchedulingDefaults.ProposalHoldHours);
 
         var result = WriteAsync(app);
@@ -136,7 +138,7 @@ public class ProposalHoldTests
     public void TryCreate_AHoldWhoseExpiryHasPassed_IsAccepted()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(app, expiresInHours: HoursAlreadyLapsed);
 
         WriteAsync(app).Success.ShouldBeTrue();
@@ -151,7 +153,7 @@ public class ProposalHoldTests
     public void TryCreate_AHoldOnACancelledMeeting_IsAccepted()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(
             app,
             expiresInHours: SchedulingDefaults.ProposalHoldHours,
@@ -165,7 +167,7 @@ public class ProposalHoldTests
     public void TryCreate_AHoldOnADeclinedProposal_IsAccepted()
     {
         using var app = new KairosApp();
-        SeedLink(app);
+        MeetingsFixture.Seed(app);
         SeedProposal(
             app,
             expiresInHours: SchedulingDefaults.ProposalHoldHours,
@@ -202,40 +204,6 @@ public class ProposalHoldTests
 
         return offered!;
     }
-
-    private static void SeedLink(KairosApp app) => app.Seed(context =>
-    {
-        var pattern = new Pattern { Id = Guid.CreateVersion7(), Name = PatternName };
-        context.Patterns.Add(pattern);
-
-        for (var day = IsoDayOfWeek.Monday; day <= IsoDayOfWeek.Sunday; day++)
-        {
-            context.PatternRules.Add(new PatternRule
-            {
-                Id = Guid.CreateVersion7(),
-                PatternId = pattern.Id,
-                IsoDayOfWeek = (int)day,
-                StartMinute = NineAm,
-                EndMinute = FivePm,
-            });
-        }
-
-        var link = new Link
-        {
-            Id = Guid.CreateVersion7(),
-            PatternId = pattern.Id,
-            Slug = Slug,
-            Name = LinkName,
-            Active = true,
-        };
-        context.Links.Add(link);
-        context.LinkDurations.Add(new LinkDuration
-        {
-            LinkId = link.Id,
-            Minutes = DurationMinutes,
-            SortOrder = 0,
-        });
-    });
 
     /// <summary>
     /// A booking elsewhere on the same day — 15:00 against the 11:00 it proposes — carrying one

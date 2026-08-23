@@ -1,3 +1,7 @@
+using System.ComponentModel.DataAnnotations;
+
+using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -30,6 +34,23 @@ public sealed record ListMeetingsRequest
 
     [FromQuery(Name = "to")]
     public string? To { get; init; }
+}
+
+/// <summary>
+/// Why the operator is calling it off, in their words. The invitee reads it, so it is bounded the
+/// way every other free-text field on a request is bounded.
+/// </summary>
+public sealed record CancelMeetingRequest
+{
+    /// <summary>
+    /// The bound, public so a test can say <c>MaxReasonLength + 1</c> rather than carry its own
+    /// copy of the number — the habit <see cref="MeetingsAdminEndpoints.DateInvalidCode"/> and
+    /// <see cref="Scheduling.SchedulingDefaults.ProposalHoldHours"/> already keep.
+    /// </summary>
+    public const int MaxReasonLength = 2000;
+
+    [StringLength(MaxReasonLength)]
+    public string Reason { get; init; } = string.Empty;
 }
 
 /// <summary>One link, as the filter's option list needs it. Not the link admin's shape.</summary>
@@ -86,10 +107,11 @@ public sealed record MeetingsResponse(
 /// which link it came through.
 /// </summary>
 /// <remarks>
-/// Read-only, and one route. Cancelling and moving a meeting already have a surface — Part A's
-/// manage link — and a second one here would be two implementations of a rule that only holds if
-/// there is one. Bookings Kairos did not create are equally absent: reading the calendar back is
-/// a slice with its own conflict rules and it is not smuggled in behind a list.
+/// The read is one route and the write is another: an operator cancels a meeting here, because
+/// the alternative was editing the calendar by hand, which leaves the calendar and Kairos
+/// disagreeing about a meeting Kairos is the source of truth for. What is still absent is any
+/// meeting Kairos did not create: reading a calendar back is a slice with its own conflict rules
+/// and it is not smuggled in behind a list.
 /// </remarks>
 public static class MeetingsAdminEndpoints
 {
@@ -111,6 +133,7 @@ public static class MeetingsAdminEndpoints
     public static RouteGroupBuilder MapMeetingsAdmin(this RouteGroupBuilder group)
     {
         group.MapGet("/meetings", ListAsync).WithName("ListMeetings");
+        group.MapPost("/meetings/{id:guid}/cancel", CancelAsync).WithName("CancelMeeting");
         return group;
     }
 
@@ -204,33 +227,119 @@ public static class MeetingsAdminEndpoints
 
         return
         [
-            .. rows.Select(row =>
-            {
-                var start = Instant.FromUnixTimeSeconds(row.StartUtc);
-                var end = Instant.FromUnixTimeSeconds(row.EndUtc);
-                var calendar = row.Calendar;
-
-                return new MeetingResponse(
-                    row.Id,
-                    InstantPattern.ExtendedIso.Format(start),
-                    InstantPattern.ExtendedIso.Format(end),
-                    (int)((row.EndUtc - row.StartUtc) / SecondsPerMinute),
-                    row.Status.ToString().ToLowerInvariant(),
-                    row.LinkId,
-                    row.LinkName,
-                    row.Booker?.Name ?? string.Empty,
-                    row.Booker?.Email ?? string.Empty,
-                    row.Booker?.TimeZoneId ?? string.Empty,
-                    // Synced is the only state that reads as synced. A missing entry means nobody
-                    // was connected, Failed means somebody refused, and Pending means a write
-                    // nothing has finished — all three are the operator's calendar not holding
-                    // this meeting, which is the only question the row is asking.
-                    calendar is not null && calendar.State == CalendarSyncState.Synced,
-                    calendar is null ? null : calendar.Provider.ToString().ToLowerInvariant(),
-                    calendar?.LastError);
-            }),
+            .. rows.Select(row => Describe(
+                row.Id,
+                row.StartUtc,
+                row.EndUtc,
+                row.Status,
+                row.LinkId,
+                row.LinkName,
+                row.Booker?.Name ?? string.Empty,
+                row.Booker?.Email ?? string.Empty,
+                row.Booker?.TimeZoneId ?? string.Empty,
+                row.Calendar is null
+                    ? null
+                    : new CalendarFacts(row.Calendar.State, row.Calendar.Provider, row.Calendar.LastError))),
         ];
     }
+
+    /// <summary>
+    /// The operator calls a meeting off, with a sentence the invitee reads.
+    /// </summary>
+    /// <remarks>
+    /// The cancellation itself is <see cref="Bookings.BookingCanceller"/>'s, shared with the
+    /// invitee's own cancel: the work that belongs to this route is the principal, the reason and
+    /// the shape of the answer, not the scheduling.
+    ///
+    /// No manage token reaches the mailer, and none can — only its SHA-256 is stored, and the
+    /// plaintext exists in exactly two requests, neither of them this one. The invitee gets the
+    /// cancellation with no manage link on it and the operator's reason in place of it.
+    /// </remarks>
+    private static async Task<MeetingResponse> CancelAsync(
+        Guid id,
+        CancelMeetingRequest request,
+        KairosDbContext context,
+        BookingCanceller canceller,
+        CancellationToken cancellationToken)
+    {
+        var booking = await context.Bookings
+            .Include(row => row.Link)
+            .Include(row => row.Participants)
+            .FirstOrDefaultAsync(row => row.Id == id, cancellationToken)
+            ?? throw DomainException.NotFound("Meeting");
+
+        await canceller.CancelAsync(booking, request.Reason, manageToken: null, cancellationToken);
+
+        return await OneAsync(context, booking, cancellationToken);
+    }
+
+    /// <summary>
+    /// One meeting in the shape the list draws it, for the route that changes one. Written as a
+    /// read of the same fields rather than as a second projection: a write that answered in a
+    /// different shape from the list would be a second description of a meeting, and the table
+    /// would start disagreeing with the row it just refreshed.
+    /// </summary>
+    private static async Task<MeetingResponse> OneAsync(
+        KairosDbContext context,
+        Booking booking,
+        CancellationToken cancellationToken)
+    {
+        var calendar = await context.CalendarEntries.AsNoTracking()
+            .Where(entry => entry.BookingId == booking.Id)
+            .OrderByDescending(entry => entry.UpdatedAt)
+            .Select(entry => new CalendarFacts(entry.State, entry.Provider, entry.LastError))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var booker = booking.Participants
+            .FirstOrDefault(participant => participant.Role == ParticipantRole.Booker);
+
+        return Describe(
+            booking.Id,
+            booking.StartUtc,
+            booking.EndUtc,
+            booking.Status,
+            booking.LinkId,
+            booking.Link.Name,
+            booker?.Name ?? string.Empty,
+            booker?.Email ?? string.Empty,
+            booker?.TimeZoneId ?? string.Empty,
+            calendar);
+    }
+
+    /// <summary>One construction of a row, so the list and the cancel cannot describe it differently.</summary>
+    private static MeetingResponse Describe(
+        Guid id,
+        long startUtc,
+        long endUtc,
+        BookingStatus status,
+        Guid linkId,
+        string linkName,
+        string bookerName,
+        string bookerEmail,
+        string bookerTimeZone,
+        CalendarFacts? calendar) =>
+        new(
+            id,
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(startUtc)),
+            InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(endUtc)),
+            (int)((endUtc - startUtc) / SecondsPerMinute),
+            status.ToString().ToLowerInvariant(),
+            linkId,
+            linkName,
+            bookerName,
+            bookerEmail,
+            bookerTimeZone,
+            // Synced is the only state that reads as synced. A missing entry means nobody was
+            // connected, Failed means somebody refused, and Pending means a write nothing has
+            // finished — all three are the operator's calendar not holding this meeting, which is
+            // the only question the row is asking.
+            calendar is not null && calendar.State == CalendarSyncState.Synced,
+            calendar is null ? null : calendar.Provider.ToString().ToLowerInvariant(),
+            calendar?.LastError);
+
+    /// <summary>The calendar half of a row, flattened. One record so the list and the single read
+    /// hand <see cref="Describe"/> the same thing.</summary>
+    private sealed record CalendarFacts(CalendarSyncState State, IntegrationProvider Provider, string? LastError);
 
     private static async Task<IReadOnlyList<MeetingLinkResponse>> LinksWithMeetingsAsync(
         KairosDbContext context,

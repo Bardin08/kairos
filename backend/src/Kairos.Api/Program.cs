@@ -190,6 +190,7 @@ builder.Services.AddScoped<IBusySource, LocalBusySource>();
 builder.Services.AddScoped<AvailabilityQuery>();
 builder.Services.AddScoped<SlotQuery>();
 builder.Services.AddScoped<BookingWriter>();
+builder.Services.AddScoped<BookingCanceller>();
 
 // One adapter resolved through three interfaces, and one instance per request rather than three:
 // registering the class separately and handing the same instance to each role is what keeps a

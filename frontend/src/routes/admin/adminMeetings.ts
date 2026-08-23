@@ -19,6 +19,8 @@
 
 import { adminRequest } from './session'
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
 /** One link, as the meetings filter offers it. Only links that have meetings. */
 export type MeetingLink = {
   id: string
@@ -86,4 +88,20 @@ export function listMeetings(
 
   const search = query.toString()
   return adminRequest<Meetings>(`/admin/meetings${search === '' ? '' : `?${search}`}`, { signal })
+}
+
+/**
+ * Calls a meeting off, with a reason the invitee reads in their cancellation.
+ *
+ * The slot and its margin shadow come back on every link, and the invitee's
+ * calendar drops the event. Answers 404 for a meeting that is not there and 200
+ * for one already cancelled — pressing it twice is not an error.
+ */
+export function cancelMeeting(id: string, reason: string, signal?: AbortSignal): Promise<Meeting> {
+  return adminRequest<Meeting>(`/admin/meetings/${id}/cancel`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ reason }),
+    signal,
+  })
 }

@@ -32,6 +32,8 @@ public class BookingMailerTests
 {
     private const string ManageToken = "3f2504e04f8911d39a0c0305e82c3301";
     private const string BaseUrl = "https://kairos.example.com";
+    private const string ManageUrlFragment = "/manage/";
+    private const string CancellationReason = "The client moved the workshop a week.";
     private const string OrganizerAddress = "organizer@example.com";
     private const string BookerAddress = "guest@example.com";
     private const string BookerName = "Vlad";
@@ -49,6 +51,15 @@ public class BookingMailerTests
     private const int PortNothingListensOn = 1;
 
     private const int DurationMinutes = 25;
+
+    /// <summary>The heading the mailer writes over a cancellation's manage link.</summary>
+    private const string CancellationAction = "This booking:";
+
+    /// <summary>
+    /// Two blank lines in a row. Nothing in this mail is separated by more than one, so a run of
+    /// them is the mark an omitted block left behind.
+    /// </summary>
+    private const string BlankLineRun = "\n\n\n";
 
     private static readonly Instant Start = Instant.FromUtc(2026, 9, 7, 7, 0);
 
@@ -121,6 +132,67 @@ public class BookingMailerTests
         ics.ShouldContain("SEQUENCE:2");
         CalendarPart(message).ContentType.Parameters["method"].ShouldBe("CANCEL");
         message.Subject.ShouldStartWith("Cancelled:");
+    }
+
+    /// <summary>
+    /// An operator's cancellation has no manage token to put in the mail, and cannot get one:
+    /// only the SHA-256 is stored. The notice still has to go, so the link is omitted rather than
+    /// invented — and it is worth nothing on a cancelled booking anyway.
+    /// </summary>
+    /// <remarks>
+    /// The heading is asserted alongside the URL, and that is the half that pins the behaviour
+    /// this was written for. A body that dropped the link and kept "This booking:" over the empty
+    /// space where it had been passes an assertion about the URL alone, and reads to the invitee
+    /// as a mail with something missing from it.
+    /// </remarks>
+    [Fact]
+    public void Compose_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
+    {
+        var message = Compose(manageToken: null, notice: BookingNotice.Cancellation);
+        var body = Plain(message);
+
+        body.ShouldNotContain(ManageUrlFragment);
+        body.ShouldNotContain(CancellationAction);
+
+        // And no hole where the block was: the closing line follows the times directly, one blank
+        // line apart, exactly as it does when there is nothing optional in the mail at all.
+        body.ShouldNotContain(BlankLineRun);
+
+        var ics = Ics(message);
+        ics.ShouldContain("METHOD:CANCEL");
+        ics.ShouldContain("STATUS:CANCELLED");
+    }
+
+    /// <summary>
+    /// The whole point of an operator's cancel. The invitee is told a meeting is off by somebody
+    /// who is not them, and the one thing that makes that not arbitrary is the sentence saying
+    /// why — which the workbench promises them is read, on the panel that collects it.
+    /// </summary>
+    [Fact]
+    public void Compose_ACancellationCarryingAReason_PrintsItUnderTheHeadline()
+    {
+        var booking = Booking();
+        booking.CancellationReason = CancellationReason;
+
+        var body = Plain(Compose(booking, notice: BookingNotice.Cancellation, manageToken: null));
+
+        body.ShouldContain(BookingMailer.ReasonHeading);
+        body.ShouldContain(CancellationReason);
+    }
+
+    /// <summary>
+    /// The invitee's own cancel carries no reason — they know why — and the mail they get has to
+    /// be what it was before this column existed. A heading over nothing is the failure mode a
+    /// template with an optional block in it produces, and it is read by the person least able to
+    /// ask what was meant by it.
+    /// </summary>
+    [Fact]
+    public void Compose_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
+    {
+        var body = Plain(Compose(notice: BookingNotice.Cancellation));
+
+        body.ShouldNotContain(BookingMailer.ReasonHeading);
+        body.ShouldNotContain(BlankLineRun);
     }
 
     /// <summary>
@@ -309,11 +381,12 @@ public class BookingMailerTests
     private static MimeMessage Compose(
         Booking? booking = null,
         EmailOptions? options = null,
-        BookingNotice notice = BookingNotice.Confirmation)
+        BookingNotice notice = BookingNotice.Confirmation,
+        string? manageToken = ManageToken)
     {
         using var stream = new MemoryStream();
         Mailer(options ?? Options(BaseUrl))
-            .Compose(booking ?? Booking(), ManageToken, notice)
+            .Compose(booking ?? Booking(), manageToken, notice)
             .WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);
@@ -329,6 +402,14 @@ public class BookingMailerTests
     private static TextPart CalendarPart(MimeMessage message) =>
         message.BodyParts.OfType<TextPart>()
             .Single(part => part.ContentType.IsMimeType("text", "calendar"));
+
+    /// <summary>
+    /// The plain body with its line endings pinned to one spelling. <see cref="TextPart.Text"/>
+    /// has already normalised them to whatever the running platform uses, which is fine for an
+    /// assertion about a URL and not fine for one about blank lines.
+    /// </summary>
+    private static string Plain(MimeMessage message) =>
+        PlainPart(message).Text.ReplaceLineEndings("\n");
 
     private static TextPart PlainPart(MimeMessage message) =>
         message.BodyParts.OfType<TextPart>()
