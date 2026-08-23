@@ -322,3 +322,20 @@ test('archive calls archiveLink and then onSaved', async () => {
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   expect(adminLinks.archiveLink).toHaveBeenCalledWith(LINK.id)
 })
+
+/**
+ * Finding 12. Copy built its string from the draft, so an address typed and not
+ * yet saved was copied as though it resolved — the same 404 the button already
+ * refuses to hand out for a link that was never saved at all, reached by the
+ * other route.
+ */
+test('Copy hands out the saved address, not the one being typed', () => {
+  show()
+
+  fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'renamed-not-saved' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
+
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    `${window.location.origin}/book/${LINK.slug}`,
+  )
+})

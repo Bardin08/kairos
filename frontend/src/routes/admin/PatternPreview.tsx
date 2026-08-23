@@ -210,7 +210,14 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   useEffect(() => {
     // A pattern no link points at has nothing to offer times for, and the
     // request would be a refusable call made to fill a picker with nothing.
-    if (usedByCount === 0) return
+    // Cleared rather than returned from: the last link to stop standing on this
+    // pattern would otherwise stay in the picker, still resolving `chosen`, and
+    // every month change would go on fetching the slots of a link that moved.
+    if (usedByCount === 0) {
+      setLinks([])
+      setSlug(DAYS_ONLY)
+      return
+    }
 
     const controller = new AbortController()
 
@@ -631,7 +638,9 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
                 <button
                   className="btn btn-primary"
                   type="button"
-                  aria-disabled={windows !== null && windows.length > 0 ? undefined : true}
+                  aria-disabled={
+                    saving || windows === null || windows.length === 0 ? true : undefined
+                  }
                   data-loading={saving || undefined}
                   onClick={applyHours}
                 >

@@ -47,6 +47,9 @@ const MONDAY = 1
 const TUESDAY = 2
 const WEDNESDAY = 3
 
+/** Outside 1-7, which the column permits and the week has no square for. */
+const DAY_THAT_IS_NOT_A_DAY = 9
+
 const weekdays: Pattern = {
   id: PATTERN_ID,
   name: 'Weekdays',
@@ -267,4 +270,24 @@ test('every class the editor renders exists in kairos.css', async () => {
   )
 
   expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
+})
+
+/**
+ * Finding 13. `IsoDayOfWeek` carries no CHECK constraint, so a row outside 1-7
+ * is storable, and `week[rule.isoDayOfWeek - MONDAY]` indexed straight into
+ * `undefined` and threw on `.push` — taking the whole editor down rather than
+ * losing one rule. `AvailabilityQuery.cs:108` guards the identical lookup on the
+ * server and says why; this is the same decision on the client.
+ */
+test('a rule on a day of the week that does not exist drops rather than taking the editor down', async () => {
+  patternWith([
+    { id: 'r0', isoDayOfWeek: DAY_THAT_IS_NOT_A_DAY, startMinute: NINE_AM, endMinute: FIVE_PM },
+    { id: 'r1', isoDayOfWeek: TUESDAY, startMinute: NINE_AM, endMinute: FIVE_PM },
+  ])
+
+  renderEditor()
+
+  // The week the rules actually describe is still editable, and the rule that
+  // named no weekday is simply not in it.
+  expect(await screen.findByLabelText('Tuesday, window 1, opens at')).toBeDefined()
 })
