@@ -5,10 +5,9 @@ using Microsoft.Net.Http.Headers;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// The headers every response carries, whatever it is. A middleware rather than endpoint metadata,
-/// because a header set that some responses miss is the same defect as no header set — and the
-/// responses most likely to be forgotten are the static assets, which have no endpoint to hang
-/// metadata on.
+/// The headers every response carries. A middleware rather than endpoint metadata, because a
+/// header set some responses miss is the same defect as no header set — and the responses most
+/// likely to be forgotten are the static assets, which have no endpoint to hang metadata on.
 /// </summary>
 public static class SecurityHeaders
 {
@@ -33,12 +32,11 @@ public static class SecurityHeaders
 
     /// <summary>
     /// The whole URL, withheld from everybody. It does not keep the manage token out of a log —
-    /// the origin server already writes <c>GET /manage/&lt;token&gt;</c> as its request line, and
-    /// nothing in a header policy changes that. What it stops is the token travelling as
-    /// <c>Referer</c> on every OTHER request the manage page makes, which is where the weaker
-    /// <c>strict-origin-when-cross-origin</c> leaks: it still sends the full URL same-origin, so
-    /// each fetch would carry the token into a log line of its own, and any outbound link would
-    /// carry the origin off this host entirely. One line naming it rather than many.
+    /// the origin server already writes <c>GET /manage/&lt;token&gt;</c> as its request line. What
+    /// it stops is the token travelling as <c>Referer</c> on every OTHER request the manage page
+    /// makes, which is where the weaker <c>strict-origin-when-cross-origin</c> leaks: it still
+    /// sends the full URL same-origin, so each fetch would carry the token into a log line of its
+    /// own, and any outbound link would carry the origin off this host entirely.
     /// </summary>
     public const string NoReferrer = "no-referrer";
 
@@ -56,10 +54,10 @@ public static class SecurityHeaders
     private const string Preload = "; preload";
 
     /// <summary>
-    /// Registered first, ahead of the static files middleware and of the exception handler. Both
+    /// Registered first, ahead of the static files middleware and the exception handler. Both
     /// answer without ever reaching an endpoint — one short-circuits on a file that exists, the
-    /// other clears the response and writes its own — and a set that misses either of them is a
-    /// set the single page and every refusal go out without.
+    /// other clears the response and writes its own — and a set that misses either is a set the
+    /// single page and every refusal go out without.
     /// </summary>
     /// <remarks>
     /// The policy is built once, here, while the pipeline is being assembled. It reads the page on
@@ -78,14 +76,13 @@ public static class SecurityHeaders
 
         return app.Use(async (context, next) =>
         {
-            // Registered on the response rather than written now, and measured rather than
-            // assumed: written eagerly, the whole set survives an ordinary 200 and is missing from
-            // every response UseExceptionHandler writes — which is every DomainException in this
-            // application. That handler clears the response and hands it to the registered
-            // IExceptionHandler; with no re-execution path configured it never runs the pipeline
-            // again, so no middleware anywhere can put an eagerly written header back. A callback
-            // survives the clear, because it lives on the response feature rather than in the
-            // headers, and it runs when the handler's own response starts.
+            // Registered on the response rather than written now, measured rather than assumed:
+            // written eagerly, the set survives an ordinary 200 and is missing from every response
+            // UseExceptionHandler writes — which is every DomainException here. That handler clears
+            // the response and hands it to the registered IExceptionHandler; with no re-execution
+            // path configured it never runs the pipeline again, so no middleware can put an eagerly
+            // written header back. A callback survives the clear, because it lives on the response
+            // feature rather than in the headers, and runs when the handler's response starts.
             context.Response.OnStarting(() =>
             {
                 context.Response.Headers[ContentSecurityPolicyHeader] = policy;
