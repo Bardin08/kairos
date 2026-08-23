@@ -14,15 +14,27 @@ public partial class OverrideWindowsUnique : Migration
             name: "IX_PatternOverrides_PatternId_Date",
             table: "PatternOverrides");
 
-        // Before the index, or the index cannot be created on a database that already holds a
-        // pair. The lowest id wins in each group, which is the earliest row by Uuid7 ordering —
-        // an arbitrary choice among rows that are identical in every column that matters.
+        // Two jobs, and the second is not an accident. It makes the index creatable — a database
+        // already holding an identical pair would refuse CREATE UNIQUE INDEX — and it also folds
+        // together the rows the index will not bound: SQLite treats nulls as distinct, so a date
+        // blocked twice would survive the index, and a date blocked twice is nonsense whichever
+        // way it got there. The lowest id wins in each group, the earliest row by Uuid7 ordering,
+        // which is an arbitrary choice among rows identical in every column that matters.
+        //
+        // Grouped on "is it null" beside the value rather than on IFNULL(value, -1): -1 is a
+        // number the column can hold, so that sentinel folded a real window in with the blocked
+        // rows and deleted one of them. Only [Range] on the request keeps it out today, which is
+        // not where a migration's correctness belongs.
         migrationBuilder.Sql(
             """
             DELETE FROM PatternOverrides
             WHERE Id NOT IN (
                 SELECT MIN(Id) FROM PatternOverrides
-                GROUP BY PatternId, Date, IFNULL(StartMinute, -1), IFNULL(EndMinute, -1)
+                GROUP BY
+                    PatternId,
+                    Date,
+                    StartMinute IS NULL, StartMinute,
+                    EndMinute IS NULL, EndMinute
             );
             """);
 
