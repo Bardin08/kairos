@@ -32,7 +32,6 @@ public sealed record AdminLinkResponse(
     int? DailyCap,
     int? StartIncrementMinutes);
 
-/// <summary>A pattern as a thing to pick, which is all the link editor needs of one.</summary>
 public sealed record AdminPatternResponse(Guid Id, string Name);
 
 /// <summary>
@@ -101,11 +100,10 @@ public sealed record SaveLinkRequest
     public const int MaxDurationMinutes = 1440;
 
     /// <summary>
-    /// The allocation guard on the list, and generous on purpose: a link offers a handful of
-    /// lengths — the booking page draws one tab per duration — so two dozen is far past any real
-    /// one. Unbounded, the whole array is bound and run through Distinct() before the three
-    /// checks below it get to say anything, and duplicates are refused only after that, so the
-    /// 1,440 minutes a duration may be is no bound on how long the list can be.
+    /// The allocation guard on the list, generous on purpose: the booking page draws one tab per
+    /// duration, so two dozen is far past any real link. Unbounded, the whole array is bound and
+    /// run through Distinct() before the checks below say anything — and the 1,440 minutes a
+    /// duration may be is no bound on how long the list can be.
     /// </summary>
     public const int MaxDurations = 24;
 
@@ -415,7 +413,6 @@ public static class LinksAdminEndpoints
         }
     }
 
-    /// <summary>The link a write just touched, read back so the caller never has to guess.</summary>
     private static async Task<AdminLinkResponse> ReadLinkAsync(
         KairosDbContext context,
         Guid id,

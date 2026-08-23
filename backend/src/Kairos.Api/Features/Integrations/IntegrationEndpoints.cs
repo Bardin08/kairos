@@ -33,19 +33,18 @@ public sealed record IntegrationResponse(
 public sealed record ConnectIntegrationResponse(string ConsentUrl);
 
 /// <summary>
-/// List providers, start a connection, finish a connection. Which provider, and what its consent
-/// screen wants, lives under <c>Integrations/</c> — no vendor name reaches this file.
+/// No vendor name reaches this file: which provider exists, and what its consent screen wants,
+/// lives under <c>Integrations/</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>What protects these endpoints.</b> The two operator-driven routes hang off
-/// <see cref="AdminGroup.MapAdmin"/> like every other admin route, and are therefore under
-/// <c>/api/v1/admin</c> — Part B wrote them "behind the admin boundary" before there was one, and
-/// this is where that promise is kept. They were left outside the prefix at first to protect the
-/// callback's registered URI, but that constraint binds the callback alone: <c>list</c> and
-/// <c>connect</c> are registered with nobody and cost two fetch URLs to move. The callback stays
-/// exactly where it is and stays anonymous, because a browser arrives there on a redirect from
-/// Google and the ticket it presents is <c>state</c>.
+/// <see cref="AdminGroup.MapAdmin"/> like every other admin route, under <c>/api/v1/admin</c>.
+/// They were left outside the prefix at first to protect the callback's registered URI, but that
+/// constraint binds the callback alone: <c>list</c> and <c>connect</c> are registered with nobody
+/// and cost two fetch URLs to move. The callback stays exactly where it is and stays anonymous,
+/// because a browser arrives there on a redirect from the provider and the ticket it presents is
+/// <c>state</c>.
 /// </para>
 /// <para>
 /// <b>state.</b> Not a row in a table and not a cache entry: the value is the provider and an
@@ -143,12 +142,9 @@ public static class IntegrationEndpoints
                     when (failure.Code == IntegrationCredentialStore.CredentialUnreadableCode)
                 {
                     // One provider's unusable credential is not the listing's failure. Answered on
-                    // the row rather than thrown, because the whole point of this screen is to
-                    // show what can be connected and what is connected — and a page that refuses
-                    // to draw is a page with no button on it, which is where the operator was
-                    // left: a sentence naming a key mismatch and nothing to press. The fix is
-                    // reconnecting, the Connect button is what does it, and it only exists if the
-                    // table gets drawn.
+                    // the row rather than thrown: the fix is reconnecting, the Connect button is
+                    // what does it, and that button only exists if the table gets drawn. Thrown,
+                    // this left the operator a sentence naming a key mismatch and nothing to press.
                     fault = failure.Code;
                 }
             }
