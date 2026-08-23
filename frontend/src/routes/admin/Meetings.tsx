@@ -8,12 +8,11 @@ import MeetingActions from './MeetingActions'
 import ProposePanel from './ProposePanel'
 import { shiftDays, shortMonth } from './adminTime'
 
-// The two status shapes kairos.css draws, and the Second Channel Rule is the
-// whole reason they are shapes rather than colours: `live` fills the 7px dot,
-// `paused` leaves it hollow at the same size. Both states this page shows —
-// confirmed against cancelled, synced against not synced — therefore survive a
-// monochrome screenshot and a colour-blind reader, and the words beside the dot
-// are what name them.
+// The two status shapes kairos.css draws, and the Second Channel Rule is why
+// they are shapes rather than colours: `live` fills the 7px dot, `paused` leaves
+// it hollow at the same size. Both states this page shows — confirmed against
+// cancelled, synced against not synced — survive a monochrome screenshot, and
+// the words beside the dot are what name them.
 const LIVE = 'live'
 const PAUSED = 'paused'
 
@@ -21,13 +20,11 @@ const PAUSED = 'paused'
 const CONFIRMED = 'confirmed'
 
 /**
- * The three ranges the period filter offers.
- *
- * All three are date ranges, which is what the endpoint takes; the presets are
- * only the three an operator actually asks for. `RECENT` is bounded rather than
- * open because "everything behind me, oldest first" is a list that grows without
- * limit and answers nothing — and `ALL` is still there for the year no preset
- * covers.
+ * The three ranges the period filter offers. All three are date ranges, which is
+ * what the endpoint takes; the presets are only the three an operator actually
+ * asks for. `RECENT` is bounded rather than open because "everything behind me"
+ * is a list that grows without limit — and `ALL` is still there for the year no
+ * preset covers.
  */
 const UPCOMING = 'upcoming'
 const RECENT = 'recent'
@@ -35,8 +32,7 @@ const ALL = 'all'
 
 const RECENT_DAYS = 30
 
-// Slices of a `YYYY-MM-DD` date key. Named rather than written as 0, 4 and 8 at
-// the point of use, which is the difference between a slice and a magic number.
+// Slices of a `YYYY-MM-DD` date key, named rather than written as 0, 4 and 8.
 const YEAR_LENGTH = 'YYYY'.length
 const DAY_OF_MONTH_AT = 'YYYY-MM-'.length
 
@@ -55,12 +51,11 @@ function rangeOf(period: string, zone: string): { from?: string; to?: string } {
  * with the year as a third line inside it.
  *
  * The comp carries no year because it is showing four meetings in one month. A
- * list that spans "past and upcoming" spans years, and a bare "20 Aug" in it is
- * a date that does not say which one. It goes on its own quiet line rather than
- * beside the month, whose 54px chip would wrap the pair — and inside the chip
- * rather than under it, because a sibling of the chip is a full-width block that
- * takes the cell's own alignment, which is how the day, the month and the year
- * ended up on three different alignments.
+ * list spanning "past and upcoming" spans years, and a bare "20 Aug" does not
+ * say which one. It goes on its own quiet line rather than beside the month,
+ * whose 54px chip would wrap the pair — and inside the chip rather than under
+ * it, because a sibling of the chip is a full-width block that takes the cell's
+ * own alignment, which is how day, month and year ended up on three alignments.
  *
  * A `div` rather than the comp's `span`: `p` is not phrasing content, and the
  * chip is a block in every layout that uses it.
@@ -83,8 +78,7 @@ function dateChip(instant: string, zone: string) {
  * The question that gets asked after a no-show, which is why the zone is stored
  * on the participant rather than derived from the organizer's. Null when the
  * booking carries no zone at all; the zone's own name when `Intl` does not carry
- * it, because the name still answers some of the question and a thrown
- * RangeError would take the whole page down over one row.
+ * it, because a thrown RangeError would take the whole page down over one row.
  */
 function theirTime(meeting: Meeting): string | null {
   if (meeting.participantTimeZone === '') return null
@@ -106,9 +100,8 @@ function label(provider: string): string {
  *
  * "Not synced" on its own sends them to the server log for something the row
  * already knows, so the provider's own words go on the detail. No error at all
- * means nothing was ever attempted, which is the ordinary state of a Kairos
- * whose operator never connected a calendar — not a fault, and it must not read
- * like one.
+ * means nothing was ever attempted — the ordinary state of a Kairos whose
+ * operator never connected a calendar, and it must not read like a fault.
  */
 function whyNotSynced(meeting: Meeting): string {
   if (meeting.calendarError === null) {
@@ -142,8 +135,7 @@ export default function Meetings() {
   // answer says what it is. The zone decides what "today" means to the period
   // filter, and the filter has to be built before any answer exists — so the
   // browser's is the opening guess, the stored setting is the authority, and
-  // where the two differ this effect runs once more with corrected dates and
-  // settles. Nothing here hard-codes a zone, so Task 6's picker flows through.
+  // where the two differ this effect runs once more with corrected dates.
   const [zone, setZone] = useState(localZone)
   // Which meeting the operator is choosing a time for, if any. The picker is a
   // whole screen rather than a panel in the Actions cell — see ProposePanel for
@@ -178,10 +170,9 @@ export default function Meetings() {
   }, [period, linkId, zone])
 
   // The write answers with the row as it now stands, in exactly the shape the
-  // list draws — which is what OneAsync on the server is for. Applied in place
-  // rather than used as a cue to refetch: a second round trip would ask for
-  // every meeting on the page to learn one fact the answer already carried, and
-  // would redraw the whole table under an operator who changed one row.
+  // list draws. Applied in place rather than used as a cue to refetch: a second
+  // round trip would ask for every meeting on the page to learn one fact the
+  // answer already carried, and would redraw the whole table.
   function applyChange(changed: Meeting) {
     setList((current) =>
       current === null
