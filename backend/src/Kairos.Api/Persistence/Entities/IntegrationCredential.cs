@@ -13,14 +13,14 @@ public sealed class IntegrationCredential
     public IntegrationProvider Provider { get; set; }
 
     /// <summary>
-    /// AES-GCM ciphertext of a small JSON document whose shape is the provider's business:
-    /// Google stores a refresh token and a calendar id, Zoom would store a refresh token and
-    /// an account id. Encrypted as a whole, read as a whole, never queried by content.
+    /// AES-GCM ciphertext of a small JSON document whose shape is the provider's business — a
+    /// refresh token and a calendar id for Google. Encrypted whole, read whole, never queried by
+    /// content.
     /// </summary>
     /// <remarks>
     /// JSON is right here and was wrong for <see cref="BookingParticipant"/>: a credential payload
-    /// is never searched, never joined, never constrained by a foreign key, and it is a secret — so
-    /// it is a single opaque blob whichever way it is stored. The queryable parts stay columns.
+    /// is never searched, joined or constrained by a foreign key, and it is a secret — a single
+    /// opaque blob whichever way it is stored. The queryable parts stay columns.
     /// </remarks>
     public required string ProtectedPayload { get; set; }
 
@@ -29,13 +29,13 @@ public sealed class IntegrationCredential
 
     /// <summary>
     /// Written by whatever discovers the credential has stopped working. Google's adapter is the
-    /// only writer today, an accident of there being one provider — the column belongs to the
-    /// credential, not to the adapter.
+    /// only writer today, an accident of there being one provider: the column belongs to the
+    /// credential.
     /// </summary>
     /// <remarks>
-    /// Initialised rather than left to default(CredentialHealth), which is 0 and is not a value of
-    /// the enum. A row written by a path that never thought about health is healthy — the failure
-    /// has to be discovered and recorded, never assumed.
+    /// Initialised rather than left to default(CredentialHealth), which is 0 and not a value of the
+    /// enum. A row written by a path that never thought about health is healthy — failure has to be
+    /// discovered, never assumed.
     /// </remarks>
     public CredentialHealth Health { get; set; } = CredentialHealth.Healthy;
 

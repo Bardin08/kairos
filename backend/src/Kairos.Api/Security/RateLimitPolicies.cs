@@ -8,11 +8,10 @@ using Microsoft.Extensions.Options;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// The rate limit as the wire sees it: what every response tells a caller about where it stands,
-/// and what a refusal looks like. The budget is declared at each mapping site as endpoint metadata,
-/// so "which routes are limited?" is answered by reading the mapping rather than this file. The
-/// anonymous routes that declare none are the six outside the admin prefix, and
-/// <see cref="Shared.AdminGroup"/>'s remarks record why.
+/// The rate limit as the wire sees it: what a response tells a caller about where it stands, and
+/// what a refusal looks like. Budgets are declared at each mapping site as endpoint metadata, so
+/// "which routes are limited?" is answered by the mapping, not this file. The six anonymous routes
+/// that declare none are outside the admin prefix; <see cref="Shared.AdminGroup"/> records why.
 /// </summary>
 public static class RateLimitPolicies
 {
@@ -28,13 +27,11 @@ public static class RateLimitPolicies
 
     /// <summary>
     /// The partition of a caller Kestrel can name no address for: every request through the
-    /// in-memory test host, and in production a listener on a Unix domain socket or a named pipe —
-    /// nginx in front of Kestrel over a UDS is an ordinary self-hosted shape. There every caller
-    /// falls into this single partition, so the whole site shares one budget, and
-    /// <c>UseForwardedHeaders</c> declines to read <c>X-Forwarded-For</c> as well, because a peer
-    /// that does not exist is in nobody's <c>KnownProxies</c>. Hence
-    /// <see cref="RateLimitBudget.WarnAboutMissingPeerOnce"/>: the failure is total and otherwise
-    /// silent.
+    /// in-memory test host, and in production a Unix domain socket or named pipe — nginx over a UDS
+    /// is an ordinary self-hosted shape. Every caller then falls into this one partition and the
+    /// site shares one budget, and <c>UseForwardedHeaders</c> declines <c>X-Forwarded-For</c> too,
+    /// a nonexistent peer being in nobody's <c>KnownProxies</c>. Hence
+    /// <see cref="RateLimitBudget.WarnAboutMissingPeerOnce"/>: total, and otherwise silent.
     /// </summary>
     private const string UnknownCaller = "unknown";
 

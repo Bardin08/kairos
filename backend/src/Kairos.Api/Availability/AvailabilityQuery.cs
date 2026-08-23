@@ -31,9 +31,9 @@ public sealed class AvailabilityQuery(KairosDbContext context)
     /// erase the day. "Until the end of the day" is 1439.
     /// </summary>
     /// <remarks>
-    /// Public because the admin write side declares the same bound, and a window this class
-    /// refuses to expand must be one the operator was never able to save. Two copies of 1439 is
-    /// one of them going stale.
+    /// Public because the admin write side declares the same bound: a window this class refuses to
+    /// expand must be one the operator was never able to save, and two copies of 1439 is one of
+    /// them going stale.
     /// </remarks>
     public const int LastMinuteOfDay = (24 * MinutesPerHour) - 1;
 

@@ -112,14 +112,14 @@ builder.Services
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return Task.CompletedTask;
         };
-        // A body on the refusal, in the shape DomainExceptionHandler writes, because a bodyless
-        // 403 leaves the workbench nothing to tell "you are signed in and not an operator" apart
-        // from any other refusal — and those two screens have different remedies.
+        // A body on the refusal, in the shape DomainExceptionHandler writes: a bodyless 403 leaves
+        // the workbench nothing to tell "signed in, not an operator" from any other refusal, and
+        // those screens have different remedies.
         //
-        // Naming that refusal HERE is correct only while AdminGroup.Policy is the only policy in
-        // the application, so every forbid this handler sees really is that one. A second policy
-        // would start answering not_an_operator to a refusal that is nothing of the kind, and the
-        // code would have to move to where the policy that produced it is known.
+        // Naming it HERE is correct only while AdminGroup.Policy is the only policy, so every forbid
+        // this handler sees really is that one. A second policy would answer not_an_operator to a
+        // refusal that is nothing of the kind, and this code would move to where the policy is
+        // known.
         options.Events.OnRedirectToAccessDenied = async context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -153,12 +153,10 @@ builder.Services
         options.Scope.Add(AdminAuthorization.GroupScope);
 
         // Development only, gated so production cannot reach it however the configuration is
-        // written. The local provider in compose.dev.yaml serves discovery and its JWKS over plain
-        // HTTP on loopback, and the handler refuses to fetch either without this. It relaxes the
-        // TRANSPORT the metadata is fetched over and nothing else: every token's signature is still
-        // verified against that JWKS, the issuer and audience are still checked, and no request
-        // skips authentication. It is not an authentication bypass and must never be widened into
-        // one.
+        // written: the local provider in compose.dev.yaml serves discovery and its JWKS over plain
+        // HTTP on loopback. It relaxes the TRANSPORT the metadata is fetched over and nothing else —
+        // signatures still verified against that JWKS, issuer and audience still checked. Not an
+        // authentication bypass, and never to be widened into one.
         if (builder.Environment.IsDevelopment())
         {
             options.RequireHttpsMetadata = false;
@@ -260,13 +258,12 @@ builder.Services.AddHealthEndpoints();
 
 // Which addresses may speak for a caller, and which scheme the request really arrived on. The
 // address is what the rate limiter partitions on; without the scheme a TLS-terminating proxy leaves
-// this application believing every request is plain HTTP, and the OIDC handler then builds an
-// http:// redirect_uri the provider refuses.
+// this application on plain HTTP and the OIDC handler builds an http:// redirect_uri the provider
+// refuses.
 //
-// Left at the framework's default — loopback only — so a deployment that is NOT behind a proxy
-// cannot be told a false client address by a header. A deployment that is behind one names it, and
-// clearing these lists to accept X-Forwarded-For from anybody would hand every caller a free
-// identity and with it every other caller's rate limit.
+// Left at the framework's default — loopback only — so a deployment NOT behind a proxy cannot be
+// told a false client address. Clearing these lists to accept X-Forwarded-For from anybody hands
+// every caller a free identity, and with it every other caller's rate limit.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
@@ -315,15 +312,14 @@ static T Parsed<T>(string value, string path, Func<string, T> parse)
     }
 }
 
-// Configuration only: nothing calls UseHsts, and these values are read by UseSecurityHeaders,
-// which writes the header where a cleared response cannot lose it. AddHsts is still where they
-// are set, so there is one place to change them and one excluded-hosts list.
+// Configuration only: nothing calls UseHsts, and UseSecurityHeaders reads these values and writes
+// the header where a cleared response cannot lose it. AddHsts stays the one place to change them,
+// and the one excluded-hosts list.
 //
-// Both flags off, written out rather than left implicit, because they are a decision. Kairos is
-// deployed on somebody else's domain: IncludeSubDomains would pin every sibling subdomain of a
-// host this application does not own to HTTPS, and the preload list is close to irreversible and
-// belongs to whoever owns the apex. An operator who wants either says so at their proxy, where
-// the certificate already lives.
+// Both flags off, written out because they are a decision. Kairos is deployed on somebody else's
+// domain: IncludeSubDomains would pin sibling subdomains it does not own, and the preload list is
+// close to irreversible and belongs to whoever owns the apex. An operator who wants either says so
+// at their proxy.
 builder.Services.AddHsts(options =>
 {
     options.MaxAge = TimeSpan.FromDays(
@@ -351,17 +347,14 @@ using (var scope = app.Services.CreateScope())
 // limiter's partition, and the redirect_uri a challenge builds — reads the wrong one otherwise.
 app.UseForwardedHeaders();
 
-// Ahead of everything that writes a response, so nothing can answer without them — the static files
-// middleware's short circuit and the exception handler's cleared response included. HSTS is one of
-// the headers it writes, and there is deliberately no UseHsts beside this line: that middleware
-// writes eagerly and loses its header on the exception path, which SecurityHeaders.IsSecure records
-// with the measurement behind it.
+// Ahead of everything that writes a response — the static files short circuit and the exception
+// handler's cleared response included. HSTS is one of the headers it writes, and there is
+// deliberately no UseHsts: that middleware writes eagerly and loses its header on the exception
+// path, which SecurityHeaders.IsSecure records with the measurement.
 //
-// There is deliberately no UseHttpsRedirection either. In the deployment this targets the proxy
-// terminates TLS and every request reaches this process over plaintext, so the middleware would
-// either do nothing or redirect every request to itself. The edge holds the certificate, so the
-// edge redirects. The https launch profile is a developer convenience and not that deployment;
-// localhost is on the HSTS excluded list, so it is unaffected either way.
+// No UseHttpsRedirection either. The proxy terminates TLS and every request reaches this process
+// over plaintext, so the middleware would do nothing or redirect every request to itself. The edge
+// holds the certificate, so the edge redirects.
 app.UseSecurityHeaders();
 
 app.UseExceptionHandler();

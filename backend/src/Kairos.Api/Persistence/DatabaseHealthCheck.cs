@@ -46,10 +46,9 @@ public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
     /// probe's two bounded commands — the pragmas on opening a connection, and the query.
     /// </summary>
     /// <remarks>
-    /// A backstop, not the bound. A blocked SQLite call retries inside the native library until its
-    /// own command timeout expires, on the thread, out of reach of any cancellation token —
-    /// measured: with the commands unbounded this never fired and the probe answered after 30
-    /// seconds.
+    /// A backstop, not the bound: a blocked SQLite call retries inside the native library, on the
+    /// thread, out of reach of any cancellation token. Measured — with the commands unbounded this
+    /// never fired and the probe answered after 30 seconds.
     /// </remarks>
     public static readonly TimeSpan ProbeTimeout = QueryTimeout * TimeoutHeadroom;
 

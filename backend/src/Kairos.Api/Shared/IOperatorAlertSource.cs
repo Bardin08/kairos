@@ -5,9 +5,9 @@ namespace Kairos.Api.Shared;
 /// container and knows none of them by name.
 /// </summary>
 /// <remarks>
-/// Collect, never throw. A source that cannot answer returns nothing, because one broken publisher
-/// must not blank a panel another has something true to say on — the lesson the Integrations
-/// listing learned when a single unreadable credential took the whole screen with it.
+/// Collect, never throw: a source that cannot answer returns nothing, so one broken publisher does
+/// not blank a panel another has something true to say on — the lesson of a single unreadable
+/// credential taking the whole Integrations listing with it.
 /// </remarks>
 public interface IOperatorAlertSource
 {

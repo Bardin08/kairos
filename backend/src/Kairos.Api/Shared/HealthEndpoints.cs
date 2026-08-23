@@ -6,13 +6,12 @@ using Microsoft.AspNetCore.Routing;
 namespace Kairos.Api.Shared;
 
 /// <summary>
-/// The two questions an orchestrator asks — is this process alive, and can it serve — on two paths
-/// that answer them differently. Both are anonymous, because a kubelet holds no session.
+/// The two questions an orchestrator asks — alive, and able to serve — on two paths that answer
+/// differently. Both anonymous, because a kubelet holds no session.
 /// </summary>
 /// <remarks>
-/// Outside <see cref="ApiVersions.V1"/> deliberately. A probe path is written into a deployment
-/// manifest that is edited by hand and rarely re-read, so a version bump must not be able to move
-/// it out from under a running cluster.
+/// Outside <see cref="ApiVersions.V1"/> deliberately: a probe path lives in a hand-edited
+/// deployment manifest, so a version bump must not move it out from under a running cluster.
 /// </remarks>
 public static class HealthEndpoints
 {

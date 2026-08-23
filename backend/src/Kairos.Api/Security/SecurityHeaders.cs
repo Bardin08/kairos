@@ -53,14 +53,13 @@ public static class SecurityHeaders
     private const string Preload = "; preload";
 
     /// <summary>
-    /// Registered first, ahead of the static files middleware and the exception handler. Both
-    /// answer without ever reaching an endpoint — one short-circuits on a file that exists, the
-    /// other clears the response and writes its own — and a set that misses either is a set the
-    /// single page and every refusal go out without.
+    /// Registered first, ahead of the static files middleware and the exception handler. Both answer
+    /// without reaching an endpoint, so a set that misses either is one the single page and every
+    /// refusal go out without.
     /// </summary>
     /// <remarks>
-    /// The policy is built once, here, while the pipeline is being assembled. It reads the page on
-    /// disk, and neither the page nor the answer changes for the life of the process.
+    /// The policy is built once, while the pipeline is assembled: it reads the page on disk, and
+    /// neither the page nor the answer changes for the life of the process.
     /// </remarks>
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
     {
@@ -76,12 +75,10 @@ public static class SecurityHeaders
         return app.Use(async (context, next) =>
         {
             // Registered on the response rather than written now, measured rather than assumed:
-            // written eagerly, the set survives an ordinary 200 and is missing from every response
-            // UseExceptionHandler writes — which is every DomainException here. That handler clears
-            // the response and hands it to the registered IExceptionHandler; with no re-execution
-            // path configured it never runs the pipeline again, so no middleware can put an eagerly
-            // written header back. A callback survives the clear, because it lives on the response
-            // feature rather than in the headers, and runs when the handler's response starts.
+            // written eagerly, the set survives a 200 and is missing from every response
+            // UseExceptionHandler writes — every DomainException here. That handler clears the
+            // response and re-runs no middleware, so nothing can put an eagerly written header back.
+            // A callback lives on the response feature rather than in the headers, so it survives.
             context.Response.OnStarting(() =>
             {
                 context.Response.Headers[ContentSecurityPolicyHeader] = policy;
@@ -103,18 +100,16 @@ public static class SecurityHeaders
     }
 
     /// <summary>
-    /// The gate <c>UseHsts</c> applies, applied here instead. That middleware writes its header
-    /// eagerly, so on the exception path it is cleared and never rewritten — measured: a 404 from
-    /// a DomainException went out over HTTPS with no HSTS at all, while a 404 from an unmapped
-    /// route carried it. Moving it below <c>UseExceptionHandler</c> does not help, because that
-    /// handler re-runs no middleware. So Kairos does not call <c>UseHsts</c> and writes the header
-    /// from the callback above, which is the only place in this pipeline that outlives the clear.
+    /// The gate <c>UseHsts</c> applies, applied here instead. That middleware writes eagerly, so
+    /// the exception path clears its header and never rewrites it — measured: a 404 from a
+    /// DomainException went out over HTTPS with no HSTS, while a 404 from an unmapped route carried
+    /// it. Moving it below <c>UseExceptionHandler</c> does not help; that handler re-runs no
+    /// middleware. So the header comes from the callback above, the only thing outliving the clear.
     /// </summary>
     /// <remarks>
-    /// The scheme is the forwarded one — <c>UseForwardedHeaders</c> runs first — so behind a
-    /// TLS-terminating proxy this is what the caller really used. The excluded hosts are the
-    /// framework's own defaults, loopback among them: promising a browser that <c>localhost</c> is
-    /// HTTPS-only would break every other application a developer runs on it.
+    /// The scheme is the forwarded one — <c>UseForwardedHeaders</c> runs first — so this is what the
+    /// caller really used. The excluded hosts are the framework's defaults, loopback among them:
+    /// promising a browser that <c>localhost</c> is HTTPS-only breaks every other app on it.
     /// </remarks>
     private static bool IsSecure(HttpRequest request, HstsOptions hsts) =>
         request.IsHttps
