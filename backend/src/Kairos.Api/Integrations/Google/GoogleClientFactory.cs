@@ -123,7 +123,7 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         await scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>()
             .WriteAsync(
                 Provider,
-                new GoogleCredentialPayload(token.RefreshToken, false),
+                new GoogleCredentialPayload(token.RefreshToken),
                 label,
                 cancellationToken);
 
@@ -138,9 +138,6 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
             _gate.Release();
         }
     }
-
-    public async Task<bool> IsReconnectRequiredAsync(CancellationToken cancellationToken) =>
-        (await ReadPayloadAsync(cancellationToken))?.ReconnectRequired ?? false;
 
     /// <summary>
     /// An authorised client for the connected account, or null when there is nothing to
@@ -174,14 +171,24 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
             try
             {
                 await _credential.GetAccessTokenForRequestAsync(null, cancellationToken);
+
+                // The success is recorded as well as the failure, and it has to be: a grant that
+                // was refused and then reconnected has to stop being reported, and nothing else
+                // in this process ever learns that the provider answered.
+                await MarkAsync(store => store.MarkHealthyAsync(Provider, CancellationToken.None));
             }
             catch (TokenResponseException exception) when (exception.Error?.Error == InvalidGrant)
             {
                 // Access was revoked or the account password changed. Recorded rather than only
                 // thrown: nothing retries its way out of this, and the operator's fix is a button
-                // on a page that has to know to offer it.
+                // on a screen that has to know to offer it.
                 _credential = null;
-                await MarkReconnectRequiredAsync();
+                await MarkAsync(store => store.MarkUnhealthyAsync(
+                    Provider,
+                    CredentialHealth.ReconnectRequired,
+                    InvalidGrant,
+                    CancellationToken.None));
+
                 throw;
             }
 
@@ -221,23 +228,19 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     }
 
     /// <summary>
-    /// Deliberately uncancellable: it runs while a refresh is failing, and the request that
-    /// triggered it may already be going away. Losing this write would leave the page saying
-    /// "connected" about a credential that can never work again.
+    /// A scope for one health write. The store rides on the request's DbContext and this class is
+    /// a singleton, so every write from here needs one of its own — the same reason
+    /// <see cref="ReadPayloadAsync"/> opens one.
     /// </summary>
-    private async Task MarkReconnectRequiredAsync()
+    /// <remarks>
+    /// What it replaced read the payload, rewrote it with a flag flipped, and re-encrypted the
+    /// refresh token to record something that was never Google's business. The state is a column
+    /// now, so this touches no ciphertext at all.
+    /// </remarks>
+    private async Task MarkAsync(Func<IntegrationCredentialStore, Task> write)
     {
         await using var scope = _scopes.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>();
-
-        var payload = await store.ReadAsync<GoogleCredentialPayload>(Provider, CancellationToken.None);
-        if (payload is null)
-        {
-            return;
-        }
-
-        await store.WriteAsync(
-            Provider, payload with { ReconnectRequired = true }, null, CancellationToken.None);
+        await write(scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>());
     }
 
     /// <summary>
@@ -245,5 +248,12 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     /// "refresh token". Private and nested because it never leaves this class: the store is
     /// generic over it, so it crosses no signature that anything else can see.
     /// </summary>
-    private sealed record GoogleCredentialPayload(string RefreshToken, bool ReconnectRequired);
+    /// <remarks>
+    /// It used to carry a reconnect flag as well. That is a property of the credential now, so a
+    /// second provider inherits it rather than re-inventing it — and a credential written before
+    /// the move deserialises into this untouched, because an extra JSON property is ignored.
+    /// Nothing is re-encrypted and there is no data migration; the flag those rows carry is lost,
+    /// and the next refresh against a dead grant re-derives it.
+    /// </remarks>
+    private sealed record GoogleCredentialPayload(string RefreshToken);
 }

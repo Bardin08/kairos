@@ -35,12 +35,4 @@ public interface IIntegrationConnector
     /// the account is not connected — the caller is a browser redirect, so it ends on the page.
     /// </summary>
     public Task CompleteAsync(string code, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// True once a token refresh has been refused outright — the operator revoked access or
-    /// changed their account password. Distinct from "not connected", because the credential row
-    /// is still there, and distinct from a transient failure, because nothing except a new
-    /// consent will ever fix it. That is why the page renders it as "reconnect needed".
-    /// </summary>
-    public Task<bool> IsReconnectRequiredAsync(CancellationToken cancellationToken);
 }

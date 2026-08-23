@@ -37,6 +37,14 @@ public sealed class IntegrationCredentialStore(
     public const string CredentialUnreadableCode = "credential_unreadable";
 
     /// <summary>
+    /// How stale a proven success may get before a fresh one is worth a write. The success path
+    /// runs on every token refresh, and a token refresh runs on every booking page load — so an
+    /// unthrottled stamp is a SQLite write per page view for a value nobody read. Five minutes is
+    /// far finer than any screen renders this to.
+    /// </summary>
+    private const int SuccessRefreshSeconds = 300;
+
+    /// <summary>
     /// Every connected provider, for the page's status column. The rows carry ciphertext and the
     /// caller has no way to read it, which is why handing back the entity is safe here.
     /// </summary>
@@ -116,12 +124,121 @@ public sealed class IntegrationCredentialStore(
         row.ProtectedPayload = protector.Protect(json);
         row.UpdatedAt = now;
 
+        // A connect or a reconnect is the operator asserting that this credential works, and it is
+        // the only thing that clears a fault by hand. All three move together: a state cleared
+        // with a stale error beside it is one screen reading the state and another reading the
+        // error, and they disagree.
+        row.Health = CredentialHealth.Healthy;
+        row.LastError = null;
+        row.LastSuccessAt = now;
+
         if (accountLabel is not null)
         {
             row.AccountLabel = accountLabel;
         }
 
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Records that the provider answered. Writes only when something is actually different — the
+    /// state was not healthy, the credential has never succeeded, or the last success has gone
+    /// stale past <see cref="SuccessRefreshSeconds"/>.
+    /// </summary>
+    /// <remarks>
+    /// Uncancellable, like <see cref="MarkUnhealthyAsync"/>: a recovery discovered on a request
+    /// the caller then abandoned is still a recovery, and losing it leaves every admin screen
+    /// reporting a fault that has already cleared.
+    /// </remarks>
+    public async Task MarkHealthyAsync(IntegrationProvider provider, CancellationToken cancellationToken)
+    {
+        var row = await FindAsync(provider, cancellationToken);
+        if (row is null)
+        {
+            return;
+        }
+
+        var now = clock.GetCurrentInstant().ToUnixTimeSeconds();
+        var stale = (row.LastSuccessAt is null) || ((now - row.LastSuccessAt.Value) >= SuccessRefreshSeconds);
+
+        if ((row.Health == CredentialHealth.Healthy) && (row.LastError is null) && !stale)
+        {
+            return;
+        }
+
+        row.Health = CredentialHealth.Healthy;
+        row.LastError = null;
+        row.LastSuccessAt = now;
+        row.UpdatedAt = now;
+
+        await context.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Records that the provider refused, with a code a screen can turn into a sentence.
+    /// <see cref="IntegrationCredential.LastSuccessAt"/> is left alone: the failure does not
+    /// un-happen the last success, and that timestamp is the half of the alert an operator can act
+    /// on.
+    /// </summary>
+    /// <remarks>
+    /// Uncancellable by design — it runs while a refresh is failing, and the request that
+    /// triggered it may already be going away. Losing this write leaves every screen saying
+    /// everything is fine about a credential that can never work again.
+    /// </remarks>
+    public async Task MarkUnhealthyAsync(
+        IntegrationProvider provider,
+        CredentialHealth health,
+        string errorCode,
+        CancellationToken cancellationToken)
+    {
+        var row = await FindAsync(provider, cancellationToken);
+        if (row is null)
+        {
+            return;
+        }
+
+        row.Health = health;
+        row.LastError = errorCode;
+        row.UpdatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+
+        await context.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Whether this deployment's key can open the provider's stored credential, answered without
+    /// knowing what is inside it. Returns for a provider that was never connected: absent is not a
+    /// fault.
+    /// </summary>
+    /// <remarks>
+    /// It exists because the Integrations page used to learn this by decrypting through a
+    /// connector method that has since been deleted — the diagnosis was a side effect of a call
+    /// that said something else, and would have vanished with it silently, since a page that
+    /// renders is a page that looks fine.
+    /// </remarks>
+    public async Task EnsureReadableAsync(IntegrationProvider provider, CancellationToken cancellationToken)
+    {
+        var row = await FindAsync(provider, cancellationToken);
+        if (row is null)
+        {
+            return;
+        }
+
+        try
+        {
+            protector.Unprotect(row.ProtectedPayload);
+        }
+        catch (Exception exception)
+            when (exception is CryptographicException
+                or FormatException
+                or ArgumentException
+                or OverflowException)
+        {
+            throw DomainException.Invalid(
+                CredentialUnreadableCode,
+                $"The stored {provider} credential cannot be read: it was encrypted with a "
+                + "different Security:SecretKey than this deployment is configured with. "
+                + $"Connecting {provider} again replaces it.");
+        }
     }
 
     /// <summary>Tracked: the write path mutates what this returns.</summary>

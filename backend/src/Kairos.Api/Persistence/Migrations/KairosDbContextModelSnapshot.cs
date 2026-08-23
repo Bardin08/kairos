@@ -236,6 +236,15 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<long>("ConnectedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Health")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastSuccessAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ProtectedPayload")
                         .IsRequired()
                         .HasColumnType("TEXT");
