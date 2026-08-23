@@ -59,12 +59,10 @@ public class KeyGenerationTests
         context.Links.Add(link);
         context.SaveChanges();
 
-        // Saved one at a time: a single SaveChanges would order the inserts itself, which would
-        // prove the sort rather than the keys. The sleep is load-bearing — v7 orders by a
-        // millisecond timestamp, and .NET's Guid.CreateVersion7 fills the rest with plain random
-        // bits rather than a counter, so two ids minted inside one millisecond sort arbitrarily.
-        // Sleeping puts each booking in its own millisecond, which is what the clock does anyway
-        // between two people booking a call.
+        // Saved one at a time: a single SaveChanges would order the inserts itself and prove the
+        // sort rather than the keys. The sleep is load-bearing — v7 orders by a millisecond
+        // timestamp and .NET fills the rest with random bits, not a counter, so two ids minted
+        // inside one millisecond sort arbitrarily.
         foreach (var offset in Enumerable.Range(0, 5))
         {
             context.Bookings.Add(new Booking

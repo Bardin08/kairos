@@ -21,11 +21,9 @@ using SystemClock = NodaTime.SystemClock;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The availability write side over the real pipeline. Only the rules that are wrong in ways
-/// nothing else would notice are pinned here: a rename works or it visibly does not, but an
-/// overlapping window and a cascaded delete both look like success and are found weeks later —
-/// one as a duplicated time on the booking page, the other as a link that quietly stopped
-/// offering anything.
+/// The availability write side over the real pipeline. Only the rules that fail invisibly are
+/// pinned: an overlapping window and a cascaded delete both look like success and are found weeks
+/// later, one as a duplicated time on the booking page, the other as a link offering nothing.
 /// </summary>
 public class PatternsAdminTests
 {
@@ -33,7 +31,6 @@ public class PatternsAdminTests
     private const string LinkName = "Consulting call";
     private const int DurationMinutes = 25;
 
-    /// <summary>The pattern a test starts from, whether it is seeded or created through the API.</summary>
     private const string FirstPatternName = "Weekdays";
 
     /// <summary>A second pattern, so a rename has somewhere to collide from.</summary>
@@ -65,11 +62,10 @@ public class PatternsAdminTests
     private const int RacingWriters = 2;
 
     /// <summary>
-    /// How many times the rules race below is run. Whether two requests interleave at all is the
-    /// scheduler's decision, and a round that does not interleave proves nothing — measured with
-    /// the guard's predicate removed, a single round let the union through on 3 of 9 whole-suite
-    /// runs, while five rounds caught it on 6 of 6. Alone the test is far luckier than that, which
-    /// is the trap: the suite is where it will actually run.
+    /// How many times the rules race below is run. Whether two requests interleave is the
+    /// scheduler's decision, and a round that does not proves nothing — measured with the guard's
+    /// predicate removed, a single round let the union through on 3 of 9 whole-suite runs, five
+    /// rounds caught it on 6 of 6. Alone the test is far luckier; the suite is where it runs.
     /// </summary>
     private const int RacedRounds = 5;
 
@@ -154,9 +150,8 @@ public class PatternsAdminTests
 
     /// <summary>
     /// The window this whole endpoint exists to refuse. Two rules covering 09:00-17:00 and
-    /// 10:00-16:00 on one Monday do not produce a longer day — they produce every 10:00-onwards
-    /// start twice, which reaches the invitee as a list with duplicates in it and reads as a
-    /// rendering fault rather than as the data fault it is.
+    /// 10:00-16:00 on one Monday do not make a longer day — they offer every 10:00-onwards start
+    /// twice, which reaches the invitee as duplicates and reads as a rendering fault.
     /// </summary>
     [Fact]
     public async Task ReplaceRules_WithTwoWindowsOverlappingOnOneDay_IsRefused()
@@ -222,8 +217,7 @@ public class PatternsAdminTests
     /// Finding 2 on the weekly half: Rules carried no length bound either, so a body up to
     /// Kestrel's 30 MB cap was deserialized, grouped and sorted a day at a time before anything
     /// refused it. Every body past the weekly bound also puts a seventh window on some day, so
-    /// what tells the collection cap apart from the per-day one is which of them answers: this
-    /// refusal names the field and carries no code, which only the attribute does.
+    /// which cap answered is the tell: this refusal names the field and carries no code.
     /// </summary>
     [Fact]
     public async Task ReplaceRules_WithMoreWindowsInTheWeekThanItMayHold_IsRefusedByTheAttribute()
@@ -242,11 +236,9 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The refusal that has to name names. A cascade here would delete the pattern and leave the
-    /// link resolvable, active and offering nothing — an outage the operator did not ask for and
-    /// cannot see the cause of. Which links, not how many: the operator has to go and repoint
-    /// them, and a count sends them hunting through the links table for the answer this request
-    /// already has.
+    /// The refusal that has to name names. A cascade would delete the pattern and leave the link
+    /// resolvable, active and offering nothing. Which links, not how many: the operator has to
+    /// repoint them, and a count sends them hunting for an answer this request already has.
     /// </summary>
     [Fact]
     public async Task DeletePattern_WhileALinkStandsOnIt_IsRefusedAndNamesTheLink()
@@ -267,11 +259,9 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The blocked day, proved where it matters rather than in the row that stores it. A form
-    /// that only offered "change the times" could not express a holiday — so what is pinned is
-    /// the public booking page, through the same HTTP the invitee's browser uses, and then that
-    /// the date is still an override: one that deleted its rows instead would put the date back
-    /// on the weekly rules, where nothing can tell it from a date nobody ever touched.
+    /// The blocked day, proved on the public booking page rather than in the row that stores it —
+    /// a form offering only "change the times" could not express a holiday. And the date is still
+    /// an override: one that deleted its rows would put it back on the weekly rules.
     /// </summary>
     [Fact]
     public async Task SaveOverride_WithNoWindows_BlocksTheDate()
@@ -326,8 +316,7 @@ public class PatternsAdminTests
     /// <summary>
     /// Half a date is worse than none of it. Two windows covering 09:00-17:00 and 10:00-16:00
     /// offer every 10:00-onwards start twice, and a save that cleared the date before finding out
-    /// would leave the operator with a date they never asked for — so the date that was there is
-    /// what is still there afterwards.
+    /// would leave a date the operator never asked for. What was there is still there.
     /// </summary>
     [Fact]
     public async Task SaveOverride_WithTwoWindowsOverlappingOnTheDate_IsRefused()
@@ -354,12 +343,11 @@ public class PatternsAdminTests
 
     /// <summary>
     /// Finding 2 of the review: Windows carried [Required] and no length bound, so a body up to
-    /// Kestrel's 30 MB cap was deserialized, projected into a tuple sequence and sorted before
-    /// anything refused it. Seven is one past what a day can carry, which is the boundary worth
-    /// pinning — six is already a morning, an afternoon and four more the operator meant. The
-    /// code is what is asserted, because a date's seventh window is the same operator mistake as
-    /// a Monday's and a client branches on <c>code</c>: a bound on the body tight enough to
-    /// refuse this first would answer the two routes differently.
+    /// Kestrel's 30 MB cap was deserialized, projected and sorted before anything refused it.
+    /// Seven is one past what a day can carry — six is already a morning, an afternoon and four
+    /// more the operator meant. The code is asserted because a date's seventh window is the same
+    /// mistake as a Monday's and clients branch on <c>code</c>: a tighter body bound would answer
+    /// the two routes differently.
     /// </summary>
     [Fact]
     public async Task SaveOverride_WithMoreWindowsThanADayMayHold_IsRefusedWithACode()
@@ -374,10 +362,9 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The allocation guard on this route, which the coded refusal above cannot stand in for: it
-    /// runs inside the handler, on a list already bound. Refused before that, so the field is
-    /// named and no code comes back — and without the bound the count above would answer instead,
-    /// which is what these assertions rule out.
+    /// The allocation guard the coded refusal above cannot stand in for: that one runs inside the
+    /// handler, on a list already bound. Refused before that, so the field is named and no code
+    /// comes back — without the bound the count would answer instead.
     /// </summary>
     [Fact]
     public async Task SaveOverride_WithMoreWindowsThanAnyBodyMayCarry_IsRefusedByTheAttribute()
@@ -455,10 +442,9 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The seam the whole tab exists to move: a pattern built here, through the admin API, and
-    /// then read by an anonymous browser as times it can book. Nothing in between is stubbed —
-    /// the link is repointed the way it would be from the links editor, and the last read is the
-    /// public endpoint with no session on it.
+    /// The seam the whole tab exists to move: a pattern built through the admin API, then read by
+    /// an anonymous browser as times it can book. Nothing between is stubbed — the link is
+    /// repointed as the links editor would, and the last read carries no session.
     /// </summary>
     [Fact]
     public async Task CreatePatternAndRule_OnceALinkStandsOnIt_ChangesWhatTheBookingPageOffers()
@@ -498,27 +484,17 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// Two admin tabs saving one date at once, over the real pipeline. What is asserted is what
-    /// holds however the two interleave: neither is answered with a stack trace, and the date is
-    /// left holding one writer's set rather than the union of both.
+    /// Two admin tabs saving one date at once, over the real pipeline. What holds however they
+    /// interleave: neither is answered with a stack trace, and the date is left holding one
+    /// writer's set rather than the union of both.
     /// </summary>
     /// <remarks>
     /// Whether the loser is refused or merely replaces the winner is not asserted, and the
-    /// measurements are why. The barrier aligns the two sends, which narrows the window a great
-    /// deal: with it, the strict form — exactly one 200 and one 409 — passed 20 of 20 runs on its
-    /// own and 10 of 10 inside the full parallel suite. Without it the same strict form failed 1
-    /// in 5 under the suite, both requests answering 200, which is what this test looked like
-    /// before the barrier went in.
-    ///
-    /// Narrowed is not closed, and that is the point. The barrier aligns when the two requests
-    /// are sent; nothing reachable from outside the application can align where the two handlers
-    /// read, which is the interval that actually decides the outcome. Both requests answering 200
-    /// is correct behaviour — the second read the version the first had already raised, replaced
-    /// its row and committed — so a strict assertion would be measuring how busy the host was.
-    /// Ten green runs are not a guarantee, they are ten samples, and the difference matters on a
-    /// slower CI box. The refusal itself is therefore pinned where it can be forced rather than
-    /// sampled: the version check in <c>SchemaTests</c>, and the mapping in
-    /// <c>ConcurrentWriteTests</c>.
+    /// measurements are why: with the barrier the strict form — one 200 and one 409 — passed
+    /// 20 of 20 runs alone and 10 of 10 under the full suite, without it 1 in 5 failed with both
+    /// answering 200. The barrier aligns the sends, not where the handlers read, so ten green
+    /// runs are ten samples. The refusal is forced instead in <c>SchemaTests</c>' version check
+    /// and <c>ConcurrentWriteTests</c>' mapping.
     /// </remarks>
     [Fact]
     public async Task SaveOverride_FromTwoWritersAtOnce_LeavesOneWritersSetAndNeverAServerError()
@@ -560,11 +536,10 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The defect this whole change exists for. Two operators saving a week on a pattern that has
-    /// no rules yet: nothing is deleted, so nothing raises the way it does on a pattern that
-    /// already has rules, and both sets used to land — measured here with the guard removed, both
-    /// writers answered 200 and the stored week held Monday and Wednesday, which is a pattern open
-    /// on days neither operator asked for.
+    /// The defect this whole change exists for. Two operators saving a week on a pattern with no
+    /// rules yet: nothing is deleted, so nothing raises the way it does on a pattern that has
+    /// rules, and both sets used to land — measured with the guard removed, both writers answered
+    /// 200 and the stored week held Monday and Wednesday, days neither operator asked for.
     /// </summary>
     [Fact]
     public async Task ReplaceRules_FromTwoWritersAtOnceOnAPatternWithNoRules_KeepsOneWritersWeek()
@@ -601,16 +576,14 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The reason there are two columns rather than one. On a single token a weekly-rules save and
-    /// a date's save raced each other, so an operator blocking a holiday could be refused because
-    /// somebody else was editing Tuesday's hours — unrelated edits to unrelated days, refusing
-    /// each other. Both answers are 200 here, and neither writer's work is the other's problem.
+    /// The reason there are two columns rather than one. On a single token a weekly-rules save
+    /// and a date's save raced, so an operator blocking a holiday could be refused because
+    /// somebody else was editing Tuesday's hours. Both answers are 200 here.
     /// </summary>
     /// <remarks>
-    /// One round, unlike the race above, and the difference is not an oversight: the loser of this
-    /// one waits on the write lock rather than racing for it, so once the barrier releases the
-    /// interleave happens every time. Measured — with RulesVersion made a concurrency token, this
-    /// fails on all ten runs of a single round.
+    /// One round, unlike the race above, and not an oversight: the loser waits on the write lock
+    /// rather than racing for it, so the interleave happens every time. Measured — with
+    /// RulesVersion made a concurrency token, this fails on all ten runs of a single round.
     /// </remarks>
     [Fact]
     public async Task ReplaceRulesAndSaveOverride_AtOnce_DoNotRefuseEachOther()
@@ -636,12 +609,11 @@ public class PatternsAdminTests
 
     /// <summary>
     /// The name is how the operator picks a pattern out of a list, so two patterns wearing one
-    /// name is a workbench where the wrong availability gets attached to a link. The refusal comes
-    /// from the unique index by way of <see cref="ConcurrentWrite"/> rather than from a SELECT this
-    /// handler runs first, which is what makes it hold when two requests race — and it is why the
-    /// code, not the sentence, is what a client is asked to branch on. What the list holds
-    /// afterwards is asserted too: a 409 over a row that landed anyway is the duplicate this
-    /// refuses, wearing the refusal's clothes.
+    /// name attaches the wrong availability to a link. The refusal comes from the unique index by
+    /// way of <see cref="ConcurrentWrite"/> rather than a SELECT this handler runs first, which
+    /// is what makes it hold under a race and why clients branch on the code. What the list holds
+    /// afterwards is asserted too: a 409 over a row that landed anyway is the duplicate wearing
+    /// the refusal's clothes.
     /// </summary>
     [Fact]
     public async Task CreatePattern_WithANameAlreadyTaken_IsRefusedWithTheCode()
@@ -665,11 +637,9 @@ public class PatternsAdminTests
     }
 
     /// <summary>
-    /// The same collision reached by the other route, and not covered by the create above: a
-    /// rename goes through ExecuteUpdate, which never loads the row, so it is a second write path
-    /// to the one index. What the pattern was called is what it is still called afterwards —
-    /// a refusal the operator reads on one screen while the list on another already shows the new
-    /// name is a refusal only in the status line.
+    /// The same collision by the other route, uncovered by the create above: a rename goes
+    /// through ExecuteUpdate, which never loads the row, so it is a second write path to the one
+    /// index. The name afterwards is asserted too — otherwise the refusal is only a status line.
     /// </summary>
     [Fact]
     public async Task RenamePattern_OntoANameAlreadyTaken_IsRefusedWithTheCode()

@@ -270,9 +270,8 @@ public class BookingWriterTests
 
     /// <summary>
     /// The other half, and the one that would rot quietly: a refused booking leaves nothing to
-    /// announce, including nothing sitting in the change tracker waiting for the caller's next
-    /// SaveChanges. Saving afterwards is the assertion — without the detach in Abandon, the
-    /// announcement for a booking that was never written appears right there.
+    /// announce, including nothing in the change tracker awaiting the caller's next SaveChanges.
+    /// Saving afterwards is the assertion — without the detach in Abandon it appears right there.
     /// </summary>
     [Fact]
     public void TryCreate_TheSlotIsTaken_LeavesNoAnnouncementBehindEither()

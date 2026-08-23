@@ -15,16 +15,14 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// How far down the chain of proxies the real caller is, and what happens to the settings that say
-/// so when they are written wrong. Both are read once, while the pipeline is being built, and
-/// neither says anything at request time — which is why they are pinned here.
+/// How far down the chain of proxies the real caller is, and what a misspelled setting does. Both
+/// are read once while the pipeline is built and say nothing at request time, which is why they
+/// are pinned here.
 /// </summary>
 /// <remarks>
-/// The number matters because the reference deployment is a tunnel in front of a reverse proxy, so
-/// <c>X-Forwarded-For</c> arrives as the invitee followed by the tunnel's own hop. Stopping one
-/// hop short of the invitee resolves every caller on earth to one address, which merges the whole
-/// internet into a single rate-limit bucket — silently, in exactly the deployment shape this
-/// suite's settings exist to serve.
+/// The reference deployment is a tunnel in front of a reverse proxy, so <c>X-Forwarded-For</c>
+/// arrives as the invitee followed by the tunnel's hop. Stopping one hop short resolves every
+/// caller on earth to one address, merging the internet into a single rate-limit bucket.
 /// </remarks>
 public class ForwardedHeadersTests
 {
@@ -33,8 +31,8 @@ public class ForwardedHeadersTests
     private const string FirstKnownNetworkKey = $"{ProxyOptions.KnownNetworksPath}:0";
 
     /// <summary>
-    /// One reverse proxy and nothing in front of it, which is the unconfigured shape. Written out
-    /// rather than read from <see cref="ProxyOptions.DefaultForwardLimit"/>: a test that takes its
+    /// One reverse proxy and nothing in front of it, the unconfigured shape. Written out rather
+    /// than read from <see cref="ProxyOptions.DefaultForwardLimit"/>: a test taking its
     /// expectation from the value under test agrees with every change to it.
     /// </summary>
     private const int SingleProxy = 1;
@@ -80,13 +78,10 @@ public class ForwardedHeadersTests
     /// caller the middleware settles on at each depth.
     /// </summary>
     /// <remarks>
-    /// The rows are the two deployments. At one hop the header's rightmost entry is consumed and
-    /// the caller IS the tunnel — every invitee on earth arriving as one address, which is the
-    /// failure this setting exists to avert and which nothing else in this suite would notice. At
-    /// two, with the tunnel trusted, the invitee behind it is resolved. The tunnel is named in
-    /// <see cref="ProxyOptions.KnownProxiesPath"/> for both rows, because a depth of two with
-    /// nothing trusted stops at the first untrusted hop regardless of the limit — which is the
-    /// half that keeps a caller from prepending whatever address it likes.
+    /// At one hop the caller IS the tunnel — every invitee arriving as one address, the failure
+    /// this setting averts; at two, with the tunnel trusted, the invitee is resolved. Both rows
+    /// name the tunnel in <see cref="ProxyOptions.KnownProxiesPath"/>, because a depth of two
+    /// with nothing trusted stops at the first untrusted hop.
     /// </remarks>
     [Theory]
     [InlineData(SingleProxy, Tunnel)]
@@ -161,16 +156,13 @@ public class ForwardedHeadersTests
     /// <summary>
     /// The peer the in-memory host does not have, and the caller the middleware settled on.
     /// TestServer opens no socket, so <c>Connection.RemoteIpAddress</c> is null and
-    /// <c>UseForwardedHeaders</c> takes no header's word for who is calling — with nothing to
-    /// check, it does nothing at all. Loopback is what the framework trusts by default, so lending
-    /// the connection that address is the whole substitution.
+    /// <c>UseForwardedHeaders</c> takes no header's word for who is calling. Loopback is what the
+    /// framework trusts by default, so lending that address is the substitution.
     /// </summary>
     /// <remarks>
-    /// One middleware for both halves, and an <see cref="IStartupFilter"/> because this has to run
-    /// in front of <c>UseForwardedHeaders</c>, which is the application's own first line. The
-    /// address is read on the way back out: the middleware rewrites
-    /// <c>Connection.RemoteIpAddress</c> in place, so what this sees after awaiting is what every
-    /// line of the pipeline below it saw — the rate limiter's partition included.
+    /// An <see cref="IStartupFilter"/>, because this runs in front of <c>UseForwardedHeaders</c>,
+    /// the application's own first line. The address is read on the way back out: the middleware
+    /// rewrites it in place, so this sees what the rest of the pipeline saw.
     /// </remarks>
     private sealed class ForwardedCaller : IStartupFilter
     {

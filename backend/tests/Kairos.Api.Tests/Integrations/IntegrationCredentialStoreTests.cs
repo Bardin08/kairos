@@ -19,9 +19,8 @@ namespace Kairos.Api.Tests.Integrations;
 /// transition an operator performs by hand.
 /// </summary>
 /// <remarks>
-/// Written against the store rather than over HTTP because the throttle is the subject of one of
-/// these and cannot be observed from outside — a route that answers the same either way is a
-/// route that cannot tell you whether it wrote a row.
+/// Written against the store rather than over HTTP because the throttle cannot be observed from
+/// outside — a route answering the same either way cannot tell you whether it wrote a row.
 /// </remarks>
 public class IntegrationCredentialStoreTests
 {

@@ -10,16 +10,14 @@ namespace Kairos.Api.Tests.Shared;
 /// <summary>
 /// The mapping alone, driven directly. The interleave that produces the exception in production —
 /// two requests loading a date's rows before either saves — cannot be forced through an
-/// <see cref="HttpClient"/>, so what is pinned here is the translation, and the interleave itself
-/// is pinned against EF in <c>SchemaTests</c>.
+/// <see cref="HttpClient"/>, so it is pinned against EF in <c>SchemaTests</c> instead.
 /// </summary>
 public class ConcurrentWriteTests
 {
     /// <summary>
-    /// Deliberately not the endpoint's code and not its sentence. This helper lives in Shared/
-    /// and knows nothing about patterns — a test reaching for <c>PatternChangedCode</c> would
-    /// read as though it did, and would go on passing by copying whatever the endpoint copied.
-    /// Any two strings prove the same thing, so these say plainly that they are the caller's.
+    /// Deliberately not the endpoint's code or sentence. This helper lives in Shared/ and knows
+    /// nothing about patterns; a test reaching for <c>PatternChangedCode</c> would read as though
+    /// it did, and would pass by copying whatever the endpoint copied.
     /// </summary>
     private const string Code = "some_caller_code";
     private const string Message = "Whatever the caller wanted to say about it.";
@@ -49,11 +47,10 @@ public class ConcurrentWriteTests
     }
 
     /// <summary>
-    /// The helper's other shape, against a violation SQLite actually raised rather than one built
-    /// by hand. A duplicate arrives as an extended error code on an exception EF has wrapped, so
-    /// a constructed exception would pin the constructor and not the shape — and this is now the
-    /// only thing exercising the branch at all, because the token on the pattern means the
-    /// endpoint reaches the concurrency exception first and never gets here.
+    /// The helper's other shape, against a violation SQLite actually raised. A duplicate arrives
+    /// as an extended error code on an exception EF has wrapped, so a constructed one would pin
+    /// the constructor rather than the shape — and this is now the only thing exercising the
+    /// branch, the pattern's token meaning the endpoint hits the concurrency exception first.
     /// </summary>
     [Fact]
     public async Task NamedAsync_WhenTheRowWasAlreadyInserted_IsAConflictNamingTheCode()

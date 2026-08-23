@@ -103,11 +103,9 @@ public class SchemaTests
     }
 
     /// <summary>
-    /// The index asserted as enforcement rather than as declaration, on the same reasoning as the
-    /// foreign-key test above: a unique index that was configured and never created refuses
-    /// nothing, and reading the configuration would not tell you which. Two rows identical in all
-    /// four columns is what two writers who each passed ValidateDay alone can produce, so this is
-    /// the endpoint's last line rather than its first.
+    /// The index asserted as enforcement, not declaration, on the foreign-key test's reasoning:
+    /// an index configured and never created refuses nothing. Two rows identical in all four
+    /// columns is what two writers who each passed ValidateDay produce.
     /// </summary>
     [Fact]
     public void SaveChanges_WithTheSameWindowOnOneDateTwice_IsRejectedByTheUniqueIndex()
@@ -140,11 +138,9 @@ public class SchemaTests
     }
 
     /// <summary>
-    /// The assumption <see cref="Kairos.Api.Shared.ConcurrentWrite"/> stands on: two writers that
-    /// both read a date's rows before either saves, which is two admin tabs on one date. The
-    /// second delete finds nothing to delete and EF raises rather than writing a merged set. If a
-    /// provider change ever made this silent, the 409 above would become a lie and nothing else
-    /// would notice.
+    /// The assumption <see cref="Kairos.Api.Shared.ConcurrentWrite"/> stands on: two admin tabs
+    /// both read a date's rows before either saves, so the second delete finds nothing and EF
+    /// raises rather than writing a merged set. Made silent, the 409 above becomes a lie.
     /// </summary>
     [Fact]
     public void SaveChanges_WhenAnotherWriterAlreadyReplacedTheDate_RaisesConcurrency()
@@ -180,13 +176,11 @@ public class SchemaTests
     }
 
     /// <summary>
-    /// The other half of what the override write leans on, and the half that covers a date
-    /// holding no rows yet: there is nothing to delete then, so the stale delete above never
-    /// fires and the two windows differ, so the unique index has nothing to refuse either. Both
-    /// writers raise the number they read, and the second finds the row already moved. Remove
-    /// IsConcurrencyToken from the column and the second save simply succeeds, this test fails,
-    /// and what it was guarding is gone — that is the state in which two tabs left a date holding
-    /// both of their windows.
+    /// The other half, covering a date holding no rows yet: nothing to delete, so the stale
+    /// delete above never fires, and the two windows differ, so the unique index refuses nothing
+    /// either. Both writers raise the number they read and the second finds the row moved. Remove
+    /// IsConcurrencyToken from the column and the second save succeeds — the state in which two
+    /// tabs left a date holding both of their windows.
     /// </summary>
     [Fact]
     public void SaveChanges_WhenTwoWritersBothRaiseTheOverridesVersion_RaisesConcurrency()
@@ -214,15 +208,13 @@ public class SchemaTests
     }
 
     /// <summary>
-    /// Why RulesVersion is raised by an explicit UPDATE rather than by carrying
-    /// IsConcurrencyToken like the column above. EF builds an update's WHERE clause from the key
-    /// plus EVERY concurrency token on the entity, not only the tokens whose properties changed —
-    /// so a tracked save that touches nothing but RulesVersion is still refused by an override
-    /// write that moved OverridesVersion under it, on a date the week has nothing to do with.
-    /// Make RulesVersion a token as well and this stops being a demonstration and becomes the
-    /// shipping behaviour of both routes; ReplaceRulesAsync sidesteps it entirely by writing
-    /// through ExecuteUpdate, which is generated from its own predicate and reads no token
-    /// metadata at all.
+    /// Why RulesVersion is raised by an explicit UPDATE rather than carrying IsConcurrencyToken
+    /// like the column above. EF builds an update's WHERE clause from the key plus EVERY
+    /// concurrency token, not only the changed ones, so a tracked save touching nothing but
+    /// RulesVersion is still refused by an override write that moved OverridesVersion on an
+    /// unrelated date. Make RulesVersion a token too and that becomes both routes' shipping
+    /// behaviour; ReplaceRulesAsync sidesteps it through ExecuteUpdate, which reads no token
+    /// metadata.
     /// </summary>
     [Fact]
     public void SaveChanges_WhenARulesWriterSavesUnderAnOverrideWriter_StillCollides()
@@ -287,9 +279,8 @@ public class SchemaTests
 
     /// <summary>
     /// The branch the endpoint actually reports on. Zero rows affected is another rules writer
-    /// having claimed the week between this one's read and its update — nothing raises, nothing
-    /// throws, and the count is the only thing that says so, which is why ReplaceRulesAsync
-    /// refuses on it rather than on an exception it would never see.
+    /// having claimed the week between this one's read and its update — nothing raises, and the
+    /// count is the only thing that says so, which is what ReplaceRulesAsync refuses on.
     /// </summary>
     [Fact]
     public void ExecuteUpdate_RaisingARulesVersionAnotherWriterAlreadyRaised_ClaimsNothing()

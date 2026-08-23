@@ -9,10 +9,9 @@ using Shouldly;
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
-/// The body other people's code reads, and the one thing about it that is a contract rather than
-/// an implementation detail: the three event names, and that every event renders the same six
-/// fields. A subscriber that has to special-case an event to find its start time is reading a
-/// worse contract than one that never has to.
+/// The body other people's code reads, and the part of it that is a contract rather than an
+/// implementation detail: the three event names, and that every event renders the same six
+/// fields. A subscriber special-casing an event to find its start time reads a worse contract.
 /// </summary>
 public class BookingEventPayloadTests
 {

@@ -51,10 +51,8 @@ public class LinksAdminTests
 
     /// <summary>
     /// <c>MapFallbackToFile</c> claims every extensionless path, so before the catch-all under
-    /// <c>/api</c> was mapped an unmatched API route answered 200 with the single page. The failure
-    /// is silent in both directions — a path nothing serves answered 200, and a fetch to a mistyped
-    /// route received <c>&lt;!doctype html&gt;</c> and died on a JSON parse error rather than on a
-    /// 404 — and the next person to add a route will not be thinking about route ordering.
+    /// <c>/api</c> was mapped an unmatched API route answered 200 with the single page, and a
+    /// fetch to a mistyped route died on a JSON parse error rather than a 404.
     /// </summary>
     [Fact]
     public async Task UnmappedApiPath_IsNotFound_WhileTheSinglePageStillAnswers()
@@ -122,11 +120,10 @@ public class LinksAdminTests
 
     /// <summary>
     /// The same unbounded-collection defect the pattern windows carried, one endpoint over: with
-    /// no bound the whole array is bound and Distinct() walks it, so a body up to Kestrel's 30 MB
-    /// cap was allocated and scanned before any of the three duration rules could refuse it. The
-    /// refusal is the attribute's, so it names the field and carries no code — the coded rules
-    /// below it have nothing to say about a list that is merely long, and every value here passes
-    /// all three of them.
+    /// no bound the whole array binds and Distinct() walks it, so a body up to Kestrel's 30 MB cap
+    /// was allocated and scanned before any duration rule could refuse it. The refusal is the
+    /// attribute's, naming the field and carrying no code — every value here passes all three
+    /// coded rules, which have nothing to say about a list that is merely long.
     /// </summary>
     [Fact]
     public async Task Create_WithMoreDurationsThanALinkMayOffer_IsRefusedByTheAttribute()
@@ -160,15 +157,12 @@ public class LinksAdminTests
     /// An inherited limit is an explicit <c>null</c> on the wire, not a key that is not there.
     /// </summary>
     /// <remarks>
-    /// Asserted on the raw body, and that is the whole point of the test. Deserializing it back
-    /// into <see cref="AdminLinkResponse"/> would put the property back whether or not the JSON
-    /// carried it, and prove nothing. What this defends is one line nobody would connect to it:
-    /// System.Text.Json's <c>DefaultIgnoreCondition</c> is <c>Never</c> today, and setting it to
-    /// <c>WhenWritingNull</c> — a plausible tidying-up — drops the key, JavaScript reads
-    /// <c>undefined</c>, <c>value === null</c> goes false in <c>InheritableNumber</c>, and every
-    /// inherited limit in the workbench renders as an editable box holding the global. The link
-    /// then stops tracking the global the first time anybody saves it, silently, and no other
-    /// test in this suite goes red.
+    /// Asserted on the raw body: deserializing into <see cref="AdminLinkResponse"/> would put the
+    /// property back whether the JSON carried it or not. What this defends is one line nobody
+    /// would connect to it — System.Text.Json's <c>DefaultIgnoreCondition</c> is <c>Never</c>, and
+    /// the plausible tidy-up to <c>WhenWritingNull</c> drops the key, so <c>value === null</c>
+    /// goes false in <c>InheritableNumber</c> and every inherited limit renders as a box holding
+    /// the global, silently stopping tracking at the next save.
     /// </remarks>
     [Fact]
     public async Task ListLinks_ForAnInheritedLimit_SendsAnExplicitNullRatherThanOmittingTheKey()
@@ -193,11 +187,9 @@ public class LinksAdminTests
     }
 
     /// <summary>
-    /// The link is the resource, so its absence is the first thing an answer about it can say. The
-    /// three body validations ran ahead of the lookup, and a PUT to a guid nothing answers to came
-    /// back 409 <c>slug_taken</c> — a collision reported for a link that is not there, which sends
-    /// the operator hunting for another link to rename instead of reloading a page that has gone
-    /// stale. The other three <c>{id:guid}</c> routes resolve the link first and answer 404.
+    /// The link is the resource, so its absence is the first thing an answer can say. The three
+    /// body validations ran ahead of the lookup, so a PUT to a guid nothing answers to came back
+    /// 409 <c>slug_taken</c>. The other three <c>{id:guid}</c> routes resolve first and 404.
     /// </summary>
     [Fact]
     public async Task Update_ForALinkThatDoesNotExist_IsNotFoundRatherThanAConflictWithAnotherLink()

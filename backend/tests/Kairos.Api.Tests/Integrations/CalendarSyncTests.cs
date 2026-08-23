@@ -12,18 +12,15 @@ using Shouldly;
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
-/// What a booking is left holding after the providers have had their turn. Every assertion here
-/// is a row in the database, because those rows are the entire product of this class — Part C's
-/// Meetings tab reads them and nothing else, and an operator's answer to "is my calendar
-/// working?" is whatever they say.
+/// What a booking is left holding after the providers have had their turn. Every assertion is a
+/// row in the database, because those rows are this class's entire product: Part C's Meetings tab
+/// reads them and nothing else.
 /// </summary>
 /// <remarks>
-/// The two providers are a fake and a stub rather than mocks, and nothing counts calls on them.
-/// What is pinned is the outcomes a real provider can produce — no account, a refusal, an answer
-/// — and the state each has to leave behind. A test asserting that <c>Events.Insert</c> or
-/// <c>Events.Update</c> was invoked would pass against a Google client that had been broken in
-/// every way that matters; the fake holds the events it is given instead, so a move can be told
-/// from a delete-and-recreate by looking at what the calendar ends up holding.
+/// The two providers are a fake and a stub, and nothing counts calls on them; what is pinned is
+/// the outcomes a real provider can produce and the state each leaves behind. Asserting
+/// <c>Events.Update</c> was invoked would pass against a client broken in every way that matters,
+/// where the fake's held events tell a move from a delete-and-recreate.
 /// </remarks>
 public class CalendarSyncTests
 {
@@ -39,10 +36,9 @@ public class CalendarSyncTests
     private const long MovedEndUtc = 1_788_010_800;
 
     /// <summary>
-    /// The decision this task had to make, pinned so it cannot be undone by accident: a
-    /// deployment that never connected a calendar gets no rows. A <c>Failed</c> row would be a
-    /// permanent red mark on every booking of a Kairos that was never asked to sync, and a signal
-    /// that fires on every row is not a signal.
+    /// The decision this task had to make, pinned so it cannot be undone by accident: a deployment
+    /// that never connected a calendar gets no rows. A <c>Failed</c> row would be a permanent red
+    /// mark on every booking of a Kairos never asked to sync, and a signal on every row is none.
     /// </summary>
     [Fact]
     public async Task SyncAsync_NoProviderIsConnected_RecordsNothingAtAll()
@@ -121,10 +117,9 @@ public class CalendarSyncTests
     }
 
     /// <summary>
-    /// The whole of gap 1, in one assertion: after a move the calendar holds one event, under the
-    /// id it always had, at the time the booking now claims. A second event would be a second
-    /// invitation to everybody who had already accepted; the same event left at the old time is
-    /// the invitee turning up an hour early.
+    /// The whole of gap 1 in one assertion: after a move the calendar holds one event, under the
+    /// id it always had, at the time the booking now claims. A second event is a second invitation
+    /// to everybody who accepted; the same event left behind is the invitee an hour early.
     /// </summary>
     [Fact]
     public async Task RescheduleAsync_TheBookingMoved_MovesTheSameEventRatherThanReplacingIt()
@@ -155,9 +150,8 @@ public class CalendarSyncTests
 
     /// <summary>
     /// The decision not to repair, pinned so it is a choice rather than an accident. A booking
-    /// that was never written to a calendar is not placed into one by a reschedule: that would put
-    /// a meeting in front of the organizer that the booker was never told was there, from a code
-    /// path nobody was looking at. The absent state on the booking read is where the gap shows.
+    /// never written to a calendar is not placed into one by a reschedule: that would put a
+    /// meeting in front of the organizer the booker was never told was there.
     /// </summary>
     [Fact]
     public async Task RescheduleAsync_NothingWasEverPlaced_LeavesTheCalendarAlone()
@@ -360,11 +354,9 @@ public class CalendarSyncTests
     }
 
     /// <summary>
-    /// A calendar, not a call recorder. It holds the events it is asked to hold and hands them
-    /// back, so every assertion above reads what an organizer would see rather than which methods
-    /// ran. A test that asserted <c>UpdateEventAsync</c> was invoked would pass against an
-    /// implementation that deleted the event and made a new one — which is the single thing a
-    /// move must never do, and the thing only the held state can tell you about.
+    /// A calendar, not a call recorder. It holds the events it is given and hands them back, so
+    /// the assertions read what an organizer would see. Asserting <c>UpdateEventAsync</c> was
+    /// invoked would pass against a delete-and-recreate, the one thing a move must never do.
     /// </summary>
     private sealed class FakeCalendar : ICalendarWriter
     {

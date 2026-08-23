@@ -35,7 +35,6 @@ namespace Kairos.Api.Tests.Features;
 /// </summary>
 public class AdminBoundaryTests
 {
-    /// <summary>A group the identity provider issues for something that is not this application.</summary>
     private const string ForeignGroup = "some-other-group";
 
     /// <summary>A second one, so a membership list can be a list rather than a pair.</summary>
@@ -53,10 +52,9 @@ public class AdminBoundaryTests
     private const string AuthorizationEndpoint = $"{KairosApp.Authority}/authorize";
 
     /// <summary>
-    /// Every shape of the group claim that has to be decided one way rather than the other, with
-    /// the answer beside it. Derived from <see cref="AdminAuthorization.DefaultGroup"/> rather
-    /// than written out, so a row says which near miss it is instead of asking a reader to spot
-    /// the difference between two literals.
+    /// Every shape of the group claim that has to be decided, with its answer beside it. Derived
+    /// from <see cref="AdminAuthorization.DefaultGroup"/> rather than written out, so a row names
+    /// its near miss instead of asking the reader to diff two literals.
     /// </summary>
     public static TheoryData<string[], HttpStatusCode> GroupClaims => new()
     {
@@ -105,14 +103,10 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// The old path answers nothing at all.
+    /// The failure it guards against is quiet: a route left mapped in both places is a second,
+    /// ungated way in that no test hits — and these moved so <see cref="AdminGroup"/>'s docstring
+    /// reads as the whole answer to "what is public?".
     /// </summary>
-    /// <remarks>
-    /// Worth pinning because the failure it guards against is quiet: a route left mapped in both
-    /// places is a second, ungated way in that no test hits, and the whole reason these two moved
-    /// is that <see cref="AdminGroup"/>'s docstring has to be readable as the whole answer to
-    /// "what is public?".
-    /// </remarks>
     [Fact]
     public async Task ListIntegrations_AtItsOldPathOutsideThePrefix_IsNotMappedAtAll()
     {
@@ -149,8 +143,7 @@ public class AdminBoundaryTests
     /// <summary>
     /// The finding this task exists for: the policy was RequireAuthenticatedUser() and nothing
     /// else, so every account the identity provider would authenticate was a full operator. An
-    /// OIDC provider is shared across applications by definition, so that is the provider's user
-    /// list, not the operator's.
+    /// OIDC provider is shared across applications, so that is its user list, not the operator's.
     /// </summary>
     [Fact]
     public async Task ListIntegrations_WithASessionCarryingNoGroup_IsForbiddenRatherThanAnswered()
@@ -204,17 +197,14 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// How the group claim is compared, pinned row by row, because none of it is Kairos's own
-    /// code and all of it is Kairos's decision. <c>HasClaim(type, value)</c> compares the value
-    /// with <see cref="StringComparer.Ordinal"/>, and that is the behaviour wanted: a group name
-    /// is an opaque identifier the provider chose, so a near miss is a different group and not a
-    /// typo to be forgiven.
+    /// How the group claim is compared, row by row: none of it is Kairos's code and all of it is
+    /// Kairos's decision. <c>HasClaim(type, value)</c> compares with
+    /// <see cref="StringComparer.Ordinal"/> — a group name is an opaque identifier, so a near
+    /// miss is a different group and not a typo to forgive.
     /// </summary>
     /// <remarks>
-    /// Unpinned, the rows below are what a well-meaning edit takes away. Making the comparison
-    /// case-insensitive, or splitting the value on spaces to support a provider that packs every
-    /// membership into one claim, would each ship green today — and the second would admit
-    /// <c>"a kairos-users b"</c>, which is a string an untrusted account can often choose.
+    /// Unpinned, a case-insensitive comparison or a split on spaces would each ship green, and
+    /// the second would admit <c>"a kairos-users b"</c>, a string an untrusted account can choose.
     /// </remarks>
     [Theory]
     [MemberData(nameof(GroupClaims))]
@@ -232,10 +222,9 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// The one widening in the read, and it is on the key rather than on the value: claim TYPES
-    /// are matched case-insensitively, so a provider that spells the claim <c>Groups</c> is
-    /// admitted. Worth pinning because it is the half somebody tightening the comparison above
-    /// would tighten by accident.
+    /// The one widening in the read, and it is on the key rather than the value: claim TYPES are
+    /// matched case-insensitively, so a provider spelling the claim <c>Groups</c> is admitted.
+    /// The half somebody tightening the comparison above would tighten by accident.
     /// </summary>
     [Fact]
     public async Task ListIntegrations_WithTheGroupUnderADifferentlyCasedClaimType_IsAnswered()
@@ -310,10 +299,9 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// A blanked group is a deployment that fumbled its configuration, and it stops the process
-    /// rather than answering 403 on every admin route. Asserted on the exception because there is
-    /// no request to make against a host that did not build; the base exception is read rather
-    /// than the outer one, since the factory surfaces a startup failure wrapped.
+    /// A blanked group is a fumbled configuration, and it stops the process rather than answering
+    /// 403 on every admin route. Asserted on the exception, there being no request to make
+    /// against a host that did not build; the base one, since the factory wraps startup failures.
     /// </summary>
     [Fact]
     public void CreatingTheHost_WithABlankedAdminGroup_FailsAtStartupAndNamesTheSetting()
@@ -363,16 +351,14 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// The same two cookies read as the handler will read them, rather than as one challenge
-    /// happened to write them.
+    /// The same two cookies read as the handler will read them, not as one challenge wrote them.
     /// </summary>
     /// <remarks>
-    /// This asserts a framework default on purpose, and that is the whole of its value: nothing in
-    /// <c>Program.cs</c> sets either policy, because an assignment that restates the default is a
-    /// line no test can tell from its absence. Inverted into an assertion it costs nothing today
-    /// and fails the day the default moves — which is the day the challenge would otherwise start
-    /// writing these two without Secure, silently, on every deployment behind a plaintext hop. Do
-    /// not delete it as redundant; the two assignments are what it stands in for.
+    /// This asserts a framework default on purpose. Nothing in <c>Program.cs</c> sets either
+    /// policy, because an assignment restating a default is a line no test can tell from its
+    /// absence; inverted into an assertion it fails the day the default moves, which is the day
+    /// the challenge starts writing these without Secure behind a plaintext hop. Do not delete
+    /// it as redundant — the two assignments are what it stands in for.
     /// </remarks>
     [Fact]
     public void TheChallengeCookieOptions_AreAlwaysSecure_WithNothingInThisApplicationSettingThem()
@@ -388,20 +374,14 @@ public class AdminBoundaryTests
     }
 
     /// <summary>
-    /// The correlation and nonce cookies are the handler's own and default to SameSite=None, which
-    /// a browser only accepts alongside Secure. They are written during the challenge, before any
-    /// session exists, so they are the pair a plaintext hop meets first.
+    /// The correlation and nonce cookies are the handler's own and default to SameSite=None,
+    /// which a browser accepts only alongside Secure. Written during the challenge, before any
+    /// session exists, they are the pair a plaintext hop meets first.
     /// </summary>
     /// <remarks>
-    /// The handler's configuration is pinned rather than discovered: unpinned it goes to the
-    /// harness's authority for a metadata document, which is a DNS lookup that fails and a 500 in
-    /// place of the redirect. Only the authorization endpoint is needed to reach the point where
-    /// the two cookies are written, and nothing about them depends on where it points.
-    /// <para>
-    /// This one is a guard rather than a regression caught: the handler already defaults both to
-    /// Secure on .NET 10, so it is green with or without <c>Program.cs</c> saying so, and what it
-    /// stops is that default moving under a self-hosted deployment.
-    /// </para>
+    /// The handler's configuration is pinned rather than discovered: unpinned it fetches metadata
+    /// from the harness's authority, a DNS lookup that fails into a 500. A guard rather than a
+    /// regression caught — .NET 10 already defaults both to Secure, and this stops that moving.
     /// </remarks>
     [Fact]
     public async Task TheChallengeCookies_WrittenOverPlainHttp_AreStillSecure()
