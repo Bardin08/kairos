@@ -29,8 +29,8 @@ public sealed class WebhookSigner
     public WebhookSigner(string secret) => _key = Encoding.UTF8.GetBytes(secret);
 
     /// <summary>
-    /// The value for <see cref="SignatureHeader"/>. Signed string is <c>{timestamp}.{body}</c>;
-    /// the build sets InvariantGlobalization, so the timestamp renders the same everywhere.
+    /// The value for <see cref="SignatureHeader"/>. The build sets InvariantGlobalization, so the
+    /// timestamp renders the same everywhere.
     /// </summary>
     public string Sign(long timestamp, string body)
     {

@@ -8,10 +8,8 @@ using NodaTime;
 namespace Kairos.Api.Integrations;
 
 /// <summary>
-/// Everything that happens to a booking after the domain has accepted it: it goes into a
-/// calendar, it moves when the booking moves, it leaves when the booking is cancelled, and every
-/// outcome is recorded. This is the file the provider-neutrality of Part B is judged on, so read
-/// its usings — there is no vendor namespace among them, and adding one would be the bug.
+/// This is the file the provider-neutrality of Part B is judged on, so read its usings — there is
+/// no vendor namespace among them, and adding one would be the bug.
 /// </summary>
 /// <remarks>
 /// It never throws. Ground rule 14 in one sentence: a booking the domain accepted is never lost
@@ -33,21 +31,19 @@ public sealed class CalendarSyncService(
     IClock clock,
     ILogger<CalendarSyncService> logger)
 {
-    /// <summary>Between the link's name and the booker's, in the title the organizer will read.</summary>
     private const string TitleJoiner = " with ";
 
     /// <summary>
-    /// Writes <paramref name="booking"/> to whatever is connected and records what happened.
-    /// The booking must arrive with its link and participants loaded — this reads a meeting, not
-    /// a row, and re-fetching what the caller already has would be a second query on the create
-    /// path for nothing.
+    /// <paramref name="booking"/> must arrive with its link and participants loaded — this reads a
+    /// meeting, not a row, and re-fetching what the caller already has would be a second query on
+    /// the create path for nothing.
     /// </summary>
     public Task SyncAsync(Booking booking, CancellationToken cancellationToken) =>
         GuardedAsync(booking.Id, () => PlaceAsync(booking, cancellationToken));
 
     /// <summary>
-    /// Moves the event this booking already has to the booking's new time. Same loading
-    /// requirement as <see cref="SyncAsync"/>, because the event is rewritten from the booking.
+    /// Same loading requirement as <see cref="SyncAsync"/>, because the event is rewritten from
+    /// the booking.
     /// </summary>
     /// <remarks>
     /// Called after the booking is confirmed at its new time and never while a reschedule has it
@@ -62,8 +58,7 @@ public sealed class CalendarSyncService(
         GuardedAsync(booking.Id, () => MoveAsync(booking, cancellationToken));
 
     /// <summary>
-    /// Withdraws the event this booking has, if it has one. The id alone, because a cancellation
-    /// rewrites nothing — it only names what to remove.
+    /// The id alone, because a cancellation rewrites nothing — it only names what to remove.
     /// </summary>
     public Task CancelAsync(Guid bookingId, CancellationToken cancellationToken) =>
         GuardedAsync(bookingId, () => WithdrawAsync(bookingId, cancellationToken));
@@ -165,9 +160,9 @@ public sealed class CalendarSyncService(
             return;
         }
 
-        // The same row and the same event id, updated in place. Synced again rather than left
-        // alone, because a previous failure that has now succeeded must stop being reported: the
-        // state is where the meeting is now, not the worst thing that ever happened to it.
+        // Synced again rather than left alone, because a previous failure that has now succeeded
+        // must stop being reported: the state is where the meeting is now, not the worst thing
+        // that ever happened to it.
         entry.State = CalendarSyncState.Synced;
         entry.LastError = null;
         entry.UpdatedAt = Now();
@@ -175,9 +170,6 @@ public sealed class CalendarSyncService(
         await context.SaveChangesAsync(CancellationToken.None);
     }
 
-    /// <summary>
-    /// The withdrawal, and the two decisions about what it leaves behind.
-    /// </summary>
     /// <remarks>
     /// <see cref="CalendarEntry"/> is kept, with its event id, and moved to
     /// <see cref="CalendarSyncState.Cancelled"/>. Deleting it would erase the only record that
@@ -285,8 +277,7 @@ public sealed class CalendarSyncService(
     }
 
     /// <summary>
-    /// The translation, and the only place a meeting becomes a calendar entry's worth of words.
-    /// It reads the booking and nothing else — no settings, no formatting rules, no provider.
+    /// Reads the booking and nothing else — no settings, no formatting rules, no provider.
     /// </summary>
     private static CalendarEventRequest Describe(Booking booking)
     {

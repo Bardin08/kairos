@@ -1,9 +1,8 @@
 namespace Kairos.Api.Integrations.Webhooks;
 
 /// <summary>
-/// Where deliveries go and what proves they are ours. Four settings because four have a reader;
-/// there is deliberately no Enabled flag — an absent <see cref="Url"/> already says off, and two
-/// ways to switch one thing off is one way too many to get wrong.
+/// No Enabled flag: an absent <see cref="Url"/> already says off, and two ways to switch one
+/// thing off is one way too many to get wrong.
 /// </summary>
 public sealed class WebhookOptions
 {

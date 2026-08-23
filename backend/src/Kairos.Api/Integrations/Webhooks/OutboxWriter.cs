@@ -5,9 +5,6 @@ using NodaTime;
 
 namespace Kairos.Api.Integrations.Webhooks;
 
-/// <summary>
-/// Records that something happened, in the caller's transaction.
-/// </summary>
 /// <remarks>
 /// It adds and it never saves. That is the whole of the outbox pattern: the message and the
 /// state change it describes commit together or neither does. A writer that called SaveChanges
