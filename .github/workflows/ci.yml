@@ -129,11 +129,18 @@ jobs:
       # tag carries the first seven characters of the commit, which is what makes
       # a running container traceable back to one by eye. The moving tag is the
       # branch's own name rather than the literal "main", so it follows
-      # `on.push.branches` instead of restating it.
+      # `on.push.branches` instead of restating it — and it is emitted only on a
+      # push, because a pull request's ref name is `104/merge` and a slash is not
+      # legal in a tag. That cannot be left to the `push:` flag below: buildx
+      # validates every tag it is handed before it decides whether to push one,
+      # so an unpushed invalid tag fails the build just as loudly as a pushed one.
       - id: image
         run: |
           echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "sha=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "moving=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
 
       # buildx supplies the driver that can emit a manifest list at all — the
       # default docker driver builds one platform and stops. QEMU registers the
@@ -163,13 +170,14 @@ jobs:
           # still build", which is the only question a pull request can ask about
           # it and the one that otherwise waits until after the merge.
           push: ${{ github.event_name == 'push' }}
-          # Two tags, and they answer different questions. The sha tag is
-          # immutable and is what a deployment pins to; the branch tag moves and
-          # is what says which build is current. Ignored entirely when push is
-          # false.
+          # Two tags on a push, and they answer different questions. The sha tag
+          # is immutable and is what a deployment pins to; the branch tag moves
+          # and is what says which build is current. On a pull request the second
+          # is empty, which this action drops from the list — see the step above
+          # for why it cannot simply be written out and left to `push: false`.
           tags: |
             ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.sha }}
-            ${{ steps.image.outputs.repository }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.moving }}
           # Read always, written only from main. A pull request reuses the layers
           # main last published — npm ci and dotnet restore, which are the slow
           # ones — and cannot poison what the next one reads. An empty cache-to
