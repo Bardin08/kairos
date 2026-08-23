@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Persistence.Entities;
@@ -13,7 +14,7 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The organizer's zone and the four globals, and the one promise the screen makes out loud:
+/// The organizer's zone, every global the screen writes, and the one promise it makes out loud:
 /// changing the zone moves the wall clock availability is described in and moves no booking.
 /// </summary>
 public class SettingsAdminTests
@@ -32,6 +33,10 @@ public class SettingsAdminTests
     private const int NewMinNotice = 90;
     private const int NewDailyCap = 6;
     private const int NewStartIncrement = 10;
+    private const int NewProposalHold = 12;
+
+    /// <summary>Not a shorter hold. A proposal that lapsed before it was sent holds nothing.</summary>
+    private const int NoHold = 0;
 
     /// <summary>2030-09-09T11:00:00Z, so no real clock decides anything here.</summary>
     private const long SeededStartUtc = 1_915_614_000;
@@ -87,8 +92,12 @@ public class SettingsAdminTests
         settings.Overrides.StartIncrementMinutes.ShouldBe(0);
     }
 
+    /// <summary>
+    /// Every value the operator sets, written and read back in one round trip — the four limits
+    /// and the proposal hold, which the same response carries and the override counts do not.
+    /// </summary>
     [Fact]
-    public async Task SaveSettings_WritesAllFourGlobals_AndTheyComeBackOnTheRead()
+    public async Task SaveSettings_WritesEverySetting_AndTheyComeBackOnTheRead()
     {
         using var app = new KairosApp();
         using var client = app.CreateOperatorClient();
@@ -96,11 +105,18 @@ public class SettingsAdminTests
         await client.PutAsJsonAsync(SettingsPath, Body(Warsaw), TestContext.Current.CancellationToken);
 
         var settings = await ReadAsync(client);
+        var payload = await client.GetFromJsonAsync<JsonElement>(
+            SettingsPath, TestContext.Current.CancellationToken);
 
         settings.MarginMinutes.ShouldBe(NewMargin);
         settings.MinNoticeMinutes.ShouldBe(NewMinNotice);
         settings.DailyCap.ShouldBe(NewDailyCap);
         settings.StartIncrementMinutes.ShouldBe(NewStartIncrement);
+        settings.ProposalHoldHours.ShouldBe(NewProposalHold);
+        // The hold is a global like the four above it and not a limit a link may override, so it
+        // rides on this response with no count beside it. A fifth entry here would mean the link
+        // editor had grown a control for something the schema does not model.
+        payload.GetProperty("overrides").TryGetProperty("proposalHoldHours", out _).ShouldBeFalse();
     }
 
     /// <summary>
@@ -142,6 +158,26 @@ public class SettingsAdminTests
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await ReadAsync(client)).StartIncrementMinutes
             .ShouldBe(SchedulingDefaults.StartIncrementMinutes);
+    }
+
+    /// <summary>
+    /// Zero is not a shorter hold, it is a proposal that lapses before the mail carrying it is
+    /// composed. Refused at the endpoint, and the database's check constraint refuses it again for
+    /// anything that gets past here.
+    /// </summary>
+    [Fact]
+    public async Task SaveSettings_AZeroProposalHold_IsRefused()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var saved = await client.PutAsJsonAsync(
+            SettingsPath,
+            Body(Utc) with { ProposalHoldHours = NoHold },
+            TestContext.Current.CancellationToken);
+
+        saved.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await ReadAsync(client)).ProposalHoldHours.ShouldBe(SchedulingDefaults.ProposalHoldHours);
     }
 
     [Fact]
@@ -295,6 +331,7 @@ public class SettingsAdminTests
         MinNoticeMinutes = SchedulingDefaults.MinNoticeMinutes,
         DailyCap = SchedulingDefaults.DailyCap,
         StartIncrementMinutes = startIncrementMinutes,
+        ProposalHoldHours = SchedulingDefaults.ProposalHoldHours,
     };
 
     /// <summary>
@@ -356,6 +393,7 @@ public class SettingsAdminTests
         MinNoticeMinutes = NewMinNotice,
         DailyCap = NewDailyCap,
         StartIncrementMinutes = NewStartIncrement,
+        ProposalHoldHours = NewProposalHold,
     };
 
     /// <summary>

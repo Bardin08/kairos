@@ -31,6 +31,12 @@ const UTC = 'UTC'
 // literal.
 const INVALID_ATTRIBUTE_SELECTOR = '[data-invalid="true"]'
 
+const SEEDED_HOLD_HOURS = 48
+const NEW_HOLD_HOURS = 12
+
+/** Not a shorter hold. A proposal that lapsed before it was sent holds nothing. */
+const NO_HOLD = '0'
+
 const settings: OperatorSettings = {
   timeZone: UTC,
   signedInAs: 'Vlad Bardin',
@@ -38,6 +44,7 @@ const settings: OperatorSettings = {
   minNoticeMinutes: 120,
   dailyCap: 4,
   startIncrementMinutes: 30,
+  proposalHoldHours: SEEDED_HOLD_HOURS,
   overrides: { marginMinutes: 3, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
 }
 
@@ -75,7 +82,7 @@ test('the zone picker offers the served zones with their current offsets', async
   expect(option).toBeDefined()
 })
 
-test('changing the zone and saving sends the chosen id with all four globals', async () => {
+test('changing the zone and saving sends the chosen id with every other value', async () => {
   render(<Settings />)
   fireEvent.change(await zonePicker(), { target: { value: WARSAW } })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -87,7 +94,28 @@ test('changing the zone and saving sends the chosen id with all four globals', a
       minNoticeMinutes: 120,
       dailyCap: 4,
       startIncrementMinutes: 30,
+      proposalHoldHours: SEEDED_HOLD_HOURS,
     }),
+  )
+})
+
+/**
+ * The fifth number on this screen, and deliberately not a fifth global limit:
+ * no link overrides a hold, so it has no override count and no place in the
+ * record the link editor iterates. What is pinned is that it reaches the save.
+ */
+test('the proposal hold is set in hours and sent with the rest', async () => {
+  render(<Settings />)
+
+  fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
+    target: { value: String(NEW_HOLD_HOURS) },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() =>
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalHoldHours: NEW_HOLD_HOURS }),
+    ),
   )
 })
 
@@ -111,6 +139,24 @@ test('a start increment of zero is refused here rather than by the server', asyn
   render(<Settings />)
 
   fireEvent.change(await screen.findByLabelText('Start increment'), { target: { value: '0' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true')
+  expect(vi.mocked(saveSettings)).not.toHaveBeenCalled()
+})
+
+/**
+ * The hold's floor, which is the start increment's floor for a different
+ * reason: a zero-hour hold has lapsed before the invitee's mail is composed,
+ * so the proposal would hold nothing at all. The backend refuses it; this is
+ * the same rule said early enough that nothing is submitted to learn it.
+ */
+test('a proposal hold of zero hours is refused here rather than by the server', async () => {
+  render(<Settings />)
+
+  fireEvent.change(await screen.findByLabelText('How long a proposed time is held'), {
+    target: { value: NO_HOLD },
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true')

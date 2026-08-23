@@ -133,6 +133,7 @@ beforeEach(() => {
     minNoticeMinutes: 0,
     dailyCap: 0,
     startIncrementMinutes: 30,
+    proposalHoldHours: 48,
     overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
   })
 })

@@ -1355,27 +1355,24 @@
      worse than not seeing it once. */
 
   .affix { position: relative; display: inline-flex; }
-  /* Sized for `a day` (dailyCap's affix in limitCopy.ts) rather than `min`
-     (the other three limits' affix) — it is the wider of the two strings
-     this reserves room for. Same Helvetica AFM table, at --text-xs (13px):
-     a 556, space 278, d 556, a 556, y 500, all /1000 em, sums to 2.446em ≈
-     31.8px. .affix-unit sits --space-3 (12px) off the control's trailing
-     edge, so the reservation needs at least 31.8 + 12 ≈ 43.8px before the
-     affix's own left edge would reach the digits. --space-7 (40px) falls
-     short by 3.8px — the gap `4` and `a day` were colliding into before the
-     spinner suppression below stopped the browser's own stepper from
-     painting over that same gap and hiding the shortfall entirely. --space-8
-     (48px) is the next token up and the first that clears it; `min` was
-     never the tight case (1.611em ≈ 20.9px, room to spare either way). */
+  /* Sized for the widest affix string in the app, which is `a day`
+     (dailyCap's, in limitCopy.ts). Same Helvetica AFM table, at --text-xs
+     (13px): a 556, space 278, d 556, a 556, y 500, all /1000 em, sums to
+     2.446em ≈ 31.8px. .affix-unit sits --space-3 (12px) off the control's
+     trailing edge, so the reservation needs at least 31.8 + 12 ≈ 43.8px
+     before the affix's own left edge would reach the digits. --space-7 (40px) falls short by 3.8px — the gap `4` and
+     `a day` were colliding into before the spinner suppression below stopped
+     the browser's own stepper from painting over that same gap and hiding
+     the shortfall entirely. --space-8 (48px) is the next token up and the
+     first that clears it. Every shorter affix clears it by more — `min` is
+     1.611em ≈ 20.9px, room to spare either way. */
   .affix > .input { padding-inline-end: var(--space-8); }
   /* Suppresses the native stepper wherever the unit text lives in that same
-     trailing zone — every type="number" input in the app sits inside an
-     .affix (Settings' four globals, InheritableNumber's override field,
-     DurationEditor's custom duration), so scoping here reaches all of them
-     without a blanket input[type=number] rule that would also catch a plain
-     number field this app does not have. Keyboard stepping is untouched:
-     arrow keys still call the input's own stepUp/stepDown, only the drawn
-     spinner is gone. */
+     trailing zone. Every type="number" input in the app sits inside an
+     .affix, so scoping here reaches all of them without a blanket
+     input[type=number] rule that would also catch a plain number field this
+     app does not have. Keyboard stepping is untouched: arrow keys still call
+     the input's own stepUp/stepDown, only the drawn spinner is gone. */
   .affix > input[type="number"] {
     appearance: textfield;
     -moz-appearance: textfield;
