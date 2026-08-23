@@ -80,7 +80,6 @@ export function localZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-/** The date key an instant falls on, in the given zone. */
 export function zonedDate(instant: string, zone: string): string {
   const parts = formatter('date', zone, {
     year: 'numeric',

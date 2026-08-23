@@ -41,7 +41,6 @@ export default function LinkEditor({
   onSaved,
   onCancel,
 }: {
-  /** The link being edited, or null for a new one. */
   link: AdminLink | null
   patterns: AdminPattern[]
   globals: GlobalLimits
