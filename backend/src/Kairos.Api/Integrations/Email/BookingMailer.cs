@@ -38,6 +38,16 @@ public sealed class BookingMailer(
     /// <summary>The route the frontend claims: <c>/manage/:token</c>, keyed on the token alone.</summary>
     private const string ManagePath = "manage";
 
+    /// <summary>
+    /// What the operator's words are printed under. Public so a test can assert its absence: the
+    /// claim being made is that an empty reason leaves no heading, and a test spelling the string
+    /// itself would go on passing after the heading was reworded.
+    /// </summary>
+    public const string ReasonHeading = "Why:";
+
+    /// <summary>One blank line between blocks, which is what makes an absent block leave no mark.</summary>
+    private const string BlockSeparator = "\n\n";
+
     private const string CalendarSubtype = "calendar";
     private const string AttachmentMediaType = "application";
     private const string AttachmentSubtype = "ics";
@@ -55,7 +65,7 @@ public sealed class BookingMailer(
     /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
     public Task SendConfirmationAsync(
         Booking booking,
-        string? manageToken,
+        string manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Confirmation, booking, manageToken, cancellationToken);
 
@@ -69,7 +79,7 @@ public sealed class BookingMailer(
     /// </summary>
     public Task SendRescheduleAsync(
         Booking booking,
-        string? manageToken,
+        string manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
 
@@ -78,6 +88,12 @@ public sealed class BookingMailer(
     /// <c>STATUS:CANCELLED</c> — both, because Outlook removes the event on the status and leaves
     /// one marked CONFIRMED in place however the message was labelled.
     /// </summary>
+    /// <remarks>
+    /// The only notice whose token is nullable, and the only one where it can be. A cancellation
+    /// the operator triggered has no plaintext token to put in the mail and no way to recover one.
+    /// The other two keep <c>string</c> deliberately: a confirmation shipped without its manage
+    /// link is unrecoverable, since that token never appears in any later response.
+    /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
         string? manageToken,
@@ -206,7 +222,16 @@ public sealed class BookingMailer(
 
         var body = new TextPart(TextFormat.Plain);
         body.SetText(
-            Encoding.UTF8, Body(notice, booker.Name, booking.Link.Name, start, end, zone, manageUrl));
+            Encoding.UTF8,
+            Body(
+                notice,
+                booker.Name,
+                booking.Link.Name,
+                start,
+                end,
+                zone,
+                manageUrl,
+                booking.CancellationReason));
 
         var invitation = new TextPart(CalendarSubtype)
         {
@@ -290,11 +315,21 @@ public sealed class BookingMailer(
     /// text-only body is one fewer thing for a filter to score.
     /// </summary>
     /// <remarks>
+    /// Assembled out of blocks joined by one blank line rather than written as one template with
+    /// holes in it, because two of the blocks are optional and a hole leaves a mark. A template
+    /// prints an empty line where an absent block was and a heading over nothing where its label
+    /// was; both are things the invitee reads.
+    ///
     /// The manage link is in every notice that has a token to build one from, the cancellation
     /// included: it costs nothing and it is the only way an invitee can check that a cancellation
     /// they are reading about is real, rather than taking the word of an email — which is the same
     /// reason the link exists at all. A notice the operator triggered has no token and no way to
-    /// recover one, and drops the whole block rather than printing a heading over nothing.
+    /// recover one, and drops the block whole.
+    ///
+    /// The reason is the operator's own words and is the point of an operator's cancel: a meeting
+    /// called off with no explanation is what the invitee is otherwise left with. It is absent
+    /// from every notice the invitee triggered themselves — they know why — and absent means the
+    /// mail is byte-for-byte what it was before this existed.
     /// </remarks>
     private static string Body(
         BookingNotice notice,
@@ -303,7 +338,8 @@ public sealed class BookingMailer(
         Instant start,
         Instant end,
         DateTimeZone zone,
-        string? manageUrl)
+        string? manageUrl,
+        string? reason)
     {
         var (headline, closing) = notice switch
         {
@@ -318,23 +354,29 @@ public sealed class BookingMailer(
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
-        var action = manageUrl is null ? string.Empty : $"""
-
-            {Action(notice)}
-            {manageUrl}
+        var local = start.InZone(zone);
+        var times = $"""
+            {DatePattern.Format(local)}
+            {TimePattern.Format(local)}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
             """;
 
-        return $"""
-            Hi {bookerName},
+        var explanation = string.IsNullOrWhiteSpace(reason)
+            ? null
+            : $"""
+                {ReasonHeading}
+                {reason}
+                """;
 
-            {headline}
+        var action = manageUrl is null
+            ? null
+            : $"""
+                {Action(notice)}
+                {manageUrl}
+                """;
 
-            {DatePattern.Format(start.InZone(zone))}
-            {TimePattern.Format(start.InZone(zone))}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
-            {action}
+        string?[] blocks = [$"Hi {bookerName},", headline, times, explanation, action, closing];
 
-            {closing}
-            """;
+        return string.Join(BlockSeparator, blocks.Where(block => !string.IsNullOrEmpty(block)));
     }
 
     private static string Action(BookingNotice notice) =>

@@ -145,11 +145,6 @@ export default function Meetings() {
   // settles. Nothing here hard-codes a zone, so Task 6's picker flows through.
   const [zone, setZone] = useState(localZone)
 
-  // Bumped when a row changes something, which is the effect's cue to read the
-  // list again. The row already knows what it did; the table is what has to be
-  // told, and a counter says so without this page reaching into one row's state.
-  const [reloads, setReloads] = useState(0)
-
   useEffect(() => {
     const controller = new AbortController()
     const range = rangeOf(period, zone)
@@ -173,7 +168,25 @@ export default function Meetings() {
     // screen stay until the narrower set replaces them, so changing a filter
     // does not blink the table out and back.
     return () => controller.abort()
-  }, [period, linkId, zone, reloads])
+  }, [period, linkId, zone])
+
+  // The write answers with the row as it now stands, in exactly the shape the
+  // list draws — which is what OneAsync on the server is for. Applied in place
+  // rather than used as a cue to refetch: a second round trip would ask for
+  // every meeting on the page to learn one fact the answer already carried, and
+  // would redraw the whole table under an operator who changed one row.
+  function applyChange(changed: Meeting) {
+    setList((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            meetings: current.meetings.map((meeting) =>
+              meeting.id === changed.id ? changed : meeting,
+            ),
+          },
+    )
+  }
 
   const columns: RecordColumn<Meeting>[] = [
     {
@@ -238,9 +251,10 @@ export default function Meetings() {
     },
     {
       label: 'Actions',
+      kind: 'control',
       cell: (meeting) =>
         meeting.status === CONFIRMED ? (
-          <MeetingActions meetingId={meeting.id} onChanged={() => setReloads(reloads + 1)} />
+          <MeetingActions meetingId={meeting.id} onChanged={applyChange} />
         ) : null,
     },
   ]

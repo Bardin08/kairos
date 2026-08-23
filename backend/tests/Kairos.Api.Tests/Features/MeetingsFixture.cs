@@ -23,7 +23,10 @@ namespace Kairos.Api.Tests.Features;
 /// the pattern opens Monday alone rather than all seven days, and its bookings sit on three fixed
 /// consecutive days its range filter tests assert on both edges of. Merging the two would not
 /// remove a duplicate; it would change what those tests mean, which is worse than two fixtures.
-/// This world is instead the one <see cref="ProposalHoldTests"/> seeds, widened by a second link.
+/// This world is instead the one <see cref="ProposalHoldTests"/> seeded, widened by a second link
+/// and lifted out of it — that suite now calls this one, and no assertion in it moved to make that
+/// true. The second link is inert there: availability is one calendar, and nothing in it books or
+/// proposes through the second slug.
 /// </remarks>
 public static class MeetingsFixture
 {

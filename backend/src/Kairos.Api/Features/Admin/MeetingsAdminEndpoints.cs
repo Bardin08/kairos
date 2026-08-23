@@ -1,8 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
-using Kairos.Api.Integrations.Email;
-using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -43,10 +42,15 @@ public sealed record ListMeetingsRequest
 /// </summary>
 public sealed record CancelMeetingRequest
 {
+    /// <summary>
+    /// The bound, public so a test can say <c>MaxReasonLength + 1</c> rather than carry its own
+    /// copy of the number — the habit <see cref="MeetingsAdminEndpoints.DateInvalidCode"/> and
+    /// <see cref="Scheduling.SchedulingDefaults.ProposalHoldHours"/> already keep.
+    /// </summary>
+    public const int MaxReasonLength = 2000;
+
     [StringLength(MaxReasonLength)]
     public string Reason { get; init; } = string.Empty;
-
-    private const int MaxReasonLength = 2000;
 }
 
 /// <summary>One link, as the filter's option list needs it. Not the link admin's shape.</summary>
@@ -240,27 +244,22 @@ public static class MeetingsAdminEndpoints
     }
 
     /// <summary>
-    /// The operator calls a meeting off. Same domain path the invitee's cancel takes — the work
-    /// here is the principal, the reason and the notification, not the scheduling.
+    /// The operator calls a meeting off, with a sentence the invitee reads.
     /// </summary>
     /// <remarks>
-    /// Idempotent, for the reason <see cref="Bookings.BookingsEndpoints"/> gives at its own
-    /// cancel: a double-clicked button gets the answer the operator can already see rather than a
-    /// 500 out of the outbox's unique index, and the early return is what stops the sequence being
-    /// advanced twice for one cancellation.
+    /// The cancellation itself is <see cref="Bookings.BookingCanceller"/>'s, shared with the
+    /// invitee's own cancel: the work that belongs to this route is the principal, the reason and
+    /// the shape of the answer, not the scheduling.
     ///
-    /// No manage token reaches the mailer, and none can — only its SHA-256 is stored. The invitee
-    /// gets the cancellation with no manage link on it, which costs nothing: the link's only two
-    /// uses are cancelling a booking that is already off and moving one that no longer exists.
+    /// No manage token reaches the mailer, and none can — only its SHA-256 is stored, and the
+    /// plaintext exists in exactly two requests, neither of them this one. The invitee gets the
+    /// cancellation with no manage link on it and the operator's reason in place of it.
     /// </remarks>
     private static async Task<MeetingResponse> CancelAsync(
         Guid id,
         CancelMeetingRequest request,
         KairosDbContext context,
-        OutboxWriter outbox,
-        CalendarSyncService calendars,
-        BookingMailer mailer,
-        IClock clock,
+        BookingCanceller canceller,
         CancellationToken cancellationToken)
     {
         var booking = await context.Bookings
@@ -269,58 +268,7 @@ public static class MeetingsAdminEndpoints
             .FirstOrDefaultAsync(row => row.Id == id, cancellationToken)
             ?? throw DomainException.NotFound("Meeting");
 
-        if (booking.Status != BookingStatus.Confirmed)
-        {
-            return await OneAsync(context, booking, cancellationToken);
-        }
-
-        var now = clock.GetCurrentInstant();
-        booking.Status = BookingStatus.Cancelled;
-        booking.CancelledAt = now.ToUnixTimeSeconds();
-        booking.CancellationReason = request.Reason;
-        booking.Sequence++;
-
-        // A proposal for a meeting that is off is a hold on a slot nobody will take. Closed in the
-        // same save as the cancellation, so there is no window where one is true and the other is not.
-        var open = await context.BookingProposals
-            .FirstOrDefaultAsync(
-                proposal => (proposal.BookingId == booking.Id) && (proposal.State == ProposalState.Open),
-                cancellationToken);
-
-        if (open is not null)
-        {
-            open.State = ProposalState.Withdrawn;
-            open.DecidedAt = now.ToUnixTimeSeconds();
-        }
-
-        outbox.Enqueue(
-            booking.Id,
-            OutboxMessageType.BookingCancelled,
-            BookingEventPayload.Cancelled(
-                booking.Id,
-                booking.Link.Slug,
-                Instant.FromUnixTimeSeconds(booking.StartUtc),
-                Instant.FromUnixTimeSeconds(booking.EndUtc)).ToJson());
-
-        try
-        {
-            await context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
-        {
-            // Two cancels in flight at once. The other one committed, so the booking is off and
-            // its announcement is queued; this call has nothing left to do but agree — and must
-            // return from here rather than fall through, because the outbox row it could not write
-            // is still tracked and the sync service's own save would raise the same violation.
-            return await OneAsync(context, booking, cancellationToken);
-        }
-
-        // Ground rule 14, in the order it demands: the state change has committed, and neither of
-        // these can reach back and undo it. CancelAsync writes a Failed row rather than throwing,
-        // and the mailer swallows a relay that is down — so an operator's cancel is never a 500
-        // because somebody else's service was.
-        await calendars.CancelAsync(booking.Id, cancellationToken);
-        await mailer.SendCancellationAsync(booking, null, cancellationToken);
+        await canceller.CancelAsync(booking, request.Reason, manageToken: null, cancellationToken);
 
         return await OneAsync(context, booking, cancellationToken);
     }
