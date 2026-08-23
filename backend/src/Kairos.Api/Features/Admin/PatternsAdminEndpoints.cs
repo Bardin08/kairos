@@ -1,3 +1,11 @@
+//
+// Deliberately not bumping Version, unlike the save above. Not because widening the
+// aggregate lock would be unacceptable — the save does exactly that, and PatternChanged
+// is worded for it — but because there is nothing here for a token to protect: this
+// handler reads nothing it then writes. ExecuteDelete decides on rows the database
+// matched at delete time, so two of these racing already answer coherently — one deletes,
+// the other is told the override does not exist, which by then is true. A bump would mean
+// loading the pattern purely to write a column no caller on this path reads.
 using System.ComponentModel.DataAnnotations;
 
 using Kairos.Api.Availability;
@@ -153,6 +161,19 @@ public static class PatternsAdminEndpoints
     public const string WindowInvertedCode = "window_inverted";
 
     /// <summary>
+    /// Two writers on one pattern, interleaving — two admin tabs, or one tab and a forgotten one.
+    /// Named rather than left as a 500, because the operator's answer is "reload and look at what
+    /// the other one did", which a stack trace does not say.
+    /// </summary>
+    /// <remarks>
+    /// The pattern rather than the date, and the difference is not pedantry: the token this is
+    /// raised from sits on the pattern, so a save of one date is refused by a save of another.
+    /// Naming the date would tell the operator to go and look at a date nothing touched, and the
+    /// edit they lost was on the one they were already on.
+    /// </remarks>
+    public const string PatternChangedCode = "pattern_changed";
+
+    /// <summary>
     /// The <c>{date}</c> segment of an override route is not an ISO calendar date. Thrown from the
     /// handler rather than declared as a route constraint because no regular expression rejects
     /// 2026-02-30: the parse has to run either way, and left to the binder the failure was a
@@ -201,6 +222,9 @@ public static class PatternsAdminEndpoints
     private const string NameTaken = "Another pattern already has that name.";
 
     private const string WindowInverted = "A window has to end after it starts.";
+
+    private const string PatternChanged =
+        "The pattern was changed somewhere else. Reload and try again.";
 
     private const string RuleOverlaps =
         "Another window on that day already covers part of those hours. Overlapping windows offer "
@@ -264,7 +288,7 @@ public static class PatternsAdminEndpoints
     {
         var pattern = new Pattern { Name = Named(request) };
         context.Patterns.Add(pattern);
-        await UniquelyNamedAsync(
+        await ConcurrentWrite.NamedAsync(
             () => context.SaveChangesAsync(cancellationToken), PatternNameTakenCode, NameTaken);
 
         // A pattern with no rules yet, which is the only thing a create can produce: the weekly
@@ -285,7 +309,7 @@ public static class PatternsAdminEndpoints
         // cannot translate inside the SetProperty lambda, and the trim would never run.
         var name = Named(request);
 
-        var renamed = await UniquelyNamedAsync(
+        var renamed = await ConcurrentWrite.NamedAsync(
             () => context.Patterns
                 .Where(pattern => pattern.Id == patternId)
                 .ExecuteUpdateAsync(
@@ -358,7 +382,21 @@ public static class PatternsAdminEndpoints
             });
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        // The same read-modify-write the override route does, and the same crash when two of them
+        // interleave: the second RemoveRange finds its rows already gone and EF raises. Mapped
+        // here so the weekly route answers what the date route answers.
+        //
+        // Deliberately not raising Version, unlike the override save. A rules write that took the
+        // token would start refusing override saves on dates it has nothing to do with, which
+        // widens the aggregate lock and buys nothing — the crash is what this came for.
+        await ConcurrentWrite.NamedAsync(
+            async () =>
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                return true;
+            },
+            PatternChangedCode,
+            PatternChanged);
 
         return await ReadAsync(context, pattern.Id, cancellationToken);
     }
@@ -404,7 +442,22 @@ public static class PatternsAdminEndpoints
             });
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        // The whole of what makes two tabs on one date safe. The unique index in
+        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete
+        // only raises where there were rows to delete —
+        // so a date that held nothing yet let both writers insert and kept the union, which is
+        // neither operator's answer. Raising the number they both read means EF writes
+        // WHERE Version = n, the second one matches nothing, and the loser is told.
+        pattern.Version++;
+
+        await ConcurrentWrite.NamedAsync(
+            async () =>
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                return true;
+            },
+            PatternChangedCode,
+            PatternChanged);
 
         return await ReadAsync(context, pattern.Id, cancellationToken);
     }
@@ -428,6 +481,13 @@ public static class PatternsAdminEndpoints
 
         // The date goes back to the weekly rules. Removing an override is not the same as
         // blocking the day, which is why the two are different requests.
+        //
+        // Deliberately not bumping Version, unlike the save above. The token guards a
+        // read-modify-write, and this has none: ExecuteDelete decides on rows the database
+        // matched rather than on a set read earlier, so two of these racing already answer
+        // coherently — one deletes and the other is told the override does not exist, which by
+        // then is true. Bumping would mean loading the pattern to write a column nothing reads
+        // here, and would make a remove on one date refuse a save on an unrelated one.
         return await ReadAsync(context, patternId, cancellationToken);
     }
 
@@ -560,32 +620,5 @@ public static class PatternsAdminEndpoints
         }
 
         return name;
-    }
-
-    /// <summary>
-    /// A unique index reported as the conflict it is. Caught rather than pre-checked: a SELECT
-    /// before the INSERT is a race two browser tabs win often enough to matter, and the index has
-    /// to be there for correctness either way.
-    /// </summary>
-    /// <remarks>
-    /// The filter, not the exception type, is what makes this narrow. SaveChanges wraps the
-    /// provider failure in DbUpdateException and ExecuteUpdate does not, so a catch written
-    /// against either type would silently stop covering one of its callers — and
-    /// <see cref="SqliteErrors.IsUniqueViolation"/> already walks the chain to the extended
-    /// error code, which is the only thing that means "duplicate" rather than "some constraint".
-    /// </remarks>
-    private static async Task<int> UniquelyNamedAsync(
-        Func<Task<int>> write,
-        string code,
-        string message)
-    {
-        try
-        {
-            return await write();
-        }
-        catch (Exception failure) when (SqliteErrors.IsUniqueViolation(failure))
-        {
-            throw DomainException.Conflict(code, message);
-        }
     }
 }

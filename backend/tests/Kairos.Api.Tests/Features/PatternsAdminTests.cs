@@ -55,6 +55,9 @@ public class PatternsAdminTests
     /// <summary>Days ahead of the seeding, so real-clock minimum notice never decides a test.</summary>
     private const int WellAhead = 30;
 
+    /// <summary>Two tabs on one date, which is the smallest number that is a race at all.</summary>
+    private const int RacingWriters = 2;
+
     /// <summary>
     /// The 30th of February: date-shaped and not a date, which is why the parse decides and a
     /// route constraint could not. Both override routes take it, so both have to refuse it alike.
@@ -477,6 +480,68 @@ public class PatternsAdminTests
         ruled.StatusCode.ShouldBe(HttpStatusCode.OK);
         before.ShouldBeEmpty();
         (await SlotsAsync(app, date)).ShouldNotBeEmpty();
+    }
+
+    /// <summary>
+    /// Two admin tabs saving one date at once, over the real pipeline. What is asserted is what
+    /// holds however the two interleave: neither is answered with a stack trace, and the date is
+    /// left holding one writer's set rather than the union of both.
+    /// </summary>
+    /// <remarks>
+    /// Whether the loser is refused or merely replaces the winner is not asserted, and the
+    /// measurements are why. The barrier aligns the two sends, which narrows the window a great
+    /// deal: with it, the strict form — exactly one 200 and one 409 — passed 20 of 20 runs on its
+    /// own and 10 of 10 inside the full parallel suite. Without it the same strict form failed 1
+    /// in 5 under the suite, both requests answering 200, which is what this test looked like
+    /// before the barrier went in.
+    ///
+    /// Narrowed is not closed, and that is the point. The barrier aligns when the two requests
+    /// are sent; nothing reachable from outside the application can align where the two handlers
+    /// read, which is the interval that actually decides the outcome. Both requests answering 200
+    /// is correct behaviour — the second read the version the first had already raised, replaced
+    /// its row and committed — so a strict assertion would be measuring how busy the host was.
+    /// Ten green runs are not a guarantee, they are ten samples, and the difference matters on a
+    /// slower CI box. The refusal itself is therefore pinned where it can be forced rather than
+    /// sampled: the version check in <c>SchemaTests</c>, and the mapping in
+    /// <c>ConcurrentWriteTests</c>.
+    /// </remarks>
+    [Fact]
+    public async Task SaveOverride_FromTwoWritersAtOnce_LeavesOneWritersSetAndNeverAServerError()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+
+        using var barrier = new Barrier(RacingWriters);
+        var morning = Task.Run(async () =>
+        {
+            barrier.SignalAndWait();
+            return await SaveOverrideAsync(client, day, [new { startMinute = NineAm, endMinute = Noon }]);
+        });
+        var afternoon = Task.Run(async () =>
+        {
+            barrier.SignalAndWait();
+            return await SaveOverrideAsync(client, day, [new { startMinute = TwoPm, endMinute = FivePm }]);
+        });
+
+        var answers = await Task.WhenAll(morning, afternoon);
+
+        answers.ShouldAllBe(answer => answer.StatusCode != HttpStatusCode.InternalServerError);
+        foreach (var refused in answers.Where(answer => answer.StatusCode != HttpStatusCode.OK))
+        {
+            refused.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+            (await CodeOfAsync(refused)).ShouldBe(PatternsAdminEndpoints.PatternChangedCode);
+        }
+
+        // One window rather than two, which is what rules out the union — and it is one of the
+        // two that were sent rather than anything in between.
+        var stored = (await SeededPatternAsync(client)).Overrides
+            .Single(replacement => replacement.Date == day.ToDateOnly())
+            .Windows;
+
+        stored.ShouldHaveSingleItem().ShouldBeOneOf(
+            new OverrideWindowResponse(NineAm, Noon),
+            new OverrideWindowResponse(TwoPm, FivePm));
     }
 
     private static string PatternUrl => $"{ApiVersions.V1}/admin/patterns/{PatternId}";

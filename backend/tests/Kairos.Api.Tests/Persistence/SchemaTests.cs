@@ -8,6 +8,18 @@ namespace Kairos.Api.Tests.Persistence;
 
 public class SchemaTests
 {
+    private const int MinutesPerHour = 60;
+
+    /// <summary>Minutes from local midnight, which is what the column stores.</summary>
+    private const int NineAm = 9 * MinutesPerHour;
+    private const int FivePm = 17 * MinutesPerHour;
+
+    /// <summary>
+    /// The one date both writers name. Nothing about the calendar decides anything here — what
+    /// the race needs is that the two contexts are looking at the same day.
+    /// </summary>
+    private static readonly DateOnly ContestedDate = new(2026, 9, 14);
+
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
     {
@@ -62,5 +74,116 @@ public class SchemaTests
         });
 
         Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
+    /// The index asserted as enforcement rather than as declaration, on the same reasoning as the
+    /// foreign-key test above: a unique index that was configured and never created refuses
+    /// nothing, and reading the configuration would not tell you which. Two rows identical in all
+    /// four columns is what two writers who each passed ValidateDay alone can produce, so this is
+    /// the endpoint's last line rather than its first.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WithTheSameWindowOnOneDateTwice_IsRejectedByTheUniqueIndex()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var patternId = Guid.CreateVersion7();
+        context.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+        context.SaveChanges();
+
+        context.PatternOverrides.AddRange(
+            new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = ContestedDate,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            },
+            new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = ContestedDate,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            });
+
+        Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
+    /// The assumption <see cref="Kairos.Api.Shared.ConcurrentWrite"/> stands on: two writers that
+    /// both read a date's rows before either saves, which is two admin tabs on one date. The
+    /// second delete finds nothing to delete and EF raises rather than writing a merged set. If a
+    /// provider change ever made this silent, the 409 above would become a lie and nothing else
+    /// would notice.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WhenAnotherWriterAlreadyReplacedTheDate_RaisesConcurrency()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.PatternOverrides.Add(new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = ContestedDate,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            });
+            seed.SaveChanges();
+        }
+
+        // Both read before either writes, which is the whole of the race.
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var firstRows = first.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
+        var secondRows = second.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
+
+        first.PatternOverrides.RemoveRange(firstRows);
+        first.SaveChanges();
+
+        second.PatternOverrides.RemoveRange(secondRows);
+        Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
+    }
+
+    /// <summary>
+    /// The other half of what the override write leans on, and the half that covers a date
+    /// holding no rows yet: there is nothing to delete then, so the stale delete above never
+    /// fires and the two windows differ, so the unique index has nothing to refuse either. Both
+    /// writers raise the number they read, and the second finds the row already moved. Remove
+    /// IsConcurrencyToken from the column and the second save simply succeeds, this test fails,
+    /// and what it was guarding is gone — that is the state in which two tabs left a date holding
+    /// both of their windows.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WhenTwoWritersBothRaiseThePatternVersion_RaisesConcurrency()
+    {
+        using var database = new TestDatabase();
+        var patternId = Guid.CreateVersion7();
+
+        using (var seed = database.CreateContext())
+        {
+            seed.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+            seed.SaveChanges();
+        }
+
+        // Both read before either writes, exactly as two requests on one pattern do.
+        using var first = database.CreateContext();
+        using var second = database.CreateContext();
+        var read = first.Patterns.Single(pattern => pattern.Id == patternId);
+        var alsoRead = second.Patterns.Single(pattern => pattern.Id == patternId);
+
+        read.Version++;
+        first.SaveChanges();
+
+        alsoRead.Version++;
+        Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
     }
 }
