@@ -59,12 +59,6 @@ public sealed class BookingMailer(
     private const string AlternativeSubtype = "alternative";
     private const string MixedSubtype = "mixed";
 
-    private static readonly ZonedDateTimePattern DatePattern =
-        ZonedDateTimePattern.CreateWithInvariantCulture("dddd d MMMM yyyy", DateTimeZoneProviders.Tzdb);
-
-    private static readonly ZonedDateTimePattern TimePattern =
-        ZonedDateTimePattern.CreateWithInvariantCulture("HH:mm", DateTimeZoneProviders.Tzdb);
-
     /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
     public Task SendConfirmationAsync(
         Booking booking,
@@ -299,7 +293,7 @@ public sealed class BookingMailer(
             FileName = AttachmentFileName,
         };
 
-        return Envelope(
+        return OutgoingMail.Envelope(
             Subject(notice, booking.Link.Name, start, zone),
             new Multipart(MixedSubtype)
             {
@@ -307,7 +301,7 @@ public sealed class BookingMailer(
                 attachment,
             },
             organizer,
-            booker);
+            Mailbox(booker));
     }
 
     /// <summary>
@@ -336,52 +330,26 @@ public sealed class BookingMailer(
         body.SetText(Encoding.UTF8, $"""
             Hi {booker.Name},
 
-            {booking.Link.Name} is currently {DatePattern.Format(current)} at {TimePattern.Format(current)} ({zone.Id}).
+            {booking.Link.Name} is currently {OutgoingMail.Date(current)} at {OutgoingMail.Time(current)} ({zone.Id}).
 
             A new time is being suggested:
 
-            {DatePattern.Format(proposed)}
-            {TimePattern.Format(proposed)}-{TimePattern.Format(proposedEnd)} ({zone.Id})
+            {OutgoingMail.Date(proposed)}
+            {OutgoingMail.Time(proposed)}-{OutgoingMail.Time(proposedEnd)} ({zone.Id})
 
             Nothing has changed yet. Accept or decline here:
             {url}
 
-            If you do not answer by {DatePattern.Format(expires)}, {TimePattern.Format(expires)} ({zone.Id}),
+            If you do not answer by {OutgoingMail.Date(expires)}, {OutgoingMail.Time(expires)} ({zone.Id}),
             the suggestion lapses and the meeting stays exactly where it is.
             """);
 
-        return Envelope($"A new time for {booking.Link.Name}?", body, organizer, booker);
+        return OutgoingMail.Envelope(
+            $"A new time for {booking.Link.Name}?", body, organizer, Mailbox(booker));
     }
 
-    /// <summary>
-    /// The parts of a message that do not depend on what it says: who it is from, who it is to,
-    /// and the Message-Id. Shared by both composers because it is identical between them and
-    /// because the Message-Id is the one line here with a reason that is easy to forget.
-    /// </summary>
-    /// <remarks>
-    /// MimeKit otherwise derives the Message-Id's right-hand side from the machine's hostname,
-    /// which in a container is a random hex string and not a resolvable domain. Filters read that
-    /// as a forgery signal, and this whole feature is judged on inbox placement. The sending
-    /// domain is the honest answer and costs one line.
-    /// </remarks>
-    private static MimeMessage Envelope(
-        string subject,
-        MimeEntity body,
-        MailboxAddress organizer,
-        BookingParticipant booker)
-    {
-        var message = new MimeMessage
-        {
-            Subject = subject,
-            Body = body,
-        };
-
-        message.From.Add(organizer);
-        message.To.Add(new MailboxAddress(booker.Name, booker.Email));
-        message.MessageId = MimeUtils.GenerateMessageId(organizer.Domain);
-
-        return message;
-    }
+    /// <summary>The invitee, as an address: the name they gave, around the mailbox they gave.</summary>
+    private static MailboxAddress Mailbox(BookingParticipant booker) => new(booker.Name, booker.Email);
 
     /// <summary>
     /// The invitee's only route to cancelling or moving the meeting, and the shape Part A's
@@ -390,11 +358,11 @@ public sealed class BookingMailer(
     /// clients decline to linkify.
     /// </summary>
     private static string ManageUrl(string baseUrl, string manageToken) =>
-        $"{baseUrl.TrimEnd('/')}/{ManagePath}/{Uri.EscapeDataString(manageToken)}";
+        OutgoingMail.Url(baseUrl, $"{ManagePath}/{Uri.EscapeDataString(manageToken)}");
 
     /// <summary>The same shape one path along: the proposal's token, and nothing else.</summary>
     private static string ProposalUrl(string baseUrl, string proposalToken) =>
-        $"{baseUrl.TrimEnd('/')}/{ProposalPath}/{Uri.EscapeDataString(proposalToken)}";
+        OutgoingMail.Url(baseUrl, $"{ProposalPath}/{Uri.EscapeDataString(proposalToken)}");
 
     /// <summary>
     /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
@@ -433,7 +401,7 @@ public sealed class BookingMailer(
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
-        return $"{lead}: {linkName}, {DatePattern.Format(local)} at {TimePattern.Format(local)} ({zone.Id})";
+        return $"{lead}: {linkName}, {OutgoingMail.Date(local)} at {OutgoingMail.Time(local)} ({zone.Id})";
     }
 
     /// <summary>
@@ -483,8 +451,8 @@ public sealed class BookingMailer(
 
         var local = start.InZone(zone);
         var times = $"""
-            {DatePattern.Format(local)}
-            {TimePattern.Format(local)}-{TimePattern.Format(end.InZone(zone))} ({zone.Id})
+            {OutgoingMail.Date(local)}
+            {OutgoingMail.Time(local)}-{OutgoingMail.Time(end.InZone(zone))} ({zone.Id})
             """;
 
         var explanation = string.IsNullOrWhiteSpace(reason)

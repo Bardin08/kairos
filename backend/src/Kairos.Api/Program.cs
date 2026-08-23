@@ -195,11 +195,13 @@ builder.Services.AddScoped<IOperatorAlertSource, IntegrationAlertSource>();
 
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 
-// All three are stateless and hold no per-request state: the builder renders text, the sender
-// opens a connection per message, and the mailer only composes. Singletons, like SlotGenerator.
+// Stateless, every one of them, and holding nothing per request: the builder renders text, the
+// sender opens a connection per message, and the mailers only compose. Singletons, like
+// SlotGenerator.
 builder.Services.AddSingleton<IcsBuilder>();
 builder.Services.AddSingleton<EmailSender>();
 builder.Services.AddSingleton<BookingMailer>();
+builder.Services.AddSingleton<OperatorMailer>();
 
 // Scoped, not singleton: they read the request's DbContext. SlotQuery takes
 // IEnumerable<IBusySource>, so the calendar source is one more line here and no change anywhere
@@ -244,6 +246,14 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 // not thread-safe, and these two tick independently of each other and of every request.
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
+
+// Beside them rather than inside that pair: it runs on the same minute and notices something only
+// a clock can notice, but what it produces is a mail rather than a queued event. Nothing depends on
+// it running. Availability never did — a hold whose expiry has passed has already stopped holding,
+// in both conflict readers — and re-proposing no longer does either, because the propose route
+// closes a lapsed hold itself and leaves the notice here. So a deployment where this never ticks
+// has late mail, and a calendar and a workbench that are both correct.
+builder.Services.AddHostedService<ProposalSweeper>();
 
 builder.Services.AddRateLimitPolicies();
 

@@ -414,6 +414,7 @@ public static class BookingsEndpoints
     private static async Task<ProposalResponse> DeclineProposalAsync(
         string token,
         KairosDbContext context,
+        OperatorMailer operators,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -421,6 +422,19 @@ public static class BookingsEndpoints
         var proposal = await FindProposalAsync(context, token, cancellationToken);
         RequireOpen(proposal, now);
         await ClaimAsync(context, proposal, ProposalState.Declined, now, cancellationToken);
+
+        var timeZoneId = await OrganizerZoneAsync(context, cancellationToken);
+
+        // After the claim and never before it. The claim is what decides whether this request is
+        // the one that answered, and a mail sent ahead of it would tell the operator about a
+        // refusal that another caller had already turned into an acceptance.
+        //
+        // Uncancellable, for the reason CloseIfOpenAsync is: the decline is committed by the time
+        // this runs. The mailer's rule-14 swallow is guarded by the caller's token, so an invitee
+        // who closes the tab would push the failure back out through here instead — and there is
+        // no sweep to catch it, since the sweep only ever looks at holds that lapsed.
+        await operators.SendAsync(
+            proposal.Booking, proposal, OperatorNotice.Declined, timeZoneId, CancellationToken.None);
 
         return Describe(proposal, now);
     }
@@ -524,6 +538,12 @@ public static class BookingsEndpoints
     /// Untracked, rule 8, and it is not only about the read: every write to a proposal on these
     /// routes goes out as its own conditional UPDATE, so nothing here needs a tracked row and
     /// nothing can accidentally save the booking that rides along in the Include.
+    ///
+    /// The participants ride along for two readers now — <see cref="BookerZoneOf"/>, which every
+    /// response here is rendered in, and <see cref="OperatorMailer"/>, which names the invitee.
+    /// The second is the one that fails quietly: an absent collection makes the composer throw
+    /// inside the mailer's own rule-14 swallow, so the decline still succeeds and the operator is
+    /// simply never told.
     /// </remarks>
     private static async Task<BookingProposal> FindProposalAsync(
         KairosDbContext context,
@@ -557,6 +577,22 @@ public static class BookingsEndpoints
             InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(proposal.ExpiresAt)),
             BookerZoneOf(proposal.Booking),
             StateOf(proposal, now));
+
+    /// <summary>
+    /// The organizer's own zone, out of the settings row.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="BookerZoneOf"/>, which is the invitee's and is what the page
+    /// above renders. The only reader of this is the mail to the operator's own mailbox, and every
+    /// message in Kairos is written in the zone of whoever it is addressed to.
+    /// </remarks>
+    private static async Task<string> OrganizerZoneAsync(
+        KairosDbContext context,
+        CancellationToken cancellationToken) =>
+        await context.Settings.AsNoTracking()
+            .Where(row => row.Id == Settings.SingletonId)
+            .Select(row => row.TimeZoneId)
+            .SingleAsync(cancellationToken);
 
     /// <summary>
     /// The zone the booker gave. Empty when a booking somehow carries no booker, which the page
