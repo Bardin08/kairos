@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Kairos.Api.Persistence.Migrations
 {
     [DbContext(typeof(KairosDbContext))]
-    [Migration("20260823004639_Proposals")]
+    [Migration("20260823012021_Proposals")]
     partial class Proposals
     {
         /// <inheritdoc />
@@ -376,6 +376,10 @@ namespace Kairos.Api.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
@@ -404,7 +408,8 @@ namespace Kairos.Api.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PatternId", "Date");
+                    b.HasIndex("PatternId", "Date", "StartMinute", "EndMinute")
+                        .IsUnique();
 
                     b.ToTable("PatternOverrides");
                 });
