@@ -31,6 +31,7 @@ namespace Kairos.Api.Tests.Integrations;
 public class BookingMailerTests
 {
     private const string ManageToken = "3f2504e04f8911d39a0c0305e82c3301";
+    private const string ProposalToken = "0f1e2d3c";
     private const string BaseUrl = "https://kairos.example.com";
     private const string ManageUrlFragment = "/manage/";
     private const string CancellationReason = "The client moved the workshop a week.";
@@ -62,6 +63,11 @@ public class BookingMailerTests
     private const string BlankLineRun = "\n\n\n";
 
     private static readonly Instant Start = Instant.FromUtc(2026, 9, 7, 7, 0);
+
+    /// <summary>A day after the booking, and at an hour Warsaw renders differently from UTC.</summary>
+    private static readonly Instant ProposedStart = Instant.FromUtc(2026, 9, 8, 11, 0);
+
+    private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 6, 7, 0);
 
     [Fact]
     public void Compose_Always_AttachesTheIcsAsACalendarRequest()
@@ -300,6 +306,35 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// The load-bearing assertion of the whole notice: a proposal carries NO calendar part. An
+    /// .ics in this message is the move it is asking permission for — the invitee's client would
+    /// apply it, and the meeting would have moved without anybody agreeing to it.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_CarriesNoCalendarPartAndTheDecisionLink()
+    {
+        var message = ComposeProposal();
+
+        message.BodyParts.ShouldHaveSingleItem().ShouldBe(PlainPart(message));
+        message.Attachments.ShouldBeEmpty();
+        Plain(message).ShouldContain($"{BaseUrl}/proposal/{ProposalToken}");
+    }
+
+    /// <summary>
+    /// The booker's zone again, and pinned separately from the confirmation's because this is a
+    /// second composer resolving it a second time. 11:00Z is 13:00 in Warsaw, and an hour the
+    /// invitee is asked to agree to is the one thing on the page they act on.
+    /// </summary>
+    [Fact]
+    public void ComposeProposal_Always_RendersTheProposedTimesInTheBookersOwnZone()
+    {
+        var body = Plain(ComposeProposal());
+
+        body.ShouldContain("13:00-13:25");
+        body.ShouldContain(BookerZone);
+    }
+
+    /// <summary>
     /// This deployment's state today, and the one that must never throw: no relay configured at
     /// all. The mailer is called on the booking's own request, so anything it raises here is a
     /// booking that answers 500 because nobody has set up SMTP yet.
@@ -391,6 +426,33 @@ public class BookingMailerTests
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }
+
+    /// <summary>Composed, written and parsed back, exactly as <see cref="Compose"/> is.</summary>
+    private static MimeMessage ComposeProposal()
+    {
+        var booking = Booking();
+        using var stream = new MemoryStream();
+        Mailer(Options(BaseUrl))
+            .ComposeProposal(booking, Proposal(booking), ProposalToken)
+            .WriteTo(stream);
+        stream.Position = 0;
+        return MimeMessage.Load(stream);
+    }
+
+    /// <summary>
+    /// An open proposal against <paramref name="booking"/>. Only the four instants the composer
+    /// reads are set — the state, the key and the hash are the database's business and asserting
+    /// against a half-built row is what keeps this a test of the message.
+    /// </summary>
+    private static BookingProposal Proposal(Booking booking) =>
+        new()
+        {
+            BookingId = booking.Id,
+            StartUtc = ProposedStart.ToUnixTimeSeconds(),
+            EndUtc = (ProposedStart + Duration.FromMinutes(DurationMinutes)).ToUnixTimeSeconds(),
+            ExpiresAt = ProposalExpiry.ToUnixTimeSeconds(),
+            TokenHash = string.Empty,
+        };
 
     /// <summary>
     /// The calendar part's bytes as they were transmitted. Deliberately not <c>TextPart.Text</c>:
