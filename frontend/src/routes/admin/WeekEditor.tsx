@@ -30,10 +30,14 @@ function weekOf(rules: readonly PatternRule[]): Week {
   const week: Week = WEEKDAYS.map(() => [])
 
   for (const rule of [...rules].sort((left, right) => left.startMinute - right.startMinute)) {
-    week[rule.isoDayOfWeek - MONDAY].push({
-      start: clock(rule.startMinute),
-      end: clock(rule.endMinute),
-    })
+    // A miss is a rule dropped, not an editor that will not render.
+    // `isoDayOfWeek` has no CHECK constraint behind it, so a row outside 1-7 is
+    // storable — and `AvailabilityQuery.cs:108` makes the same decision on the
+    // server for the same reason.
+    const day = week[rule.isoDayOfWeek - MONDAY]
+    if (day === undefined) continue
+
+    day.push({ start: clock(rule.startMinute), end: clock(rule.endMinute) })
   }
 
   return week

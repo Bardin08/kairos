@@ -60,7 +60,12 @@ export default function LinkEditor({
   const [copied, setCopied] = useState(false)
 
   const changed = changedCount(baseline, draft)
-  const address = window.location.origin + BOOK_PATH + draft.slug
+  // The saved slug, never the draft. The button is only rendered for a link that
+  // exists, and what exists is what the server last stored — an address typed a
+  // second ago resolves to nothing, and a copied 404 is worse than no button.
+  // The field below still shows `draft.slug`: what is being typed is what the
+  // operator is deciding about, and what is copied is what currently works.
+  const address = window.location.origin + BOOK_PATH + (link?.slug ?? draft.slug)
 
   function set<K extends keyof EditorDraft>(key: K, value: EditorDraft[K]) {
     setDraft({ ...draft, [key]: value })

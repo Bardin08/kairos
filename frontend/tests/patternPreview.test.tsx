@@ -57,6 +57,9 @@ const A_SUNDAY = '2026-08-23'
 const TODAYS_DATE = '2026-08-15'
 const A_PAST_THURSDAY = '2026-08-06'
 
+/** The picker's own value for "no link", which the pane names DAYS_ONLY. */
+const DAYS_ONLY = ''
+
 const weekdays: Pattern = {
   id: PATTERN_ID,
   name: 'Weekdays',
@@ -668,4 +671,79 @@ test('the days a link offers times on are days the pattern opens', async () => {
   expect(day('25 August, open, 1 time available')).toBeDefined()
   // A Sunday the pattern never opens, and the link has nothing on it either.
   expect(day('23 August, closed')).toBeDefined()
+})
+
+/**
+ * Finding 10's remainder. The three radios have been inert while a write is in
+ * flight since the three-state control landed; this button was not, so a second
+ * press was taken by the UI and then dropped by `write`'s own guard — the one
+ * failure mode where the operator has no way to tell a refusal from a slow
+ * network.
+ */
+test('Save this date is inert while a write is in flight', async () => {
+  const { promise, resolve } = deferred<Pattern>()
+  vi.mocked(savePatternOverride).mockReturnValue(promise)
+
+  render(<PatternPreview pattern={usedByMentorship([OWN_HOURS])} />)
+  fireEvent.click(day(A_SUNDAY_LABEL))
+
+  const save = screen.getByRole('button', { name: 'Save this date' })
+  fireEvent.click(save)
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  expect(save.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(save)
+  expect(savePatternOverride).toHaveBeenCalledTimes(1)
+
+  resolve(usedByMentorship([OWN_HOURS]))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Save this date' }).getAttribute('aria-disabled'),
+    ).toBeNull(),
+  )
+})
+
+/**
+ * Finding 11. The effect returned early when the last link stopped standing on
+ * the pattern, leaving `links` holding whatever it held — so the picker went on
+ * offering a link that had moved, and `chosen` went on resolving, so every month
+ * change fetched that link's slots.
+ */
+test('the times picker goes when the last link standing on the pattern does', async () => {
+  const { rerender } = render(<PatternPreview pattern={usedByMentorship()} />)
+
+  await waitFor(() => expect(screen.getByLabelText('Show')).toBeTruthy())
+
+  rerender(<PatternPreview pattern={{ ...weekdays, usedBy: [] }} />)
+
+  await waitFor(() => expect(screen.queryByLabelText('Show')).toBeNull())
+  expect(vi.mocked(getSlots).mock.calls.length).toBe(0)
+})
+
+/**
+ * The other half of finding 11, and the half clearing the links alone cannot
+ * show. With `links` emptied `chosen` resolves to nothing whether or not `slug`
+ * was reset, so nothing on screen tells the two apart — until the pattern gains
+ * a link again and the picker comes back open on a selection that no longer
+ * exists, fetching the slots of a link the operator never picked twice.
+ */
+test('a pattern that gains a link again opens the picker on Days only', async () => {
+  vi.mocked(getSlots).mockResolvedValue([])
+
+  const { rerender } = render(<PatternPreview pattern={usedByMentorship()} />)
+
+  fireEvent.change(await screen.findByLabelText('Show'), { target: { value: mentorship.slug } })
+  expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe(mentorship.slug)
+
+  rerender(<PatternPreview pattern={{ ...weekdays, usedBy: [] }} />)
+  await waitFor(() => expect(screen.queryByLabelText('Show')).toBeNull())
+
+  // Everything read while the link was genuinely selected is behind us. What
+  // matters from here is whether anything is read for it after it has gone.
+  vi.mocked(getSlots).mockClear()
+
+  rerender(<PatternPreview pattern={usedByMentorship()} />)
+
+  expect(((await screen.findByLabelText('Show')) as HTMLSelectElement).value).toBe(DAYS_ONLY)
+  expect(getSlots).not.toHaveBeenCalled()
 })
