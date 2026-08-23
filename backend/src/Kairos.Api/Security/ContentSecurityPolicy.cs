@@ -21,6 +21,15 @@ namespace Kairos.Api.Security;
 /// not per request: the answer is the same for every response, and the page it is read from is
 /// written by a build rather than by anything this process does.
 /// </remarks>
+/// <remarks>
+/// No <c>report-to</c> and no <c>report-uri</c>, decided rather than overlooked. A reporting
+/// endpoint is an unauthenticated write route that accepts JSON from any browser that has ever
+/// loaded this origin, and Kairos would have to rate-limit it, bound it and give an operator
+/// somewhere to read it — a task, not a directive. Of the two silent failures it would cover, the
+/// hash drifting from the page is closed above by computing it here, and a directive that turns
+/// out too tight shows up in a console the first time the page is opened. If reporting is wanted
+/// later it arrives with its own route and its own retention, not as a line in this string.
+/// </remarks>
 public static partial class ContentSecurityPolicy
 {
     /// <summary>The page the policy is derived from, and the one the fallback route serves.</summary>
@@ -76,11 +85,15 @@ public static partial class ContentSecurityPolicy
     }
 
     /// <summary>
-    /// A <c>&lt;script&gt;</c> that carries no <c>src</c>, and the text it executes. The word
-    /// boundary is what keeps <c>src</c> from matching inside a longer attribute name.
+    /// A <c>&lt;script&gt;</c> that carries no <c>src</c>, and the text it executes. The lookahead
+    /// matches an attribute NAMED src — whitespace, the name, then its equals sign — and not the
+    /// letters wherever they appear. A word boundary is not enough: it excludes <c>srcset</c>, but
+    /// a hyphen is a non-word character, so <c>data-src</c> satisfies it too and the script is
+    /// skipped. Skipping is the silent direction of this failure: the policy stays well formed,
+    /// the browser refuses a script nobody hashed, and nothing is logged anywhere.
     /// </summary>
     [GeneratedRegex(
-        @"<script\b(?![^>]*\bsrc\b)[^>]*>(.*?)</script>",
+        @"<script\b(?![^>]*\ssrc\s*=)[^>]*>(.*?)</script>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex InlineScripts();
 }

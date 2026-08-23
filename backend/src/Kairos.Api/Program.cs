@@ -298,6 +298,10 @@ static T Parsed<T>(string value, string path, Func<string, T> parse)
     }
 }
 
+// Configuration only: nothing calls UseHsts, and these values are read by UseSecurityHeaders,
+// which writes the header where a cleared response cannot lose it. AddHsts is still where they
+// are set, so there is one place to change them and one excluded-hosts list.
+//
 // Both flags off, written out rather than left implicit, because they are a decision. Kairos is
 // deployed on somebody else's domain: IncludeSubDomains would pin every sibling subdomain of a
 // host this application does not own to HTTPS, and the preload list is close to irreversible and
@@ -330,19 +334,18 @@ using (var scope = app.Services.CreateScope())
 // limiter's partition, and the redirect_uri a challenge builds — reads the wrong one otherwise.
 app.UseForwardedHeaders();
 
-// Ahead of everything that writes a response, so nothing can answer without them — the exception
-// handler's re-execution and the static files middleware's short circuit both included.
-app.UseSecurityHeaders();
-
-// Behind UseForwardedHeaders because it reads the scheme that line resolves: HSTS is sent on an
-// HTTPS request and withheld from a plaintext one, and behind a TLS-terminating proxy the only
-// thing that knows the difference is X-Forwarded-Proto.
+// Ahead of everything that writes a response, so nothing can answer without them — the static
+// files middleware's short circuit and the exception handler's cleared response both included.
+// HSTS is one of the headers it writes, and there is deliberately no UseHsts beside this line:
+// that middleware writes eagerly and loses its header on the exception path, which the docstring
+// on SecurityHeaders.IsSecure records with the measurement behind it.
 //
-// There is deliberately no UseHttpsRedirection beside it. Kestrel holds no certificate here — the
-// proxy terminates TLS and every request reaches this process over plaintext by design — so the
-// middleware would either do nothing or redirect every request to itself. The edge holds the
-// certificate, so the edge redirects.
-app.UseHsts();
+// There is deliberately no UseHttpsRedirection either. In the deployment this targets the proxy
+// terminates TLS and every request reaches this process over plaintext, so the middleware would
+// either do nothing or redirect every request to itself. The edge holds the certificate, so the
+// edge redirects. The https launch profile is a developer convenience and not that deployment;
+// localhost is on the HSTS excluded list, so it is unaffected either way.
+app.UseSecurityHeaders();
 
 app.UseExceptionHandler();
 app.UseStaticFiles();

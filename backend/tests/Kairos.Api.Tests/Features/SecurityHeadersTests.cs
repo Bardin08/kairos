@@ -17,6 +17,11 @@ namespace Kairos.Api.Tests.Features;
 /// questions here are whether the set reaches every kind of response, and whether the policy still
 /// describes the page that is actually on disk.
 /// </summary>
+/// <remarks>
+/// The policy is asserted WHOLE rather than by the directive that happens to be interesting. It is
+/// one string built in one place, and a containment check leaves every directive it does not name
+/// individually deletable with the suite green — which is the same as not pinning them at all.
+/// </remarks>
 public class SecurityHeadersTests
 {
     /// <summary>A file on disk, answered by the static files middleware and by no endpoint.</summary>
@@ -29,11 +34,14 @@ public class SecurityHeadersTests
     private const string MissingLinkPath = $"{ApiVersions.V1}/links/no-such-link";
 
     /// <summary>
-    /// Not localhost. The HSTS middleware ships an excluded-hosts list with the loopback names on
-    /// it, and the harness's own base address is one of them — a test host answering as localhost
-    /// would never see the header whatever the scheme said.
+    /// Not localhost. The excluded-hosts list carries the loopback names, and the harness's own
+    /// base address is one of them — a test host answering as localhost would never see HSTS
+    /// whatever the scheme said.
     /// </summary>
     private const string ProxiedOrigin = "http://kairos.test";
+
+    /// <summary>And the host that IS on that list, for the test that says so.</summary>
+    private const string ExcludedOrigin = "http://localhost";
 
     private const string ForwardedProtoHeader = "X-Forwarded-Proto";
 
@@ -46,7 +54,7 @@ public class SecurityHeadersTests
 
     private const string ScriptIndent = "      ";
 
-    private const string ScriptBody =
+    private const string ThemeScript =
         "try { document.documentElement.setAttribute('data-theme', 'dark') } catch (e) {}";
 
     /// <summary>
@@ -55,9 +63,21 @@ public class SecurityHeadersTests
     /// the tags, so a browser hashes it, and a policy built over a trimmed script produces a
     /// well-formed hash that matches nothing and silently refuses the script.
     /// </summary>
-    private const string InlineScript = $"\n{ScriptIndent}{ScriptBody}\n{ScriptIndent}";
+    private const string InlineScript = $"\n{ScriptIndent}{ThemeScript}\n{ScriptIndent}";
 
-    /// <summary>The bundle, carrying a <c>src</c> — nothing to hash, and nothing that may be hashed.</summary>
+    private const string MarkedScriptBody = "queueMicrotask(() => {})";
+
+    private const string MarkedScript = $"\n{ScriptIndent}{MarkedScriptBody}\n{ScriptIndent}";
+
+    /// <summary>
+    /// An attribute whose name ENDS in src and is not src. A match on the bare letters skips this
+    /// element, and the script it carries then executes nowhere: the hyphen is a non-word
+    /// character, so a word boundary does not tell the two apart. Its failure is silent in the
+    /// worst direction — a valid policy that refuses a script.
+    /// </summary>
+    private const string MarkedScriptOpen = "<script data-src=\"deferred\">";
+
+    /// <summary>The bundle, carrying a real <c>src</c> — nothing to hash, and nothing that may be.</summary>
     private const string BundlePath = "/assets/index.js";
 
     private const string ScriptOpen = "<script>";
@@ -66,14 +86,11 @@ public class SecurityHeadersTests
 
     private const string SinglePage =
         $"<!doctype html><html><head>{ScriptOpen}{InlineScript}{ScriptClose}"
+        + $"{MarkedScriptOpen}{MarkedScript}{ScriptClose}"
         + $"<script type=\"module\" src=\"{BundlePath}\">{ScriptClose}</head><body></body></html>";
 
-    private const string PolicySeparator = ";";
-
-    private const string ScriptSourcePrefix = "script-src 'self' ";
-
-    /// <summary>The directive the clickjacking finding turns on.</summary>
-    private const string FramingRefused = "frame-ancestors 'none'";
+    /// <summary>What a web root with no page in it allows: the bundle, and nothing inline.</summary>
+    private const string NoInlineScript = "'self'";
 
     private static readonly string ExpectedMaxAge =
         $"max-age={(int)TimeSpan.FromDays(DefaultMaxAgeDays).TotalSeconds}";
@@ -86,22 +103,23 @@ public class SecurityHeadersTests
     [Theory]
     [InlineData(StaticAssetPath)]
     [InlineData(ApiPath)]
-    public async Task EveryResponse_CarriesTheHeaderSet(string path) =>
+    public async Task Get_AStaticAssetOrAnApiRoute_CarriesTheWholeHeaderSet(string path) =>
         await WithSinglePageAsync(async app =>
         {
             var response = await app.Client.GetAsync(path, TestContext.Current.CancellationToken);
 
             response.StatusCode.ShouldBe(HttpStatusCode.OK);
-            ShouldCarryTheSet(response);
+            ShouldCarryTheSet(response, ExpectedPolicy(AllowedScripts));
         });
 
     /// <summary>
-    /// The test that stops the header and the page drifting apart. The hash is recomputed here
-    /// from the script the page really carries, so a policy pinned to a stale constant fails the
-    /// moment somebody edits that script — which is the failure that is otherwise silent.
+    /// The test that stops the header and the page drifting apart. Both hashes are recomputed from
+    /// the bytes the server actually returned, so a policy pinned to a stale constant fails the
+    /// moment somebody edits either script — which is the failure that is otherwise silent. The
+    /// second script is the <c>data-src</c> one, which a looser match on the attribute drops.
     /// </summary>
     [Fact]
-    public async Task TheContentSecurityPolicy_HashesTheInlineScriptTheSinglePageCarries() =>
+    public async Task ContentSecurityPolicy_WithInlineScriptsOnThePage_HashesExactlyWhatIsServed() =>
         await WithSinglePageAsync(async app =>
         {
             var response = await app.Client.GetAsync(
@@ -109,70 +127,150 @@ public class SecurityHeadersTests
                 TestContext.Current.CancellationToken);
             var page = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-            var start = page.IndexOf(ScriptOpen, StringComparison.Ordinal) + ScriptOpen.Length;
-            var end = page.IndexOf(ScriptClose, StringComparison.Ordinal);
-            var script = page[start..end];
+            var served = $"{NoInlineScript} {Hash(Between(page, ScriptOpen))} "
+                + $"{Hash(Between(page, MarkedScriptOpen))}";
 
-            // The whole directive and not just the hash: an allowlist gains a source silently, and
-            // 'unsafe-inline' beside a hash is exactly the mistake this policy exists to refuse.
-            Policy(response).ShouldContain(
-                $"{ScriptSourcePrefix}{Hash(script)}{PolicySeparator}",
-                Case.Sensitive);
+            Policy(response).ShouldBe(ExpectedPolicy(served));
         });
 
     /// <summary>
     /// HSTS is a promise about a scheme, so it is only honest on a request that arrived over that
     /// scheme. Behind a TLS-terminating proxy the only thing that knows is X-Forwarded-Proto,
-    /// which is why the middleware sits directly behind UseForwardedHeaders.
+    /// which is why the header is written behind UseForwardedHeaders.
     /// </summary>
     [Theory]
     [InlineData(Https, true)]
     [InlineData(Http, false)]
-    public async Task StrictTransportSecurity_IsSentOnlyOnAForwardedHttpsRequest(
+    public async Task StrictTransportSecurity_ByForwardedScheme_IsSentOnlyOverHttps(
         string scheme,
         bool expected)
     {
         using var app = new KairosApp();
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{ProxiedOrigin}{ApiPath}");
-        request.Headers.Add(ForwardedProtoHeader, scheme);
 
-        var response = await app.Client.SendAsync(request, TestContext.Current.CancellationToken);
+        var response = await SendAsync(app, ProxiedOrigin, ApiPath, scheme);
 
         response.Headers.Contains(HeaderNames.StrictTransportSecurity).ShouldBe(expected);
         if (expected)
         {
             // The exact value, so the max-age and the two flags Kairos declines to set — a
             // subdomain pin and a preload entry on a domain it does not own — are both pinned.
-            response.Headers.GetValues(HeaderNames.StrictTransportSecurity).Single()
-                .ShouldBe(ExpectedMaxAge);
+            Single(response, HeaderNames.StrictTransportSecurity).ShouldBe(ExpectedMaxAge);
         }
     }
 
     /// <summary>
-    /// The response an operator is most likely to meet while something is already wrong. The
-    /// exception handler clears the response and re-executes the pipeline, so a header set written
-    /// once on the way in is exactly the set that vanishes here.
+    /// The gate that is no longer the framework's to apply, so it is this suite's to pin.
+    /// Promising a browser that <c>localhost</c> is HTTPS-only outlives this process and breaks
+    /// every other application a developer runs on it.
     /// </summary>
     [Fact]
-    public async Task AnErrorResponse_CarriesTheHeaderSetToo()
+    public async Task StrictTransportSecurity_OnAnExcludedHost_IsWithheld()
     {
         using var app = new KairosApp();
 
-        var response = await app.Client.GetAsync(
-            MissingLinkPath,
-            TestContext.Current.CancellationToken);
+        var response = await SendAsync(app, ExcludedOrigin, ApiPath, Https);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        ShouldCarryTheSet(response);
+        response.Headers.Contains(HeaderNames.StrictTransportSecurity).ShouldBeFalse();
     }
 
-    private static void ShouldCarryTheSet(HttpResponseMessage response)
+    /// <summary>
+    /// The refusal a client actually meets, over HTTPS. Measured downstream through a real proxy:
+    /// a 404 from an unmapped route carried HSTS and this one did not, because UseHsts writes its
+    /// header eagerly and the exception handler clears the response without re-running anything.
+    /// </summary>
+    [Fact]
+    public async Task StrictTransportSecurity_OnADomainExceptionResponse_IsStillSent()
     {
-        Policy(response).ShouldContain(FramingRefused, Case.Sensitive);
+        using var app = new KairosApp();
+
+        var response = await SendAsync(app, ProxiedOrigin, MissingLinkPath, Https);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        Single(response, HeaderNames.StrictTransportSecurity).ShouldBe(ExpectedMaxAge);
+    }
+
+    /// <summary>
+    /// The response an operator is most likely to meet while something is already wrong. The
+    /// exception handler clears the response and writes its own, so this is the response a header
+    /// written on the way in does not reach.
+    /// </summary>
+    [Fact]
+    public async Task Get_AMissingLink_CarriesTheWholeHeaderSetOnTheRefusal() =>
+        await WithSinglePageAsync(async app =>
+        {
+            var response = await app.Client.GetAsync(
+                MissingLinkPath,
+                TestContext.Current.CancellationToken);
+
+            response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+            ShouldCarryTheSet(response, ExpectedPolicy(AllowedScripts));
+        });
+
+    /// <summary>
+    /// The backend-only host: no page, so nothing inline may run. Given an empty web root of its
+    /// own rather than the default one, which is the project's own directory — the SPA build
+    /// writes a page into it, so a test that read it would assert one policy on a machine where
+    /// somebody had run the frontend build and another where nobody had.
+    /// </summary>
+    [Fact]
+    public async Task ContentSecurityPolicy_WithNoPageInTheWebRoot_AllowsNoInlineScript() =>
+        await WithEmptyWebRootAsync(async app =>
+        {
+            var response = await app.Client.GetAsync(
+                ApiPath,
+                TestContext.Current.CancellationToken);
+
+            ShouldCarryTheSet(response, ExpectedPolicy(NoInlineScript));
+        });
+
+    /// <summary>
+    /// The policy in full. Every directive is named, so deleting any one of them fails here rather
+    /// than passing unnoticed.
+    /// </summary>
+    private static string ExpectedPolicy(string scriptSources) =>
+        "default-src 'none'; "
+        + $"script-src {scriptSources}; "
+        + "style-src 'self'; "
+        + "font-src 'self'; "
+        + "img-src 'self'; "
+        + "connect-src 'self'; "
+        + "form-action 'self'; "
+        + "frame-ancestors 'none'; "
+        + "base-uri 'none'; "
+        + "object-src 'none'";
+
+    /// <summary>Both inline scripts on the page above, in the order the document carries them.</summary>
+    private static string AllowedScripts =>
+        $"{NoInlineScript} {Hash(InlineScript)} {Hash(MarkedScript)}";
+
+    private static void ShouldCarryTheSet(HttpResponseMessage response, string policy)
+    {
+        Policy(response).ShouldBe(policy);
         Single(response, SecurityHeaders.FrameOptionsHeader).ShouldBe(SecurityHeaders.NoFraming);
         Single(response, SecurityHeaders.ContentTypeOptionsHeader).ShouldBe(SecurityHeaders.NoSniffing);
         Single(response, SecurityHeaders.ReferrerPolicyHeader).ShouldBe(SecurityHeaders.NoReferrer);
         Single(response, SecurityHeaders.PermissionsPolicyHeader).ShouldBe(SecurityHeaders.NoDeviceAccess);
+    }
+
+    private static async Task<HttpResponseMessage> SendAsync(
+        KairosApp app,
+        string origin,
+        string path,
+        string scheme)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{origin}{path}");
+        request.Headers.Add(ForwardedProtoHeader, scheme);
+
+        return await app.Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>The text an element opened by <paramref name="open"/> executes, verbatim.</summary>
+    private static string Between(string page, string open)
+    {
+        var start = page.IndexOf(open, StringComparison.Ordinal) + open.Length;
+        var end = page.IndexOf(ScriptClose, start, StringComparison.Ordinal);
+
+        return page[start..end];
     }
 
     private static string Policy(HttpResponseMessage response) =>
@@ -185,20 +283,29 @@ public class SecurityHeadersTests
         $"'sha256-{Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(script)))}'";
 
     /// <summary>
-    /// The application over a web root holding one page, cleaned up the way
-    /// <see cref="KairosApp"/> cleans its database. The single page is built by the other CI job
-    /// and never by this one, so without this the web root is empty and every assertion about a
-    /// policy derived from a page would pass over a page that does not exist.
+    /// The application over a web root this test owns, cleaned up the way <see cref="KairosApp"/>
+    /// cleans its database. Always a temporary one, never the default: the default is the API
+    /// project's own directory, whose contents depend on whether anybody has run the SPA build in
+    /// this clone, and a policy assertion against it would be green or red by accident.
     /// </summary>
-    private static async Task WithSinglePageAsync(Func<KairosApp, Task> assert)
+    private static Task WithSinglePageAsync(Func<KairosApp, Task> assert) =>
+        WithWebRootAsync(SinglePage, assert);
+
+    private static Task WithEmptyWebRootAsync(Func<KairosApp, Task> assert) =>
+        WithWebRootAsync(null, assert);
+
+    private static async Task WithWebRootAsync(string? page, Func<KairosApp, Task> assert)
     {
         var webRoot = Directory.CreateTempSubdirectory("kairos-webroot");
         try
         {
-            await File.WriteAllTextAsync(
-                Path.Combine(webRoot.FullName, ContentSecurityPolicy.IndexPage),
-                SinglePage,
-                TestContext.Current.CancellationToken);
+            if (page is not null)
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(webRoot.FullName, ContentSecurityPolicy.IndexPage),
+                    page,
+                    TestContext.Current.CancellationToken);
+            }
 
             using var app = new KairosApp(webRoot.FullName);
             await assert(app);
