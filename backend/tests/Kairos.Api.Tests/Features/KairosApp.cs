@@ -31,6 +31,13 @@ namespace Kairos.Api.Tests.Features;
 /// </param>
 public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
 {
+    /// <summary>
+    /// The identity provider the harness names. It resolves to nothing, which is deliberate: a
+    /// test that needs the OIDC handler to get past discovery hands it a configuration of its own
+    /// rather than letting this suite make a DNS call.
+    /// </summary>
+    public const string Authority = "https://id.kairos.test";
+
     /// <summary>Far above anything one test does, and finite so a runaway loop still stops.</summary>
     private const int TestPermits = 100_000;
 
@@ -94,10 +101,11 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
             Convert.ToBase64String(RandomNumberGenerator.GetBytes(SecretProtector.KeyBytes)));
 
         // Same rule for Pocket ID: the application refuses to start without an issuer and a
-        // client, so the harness supplies them. Nothing here is ever contacted — a request that
-        // has no session is refused before anything is challenged, and that is the only side of
-        // the gate these tests are on.
-        builder.UseSetting("Authentication:Authority", "https://id.kairos.test");
+        // client, so the harness supplies them. Almost every test here stays on the anonymous side
+        // of the gate, where a request with no session is refused before anything is challenged;
+        // the one test that does challenge pins the handler's configuration itself, so this
+        // address is never fetched from.
+        builder.UseSetting("Authentication:Authority", Authority);
         builder.UseSetting("Authentication:ClientId", "kairos-tests");
         builder.UseSetting("Authentication:ClientSecret", "kairos-tests");
 

@@ -49,8 +49,6 @@ builder.Services.AddDbContext<KairosDbContext>(options =>
 builder.Services.AddSingleton<IClock>(SystemClock.Instance);
 
 const string secretKeyPath = "Security:SecretKey";
-const string knownProxiesPath = "Proxy:KnownProxies";
-const string knownNetworksPath = "Proxy:KnownNetworks";
 
 // Constructed here rather than resolved lazily, so an absent, non-base64 or wrong-length key
 // stops the process at startup. An app that boots without its key and finds out at the first
@@ -87,6 +85,18 @@ builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
+        // Always, with no configuration knob: a deployment that can turn Secure off is a
+        // deployment that will eventually be found with it off. Behind a TLS-terminating proxy the
+        // scheme Kestrel sees is the forwarded one, which UseForwardedHeaders resolves before this
+        // cookie is ever written.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.HttpOnly = true;
+
+        // Lax rather than Strict: the operator arrives back from the identity provider by
+        // redirect, and Strict withholds the cookie on that first cross-site navigation — a
+        // sign-in loop that reads as a broken provider rather than as a cookie policy.
+        options.Cookie.SameSite = SameSiteMode.Lax;
+
         // Everything behind the gate is an API route the admin surface fetches, and a fetch
         // cannot follow a redirect to another origin — it fails as an opaque CORS error that says
         // nothing about the session having expired. So the cookie handler answers with the status
@@ -228,8 +238,8 @@ builder.Services.AddRateLimitPolicies();
 // Which addresses may speak for a caller, and which scheme the request really arrived on. Both
 // matter today: the address is what the rate limiter partitions on, and without the scheme a
 // TLS-terminating proxy leaves this application believing every request is plain HTTP — the OIDC
-// handler then builds an http:// redirect_uri the provider refuses, and the cookie policy's
-// SameAsRequest leaves Secure off the session cookie.
+// handler then builds an http:// redirect_uri the provider refuses. The session cookie no longer
+// depends on it, because its Secure policy above is unconditional rather than the scheme's.
 //
 // Left at the framework's default — loopback only — so a deployment that is NOT behind a proxy
 // cannot be told a false client address by a header. A deployment that is behind one names it, and
@@ -239,17 +249,49 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
 
-    foreach (var proxy in builder.Configuration.GetSection(knownProxiesPath).Get<string[]>() ?? [])
+    // How many proxies deep the real caller sits. One is right for a single reverse proxy and
+    // wrong for a tunnel in front of one: with two hops in the header and a limit of one, the
+    // middleware stops at the nearer proxy and resolves every caller on earth to that one
+    // address, which merges them into a single rate-limit bucket and says nothing while it does
+    // it. Raising it is only safe with every trusted hop named below — an unnamed hop is how a
+    // caller gets to prepend whatever address it likes.
+    options.ForwardLimit = builder.Configuration.GetValue<int?>(ProxyOptions.ForwardLimitPath)
+        ?? ProxyOptions.DefaultForwardLimit;
+
+    var proxies = builder.Configuration.GetSection(ProxyOptions.KnownProxiesPath).Get<string[]>() ?? [];
+    for (var index = 0; index < proxies.Length; index++)
     {
-        options.KnownProxies.Add(IPAddress.Parse(proxy));
+        options.KnownProxies.Add(
+            Parsed(proxies[index], $"{ProxyOptions.KnownProxiesPath}:{index}", IPAddress.Parse));
     }
 
-    foreach (var network in builder.Configuration.GetSection(knownNetworksPath).Get<string[]>() ?? [])
+    var networks =
+        builder.Configuration.GetSection(ProxyOptions.KnownNetworksPath).Get<string[]>() ?? [];
+    for (var index = 0; index < networks.Length; index++)
     {
         // CIDR as written in a config file: "10.0.0.0/8".
-        options.KnownIPNetworks.Add(IPNetwork.Parse(network));
+        options.KnownIPNetworks.Add(
+            Parsed(networks[index], $"{ProxyOptions.KnownNetworksPath}:{index}", IPNetwork.Parse));
     }
 });
+
+// The framework's own message for a bad address is "An invalid IP address was specified", which
+// names neither the setting it came from nor the value that broke it — and this runs while the
+// pipeline is built, so it is read by somebody watching a container refuse to start. Both parsers
+// answer every malformed value with FormatException, an out-of-range prefix included; the argument
+// shapes are caught as well, so a null is named the same way rather than escaping bare.
+static T Parsed<T>(string value, string path, Func<string, T> parse)
+{
+    try
+    {
+        return parse(value);
+    }
+    catch (Exception failure) when (failure is FormatException or ArgumentException)
+    {
+        throw new InvalidOperationException(
+            $"{path} contains '{value}', which is not a valid value for it.", failure);
+    }
+}
 
 builder.Services.AddValidation();
 builder.Services.AddProblemDetails();
@@ -267,7 +309,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Before everything, because every line below it that reads a scheme or an address — the rate
-// limiter's partition, and the cookie policy the proxy task adds — reads the wrong one otherwise.
+// limiter's partition, and the redirect_uri a challenge builds — reads the wrong one otherwise.
 app.UseForwardedHeaders();
 
 app.UseExceptionHandler();
@@ -334,6 +376,22 @@ app.Logger.LogInformation(
     AdminAuthorization.GroupClaimType,
     adminGroup,
     adminSubjects.Count);
+
+// Said out loud for the same reason, and about a boundary that fails even more quietly. A depth
+// too small for the topology is not an error anywhere: the middleware simply stops at the nearest
+// proxy, every caller on earth resolves to that one address, and they share a single rate-limit
+// partition. Nothing in a response says so and RateLimitBudget's warning cannot see it — that one
+// fires on a connection with no peer at all. So the numbers are stated at boot, where an operator
+// can hold them against their own topology.
+var forwarding = app.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value;
+app.Logger.LogInformation(
+    "Forwarded headers are resolved {ForwardLimit} hop(s) deep, trusting {ProxyCount} addresses "
+    + "and {NetworkCount} networks — loopback is one of each, so 1 and 1 is a deployment "
+    + "that named none. A tunnel in front of the proxy is a second hop: raise "
+    + $"{ProxyOptions.ForwardLimitPath}, and name every hop in {ProxyOptions.KnownProxiesPath}.",
+    forwarding.ForwardLimit,
+    forwarding.KnownProxies.Count,
+    forwarding.KnownIPNetworks.Count);
 
 // Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
 // nothing throws — but it is indistinguishable from a broken one from the outside, because the
