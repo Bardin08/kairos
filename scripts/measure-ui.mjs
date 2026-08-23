@@ -1514,6 +1514,13 @@ const main = async () => {
         record(label, { opened: false, reason: 'no confirmed meeting on /admin/meetings to cancel' })
         return
       }
+      // Measured before the dialog exists, because the claim is that opening it
+      // leaves the row alone — and below 760px RecordTable is a record list
+      // whose rows are tall anyway, so an absolute height would say nothing.
+      const rowBefore = await page.evaluate(
+        () => Math.round(document.querySelector('tbody tr').getBoundingClientRect().height),
+      )
+
       await opener.click()
       await page.waitForSelector('dialog[open]', { timeout: 10000 })
       await page.screenshot({ path: `${OUT}/${label}.png` })
@@ -1530,8 +1537,10 @@ const main = async () => {
           // than decorative: blurred, the row underneath cannot be read.
           backdrop: getComputedStyle(dialog, '::backdrop').backdropFilter,
           backdropPaint: getComputedStyle(dialog, '::backdrop').backgroundColor,
-          // The whole point of the change: the row keeps its own height.
-          rowGrew: document.querySelector('tbody tr').getBoundingClientRect().height > 320,
+          // The whole point of the change: the row keeps its own height. The
+          // confirm used to be drawn inside this cell, and the row grew by
+          // about 200px every time it opened.
+          rowAfter: Math.round(document.querySelector('tbody tr').getBoundingClientRect().height),
           focusInside: dialog.contains(document.activeElement),
           focusedTag: document.activeElement?.tagName.toLowerCase() ?? null,
           labelled: document.getElementById(dialog.getAttribute('aria-labelledby'))?.textContent ?? null,
@@ -1566,7 +1575,14 @@ const main = async () => {
         focusReturned: document.activeElement?.textContent?.trim() === 'Cancel',
       }))
 
-      record(label, { opened: true, ...open, focusEscapedOnTab: escaped, ...afterEscape })
+      record(label, {
+        opened: true,
+        rowBefore,
+        ...open,
+        rowUnchanged: rowBefore === open.rowAfter,
+        focusEscapedOnTab: escaped,
+        ...afterEscape,
+      })
     })
   }
 

@@ -159,6 +159,13 @@ export default function MeetingActions({
     }
   }
 
+  // A SIBLING of the row's .group and never a child of it, which is not a
+  // formatting preference: `.group > * + *` gives every child after the first a
+  // margin-top, so a dialog inside it pushed the row's own controls down by one
+  // gap whenever it opened — 129px to 141px, measured. The whole point of this
+  // change is that the row does not move, and the browser check is what caught
+  // it; nothing in jsdom computes a margin.
+  //
   // Rendered beside the row's controls rather than instead of them — the
   // confirm used to REPLACE them, which is what made the row grow — and only
   // while it is open. A closed <dialog> is display:none by the UA stylesheet,
@@ -240,54 +247,67 @@ export default function MeetingActions({
   // than to make a second suggestion that would be refused.
   if (proposal !== null && proposal.state === OPEN) {
     return (
-      <div className="group">
+      <>
         {dialog}
-        <p className="record-meta numeric">
-          Suggested {shortDate(zonedDate(proposal.start, zone))}, {zonedTime(proposal.start, zone)}
-        </p>
-        {/* To the minute, because the hold is minted-plus-hours and lands on an
-            arbitrary clock time — and because the mail the invitee is reading
-            says the same instant to the minute. */}
-        <p className="record-meta numeric">
-          Lapses {shortDate(zonedDate(proposal.expiresAt, zone))},{' '}
-          {zonedTime(proposal.expiresAt, zone)}
-        </p>
-        <Failure error={withdrawFailure} />
-        <div className="row gap-2 wrap">
-          <button className="btn" type="button" onClick={withdraw} data-loading={busy || undefined}>
-            Withdraw
-          </button>
-          {/* Cancel stays. An open hold replaces PROPOSE, never the ability to
-              call the meeting off — a branch that returned early without it made
-              the operator withdraw a suggestion first, with nothing on the row
-              saying so. */}
-          <button className="btn btn-ghost btn-danger" type="button" onClick={ask}>
-            Cancel
-          </button>
+        <div className="group">
+          <p className="record-meta numeric">
+            Suggested {shortDate(zonedDate(proposal.start, zone))},{' '}
+            {zonedTime(proposal.start, zone)}
+          </p>
+          {/* To the minute, because the hold is minted-plus-hours and lands on
+              an arbitrary clock time — and because the mail the invitee is
+              reading says the same instant to the minute. A date alone would
+              let an operator think they had until the end of that day. */}
+          <p className="record-meta numeric">
+            Lapses {shortDate(zonedDate(proposal.expiresAt, zone))},{' '}
+            {zonedTime(proposal.expiresAt, zone)}
+          </p>
+          <Failure error={withdrawFailure} />
+          <div className="row gap-2 wrap">
+            <button
+              className="btn"
+              type="button"
+              onClick={withdraw}
+              data-loading={busy || undefined}
+            >
+              Withdraw
+            </button>
+            {/* Cancel stays. An open hold replaces PROPOSE, never the ability
+                to call the meeting off — every confirmed row could be cancelled
+                before this feature existed, and a branch that returned early
+                without it made the operator withdraw a suggestion first with
+                nothing on the row saying so. */}
+            <button className="btn btn-ghost btn-danger" type="button" onClick={ask}>
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     )
   }
 
   const news = outcome(proposal)
 
   return (
-    <div className="group">
+    <>
       {dialog}
-      {/* What became of the last suggestion, next to the button that makes
-          another one. It is here rather than beside the meeting's own status
-          because that status did not change: a refused or lapsed suggestion
-          leaves a confirmed meeting exactly where it was. */}
-      {news !== null && <p className="record-meta">{news}</p>}
-      <Failure error={withdrawFailure} />
-      <div className="row gap-2 wrap">
-        <button className="btn" type="button" onClick={onPropose}>
-          Suggest a new time
-        </button>
-        <button className="btn btn-ghost btn-danger" type="button" onClick={ask}>
-          Cancel
-        </button>
+      <div className="group">
+        {/* What became of the last suggestion, next to the button that makes
+            another one — which is the operator's usual next move after either.
+            It is here rather than beside the meeting's own status because the
+            meeting's status did not change: a refused or lapsed suggestion
+            leaves a confirmed meeting exactly where it was. */}
+        {news !== null && <p className="record-meta">{news}</p>}
+        <Failure error={withdrawFailure} />
+        <div className="row gap-2 wrap">
+          <button className="btn" type="button" onClick={onPropose}>
+            Suggest a new time
+          </button>
+          <button className="btn btn-ghost btn-danger" type="button" onClick={ask}>
+            Cancel
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
