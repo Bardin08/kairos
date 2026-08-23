@@ -21,7 +21,6 @@ public class RateLimitBudgetTests
 
     private const int OneSpent = 1;
 
-    /// <summary>How many windows to wait out before the old one is certainly gone.</summary>
     private const int WindowsToOutlast = 3;
 
     /// <summary>

@@ -33,7 +33,6 @@ public class PatternsAdminTests
     private const string LinkName = "Consulting call";
     private const int DurationMinutes = 25;
 
-    /// <summary>The pattern a test starts from, whether it is seeded or created through the API.</summary>
     private const string FirstPatternName = "Weekdays";
 
     /// <summary>A second pattern, so a rename has somewhere to collide from.</summary>
