@@ -1,9 +1,8 @@
 namespace Kairos.Api.Integrations.Email;
 
 /// <summary>
-/// Which moment in a booking's life this message is about. One per thing that happens to a
-/// meeting the invitee has to be told about, each needing its own sentence and its own iCalendar
-/// METHOD — or, for a proposal, no calendar part at all.
+/// One per thing that happens to a meeting the invitee has to be told about, each needing its own
+/// sentence and its own iCalendar METHOD — or, for a proposal, no calendar part at all.
 /// </summary>
 /// <remarks>
 /// Passed in rather than inferred from the booking, and that is the whole reason this type

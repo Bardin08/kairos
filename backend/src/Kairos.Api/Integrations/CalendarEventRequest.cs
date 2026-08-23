@@ -3,9 +3,8 @@ using NodaTime;
 namespace Kairos.Api.Integrations;
 
 /// <summary>
-/// One meeting, described the way a booking describes it, for whoever is going to put it in a
-/// calendar. Every field is something the booking already knows; nothing here exists because a
-/// particular vendor's API asks for it.
+/// Every field is something the booking already knows; nothing here exists because a particular
+/// vendor's API asks for it.
 /// </summary>
 /// <remarks>
 /// What is deliberately absent is as much of the design as what is present. There is no calendar
@@ -17,10 +16,9 @@ namespace Kairos.Api.Integrations;
 /// there is no conference of any kind — that is <see cref="IConferenceCreator"/>'s job, and the
 /// two fail independently.
 /// </remarks>
-/// <param name="BookingId">Kairos's identifier for the meeting, and the correlation key an
-/// adapter is expected to build its own idempotency on.</param>
+/// <param name="BookingId">The correlation key an adapter is expected to build its own
+/// idempotency on.</param>
 /// <param name="Start">UTC. Half-open with <paramref name="End"/>, as everywhere else.</param>
-/// <param name="Title">What the organizer will read in their own calendar.</param>
 /// <param name="Description">The booker's notes, verbatim. Empty is normal.</param>
 public sealed record CalendarEventRequest(
     Guid BookingId,

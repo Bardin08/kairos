@@ -3,9 +3,9 @@ using Kairos.Api.Persistence.Entities;
 namespace Kairos.Api.Integrations;
 
 /// <summary>
-/// Giving a booking somewhere to actually meet. Separate from <see cref="ICalendarWriter"/>
-/// because the two are separate capabilities: one provider may do both, and an organizer may
-/// equally keep their calendar in one place and their conferencing in another.
+/// Separate from <see cref="ICalendarWriter"/> because the two are separate capabilities: one
+/// provider may do both, and an organizer may equally keep their calendar in one place and their
+/// conferencing in another.
 /// </summary>
 /// <remarks>
 /// The booking id is the whole input, and that is deliberate. A conference is identified by the

@@ -7,9 +7,6 @@ using MimeKit;
 
 namespace Kairos.Api.Integrations.Email;
 
-/// <summary>
-/// One message, over one connection, to the configured relay.
-/// </summary>
 /// <remarks>
 /// Deliberately the thinnest type in the feature. Everything that can be decided without a socket
 /// — what the message says, what it carries and whether to send at all — is
@@ -44,9 +41,6 @@ public class EmailSender(IOptions<EmailOptions> options)
     /// </remarks>
     public static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(15);
 
-    /// <summary>
-    /// Sends, and returns the relay's own response to the message.
-    /// </summary>
     /// <remarks>
     /// The response is returned rather than discarded because it is the only handle that ties a
     /// booking to something the operator can find at the relay. Twice during this feature's life

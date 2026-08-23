@@ -1,9 +1,8 @@
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
-/// Google's half of the OAuth client, from configuration. The client secret is the whole reason
-/// any of this touches the backend at all — a browser cannot be trusted to hold it, so the code
-/// exchange cannot happen there.
+/// The client secret is the whole reason any of this touches the backend at all — a browser
+/// cannot be trusted to hold it, so the code exchange cannot happen there.
 /// </summary>
 /// <remarks>
 /// Absent configuration is not a startup failure: a Kairos that never connects a calendar is a
@@ -13,7 +12,7 @@ namespace Kairos.Api.Integrations.Google;
 /// </remarks>
 public sealed class GoogleOptions
 {
-    /// <summary>Binds <c>Integrations:Google</c>; in the environment, <c>Integrations__Google__…</c>.</summary>
+    /// <summary>In the environment, <c>Integrations__Google__…</c>.</summary>
     public const string SectionName = "Integrations:Google";
 
     public string ClientId { get; set; } = string.Empty;
