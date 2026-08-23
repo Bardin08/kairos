@@ -12,7 +12,7 @@ import {
   type SettingsDraft,
   type TimeZoneOption,
 } from './adminSettings'
-import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitKey } from './limitCopy'
+import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitCopy } from './limitCopy'
 
 /**
  * Ends the Kairos session and not the identity provider's.
@@ -33,8 +33,34 @@ const THEMES: { value: ThemeChoice; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ]
 
+/**
+ * Not a `LimitKey`, and the difference is the point: no link overrides a hold,
+ * so it has no override count and no row in the link editor. It is drawn with
+ * the four because it is the same control, not the same kind of setting.
+ */
+const PROPOSAL_HOLD = 'proposalHoldHours'
+
+/** Zero hours has lapsed before the invitee's mail is composed. */
+const PROPOSAL_HOLD_FLOOR = 1
+
+/** Reading order on this screen: the four a link can override, then the hold. */
+const FIELD_KEYS = [...LIMIT_KEYS, PROPOSAL_HOLD] as const
+
+type FieldKey = (typeof FIELD_KEYS)[number]
+
+const FIELD_COPY: Record<FieldKey, LimitCopy> = {
+  ...LIMIT_COPY,
+  [PROPOSAL_HOLD]: {
+    label: 'How long a proposed time is held',
+    unit: 'hours',
+    short: 'hrs',
+    floor: PROPOSAL_HOLD_FLOOR,
+    help: 'A proposal nobody answers releases its slot after this and the meeting stays where it is.',
+  },
+}
+
 /** Held as typed, so a half-deleted field is an empty box rather than a zero. */
-type Draft = Record<LimitKey, string>
+type Draft = Record<FieldKey, string>
 
 type Phase = 'loading' | 'ready' | 'broken'
 
@@ -65,6 +91,7 @@ function draftOf(settings: OperatorSettings): Draft {
     minNoticeMinutes: String(settings.minNoticeMinutes),
     dailyCap: String(settings.dailyCap),
     startIncrementMinutes: String(settings.startIncrementMinutes),
+    proposalHoldHours: String(settings.proposalHoldHours),
   }
 }
 
@@ -119,7 +146,7 @@ export default function Settings() {
     return () => controller.abort()
   }, [])
 
-  function change(key: LimitKey, value: string) {
+  function change(key: FieldKey, value: string) {
     setSaved(false)
     setDraft((current) => (current === null ? current : { ...current, [key]: value }))
   }
@@ -134,13 +161,13 @@ export default function Settings() {
   const parsed =
     draft === null
       ? null
-      : LIMIT_KEYS.reduce<Partial<Record<LimitKey, number | null>>>(
-          (all, key) => ({ ...all, [key]: whole(draft[key], LIMIT_COPY[key].floor) }),
+      : FIELD_KEYS.reduce<Partial<Record<FieldKey, number | null>>>(
+          (all, key) => ({ ...all, [key]: whole(draft[key], FIELD_COPY[key].floor) }),
           {},
         )
 
   const complete =
-    parsed !== null && LIMIT_KEYS.every((key) => parsed[key] !== null && parsed[key] !== undefined)
+    parsed !== null && FIELD_KEYS.every((key) => parsed[key] !== null && parsed[key] !== undefined)
 
   function save() {
     if (draft === null || parsed === null || !complete) return
@@ -151,6 +178,7 @@ export default function Settings() {
       minNoticeMinutes: parsed.minNoticeMinutes as number,
       dailyCap: parsed.dailyCap as number,
       startIncrementMinutes: parsed.startIncrementMinutes as number,
+      proposalHoldHours: parsed.proposalHoldHours as number,
     }
 
     setSaving(true)
@@ -240,11 +268,12 @@ export default function Settings() {
           </div>
           <div className="card card-pad">
             <div className="rowgroup">
-              {LIMIT_KEYS.map((key) => {
-                const limit = LIMIT_COPY[key]
+              {FIELD_KEYS.map((key) => {
+                const limit = FIELD_COPY[key]
                 const value = draft[key]
                 const invalid = whole(value, limit.floor) === null
-                const note = overrideNote(settings.overrides[key])
+                // Nothing overrides a hold, so there is no count beside it.
+                const note = key === PROPOSAL_HOLD ? null : overrideNote(settings.overrides[key])
 
                 return (
                   <div className="field-row" data-invalid={invalid ? 'true' : undefined} key={key}>

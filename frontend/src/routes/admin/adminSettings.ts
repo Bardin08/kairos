@@ -29,7 +29,8 @@ export type OverrideCounts = {
 }
 
 /**
- * The organizer's zone, the four globals, and who is signed in.
+ * The organizer's zone, the four globals, the proposal hold, and who is signed
+ * in.
  *
  * The four limits are plain numbers and never null: this IS the level a link's
  * null inherits from, so there is nothing above it for one of them to defer to.
@@ -44,6 +45,8 @@ export type Settings = {
   minNoticeMinutes: number
   dailyCap: number
   startIncrementMinutes: number
+  /** How long a proposed move holds its slot before it lapses. Hours. */
+  proposalHoldHours: number
   overrides: OverrideCounts
 }
 
@@ -57,13 +60,15 @@ export type Settings = {
  */
 export type TimeZoneOption = { id: string; offset: string }
 
-/** The five values the operator sets, all of them, every time. */
+/** The six values the operator sets, all of them, every time. */
 export type SettingsDraft = {
   timeZoneId: string
   marginMinutes: number
   minNoticeMinutes: number
   dailyCap: number
   startIncrementMinutes: number
+  /** How long a proposed move holds its slot before it lapses. Hours. */
+  proposalHoldHours: number
 }
 
 const SETTINGS = '/admin/settings'

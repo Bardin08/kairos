@@ -47,6 +47,7 @@ const weekdays: Pattern = {
 }
 
 const ORGANIZER_ZONE = 'Europe/Warsaw'
+const HOLD_HOURS = 48
 
 const settings: Settings = {
   timeZone: ORGANIZER_ZONE,
@@ -55,6 +56,7 @@ const settings: Settings = {
   minNoticeMinutes: 120,
   dailyCap: 4,
   startIncrementMinutes: 30,
+  proposalHoldHours: HOLD_HOURS,
   overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
 }
 
