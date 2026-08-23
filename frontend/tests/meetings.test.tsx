@@ -59,6 +59,13 @@ const refused: Meeting = {
   calendarError: 'Request had insufficient authentication scopes.',
 }
 
+/** Already off. Nothing on this row can be done to it a second time. */
+const cancelled: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000004',
+  status: 'cancelled',
+}
+
 /** Nobody ever connected a calendar. Not synced, and not a fault either. */
 const neverTried: Meeting = {
   ...synced,
@@ -187,6 +194,28 @@ test('the day, the month and the year are all inside the one date chip', async (
   expect(chip?.querySelector('.record-day')?.textContent).toBe('07')
   expect(chip?.querySelector('.record-month')?.textContent).toBe('Sept')
   expect(chip?.querySelector('.record-meta')?.textContent).toBe('2026')
+})
+
+test('a confirmed meeting can be called off from its own row', async () => {
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+
+  // The whole reason this tab stopped being read-only: the alternative was
+  // editing the calendar by hand, which leaves it disagreeing with Kairos.
+  expect(within(row).getByRole('button', { name: 'Cancel' })).toBeDefined()
+})
+
+test('a meeting that is already off is offered nothing', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([cancelled]))
+  render(<Meetings />)
+
+  const row = await rowFor(cancelled)
+
+  // A cancel on a cancelled meeting answers 200 and changes nothing, so the
+  // button would work — and would still be a control that does nothing, which
+  // reads as a broken one.
+  expect(within(row).queryByRole('button')).toBeNull()
 })
 
 test('an empty list names which filter closed it', async () => {

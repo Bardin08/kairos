@@ -4,6 +4,7 @@ import RecordTable, { type RecordColumn } from '../../components/RecordTable'
 import { localZone, todayIn, zonedDate, zonedTime } from '../../lib/time'
 import { listMeetings, type Meeting, type Meetings as List } from './adminMeetings'
 import Failure from './Failure'
+import MeetingActions from './MeetingActions'
 import { shiftDays, shortMonth } from './adminTime'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is the
@@ -121,10 +122,11 @@ function whyNotSynced(meeting: Meeting): string {
  * Every meeting Kairos made, and the one fact a calendar cannot supply: the link
  * it came through.
  *
- * Read-only on purpose. Cancelling and moving already have a surface — Part A's
- * manage link — and a second one here would be two implementations of rules that
- * only hold while there is one. Meetings Kairos did not create are equally
- * absent: reading a calendar back is a slice with its own conflict rules.
+ * A confirmed meeting can be called off from its own row, because the operator's
+ * alternative was editing the calendar by hand — which leaves the calendar and
+ * Kairos disagreeing about a meeting Kairos is the source of truth for. Meetings
+ * Kairos did not create are still absent: reading a calendar back is a slice with
+ * its own conflict rules.
  */
 export default function Meetings() {
   const [period, setPeriod] = useState(UPCOMING)
@@ -142,6 +144,11 @@ export default function Meetings() {
   // where the two differ this effect runs once more with corrected dates and
   // settles. Nothing here hard-codes a zone, so Task 6's picker flows through.
   const [zone, setZone] = useState(localZone)
+
+  // Bumped when a row changes something, which is the effect's cue to read the
+  // list again. The row already knows what it did; the table is what has to be
+  // told, and a counter says so without this page reaching into one row's state.
+  const [reloads, setReloads] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -166,7 +173,7 @@ export default function Meetings() {
     // screen stay until the narrower set replaces them, so changing a filter
     // does not blink the table out and back.
     return () => controller.abort()
-  }, [period, linkId, zone])
+  }, [period, linkId, zone, reloads])
 
   const columns: RecordColumn<Meeting>[] = [
     {
@@ -228,6 +235,13 @@ export default function Meetings() {
           {!meeting.calendarSynced && <p className="record-meta">{whyNotSynced(meeting)}</p>}
         </div>
       ),
+    },
+    {
+      label: 'Actions',
+      cell: (meeting) =>
+        meeting.status === CONFIRMED ? (
+          <MeetingActions meetingId={meeting.id} onChanged={() => setReloads(reloads + 1)} />
+        ) : null,
     },
   ]
 
