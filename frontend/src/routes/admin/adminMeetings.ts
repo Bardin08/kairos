@@ -45,6 +45,17 @@ export type MeetingProposal = {
  * nothing finished; `calendarError` carries the provider's own words, which is
  * why "not synced" does not send the operator to the server log.
  */
+/**
+ * The four facts the cancel dialog restates about the meeting it is destroying.
+ *
+ * A subset of `Meeting` rather than the whole row, and that is the point: the
+ * dialog needs to name what is about to go, not to know everything about it.
+ * `--surface-overlay` is drawn with `blur(8px)`, so the row underneath the
+ * dialog is unreadable — a dialog that leaned on it for context would be
+ * leaning on something the backdrop erased.
+ */
+export type CancelSubject = Pick<Meeting, 'participantName' | 'linkName' | 'start' | 'end'>
+
 export type Meeting = {
   id: string
   /** ISO UTC instant, `2026-09-07T09:00:00Z`. Render it in `timeZone`. */

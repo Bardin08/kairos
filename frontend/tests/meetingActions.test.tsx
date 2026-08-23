@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import MeetingActions from '../src/routes/admin/MeetingActions'
 import { ApiError } from '../src/lib/api'
 import { cancelMeeting, withdrawProposal } from '../src/routes/admin/adminMeetings'
-import type { MeetingProposal } from '../src/routes/admin/adminMeetings'
+import type { CancelSubject, MeetingProposal } from '../src/routes/admin/adminMeetings'
 
 vi.mock('../src/routes/admin/adminMeetings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/adminMeetings')>()),
@@ -29,6 +29,16 @@ const EXPIRES_AT = '2030-09-11T09:30:00Z'
 const EXPIRES_TIME = '11:30'
 const LAPSE_DAY = /11 Sep/
 
+// The meeting the dialog restates. Its clock times are deliberately unlike the
+// proposal's below — 09:30Z is 11:30 in Warsaw, which is EXPIRES_TIME, and an
+// assertion on the lapse would have matched the restated meeting instead.
+const SUBJECT = {
+  participantName: 'Ada Lovelace',
+  linkName: 'Consulting call',
+  start: '2030-09-09T05:00:00Z',
+  end: '2030-09-09T05:45:00Z',
+}
+
 const openProposal: MeetingProposal = {
   id: PROPOSAL_ID,
   start: PROPOSED_SLOT,
@@ -46,11 +56,16 @@ const SERVICE_UNAVAILABLE = 503
 const MAX_REASON_LENGTH = 2000
 
 /** The row's controls. Proposing is the page's job, so the row is handed a callback. */
-function renderActions(proposal: MeetingProposal | null = null, onPropose = vi.fn()) {
+function renderActions(
+  proposal: MeetingProposal | null = null,
+  onPropose = vi.fn(),
+  subject: CancelSubject = SUBJECT,
+) {
   render(
     <MeetingActions
       meetingId={MEETING_ID}
       zone={ORGANIZER_ZONE}
+      subject={subject}
       proposal={proposal}
       onPropose={onPropose}
       onChanged={vi.fn()}
@@ -188,6 +203,101 @@ describe('MeetingActions', () => {
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
 
     expect(screen.queryByLabelText(/why/i)).not.toBeNull()
+  })
+
+  test('cancelling opens a modal dialog rather than growing the row', () => {
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    // The row is a table cell in the narrowest column on the page. The reason
+    // was typed into it until this change, and the table reflowed around it
+    // every time the panel opened.
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.tagName.toLowerCase()).toBe('dialog')
+    expect(dialog).toHaveProperty('open', true)
+  })
+
+  test('the dialog names the meeting it is about, because the backdrop hides the row', () => {
+    renderActions(null, vi.fn(), SUBJECT)
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    // --surface-overlay is paired with blur(8px), so the row underneath is
+    // unreadable. A dialog that leaned on it for context would be leaning on
+    // something the backdrop erased.
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain(SUBJECT.participantName)
+    expect(dialog.textContent).toContain(SUBJECT.linkName)
+  })
+
+  test('the dialog is labelled by its own heading', () => {
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    const dialog = screen.getByRole('dialog')
+    const labelledBy = dialog.getAttribute('aria-labelledby')
+    expect(labelledBy).not.toBeNull()
+    expect(document.getElementById(labelledBy as string)?.textContent).toMatch(/call this meeting off/i)
+  })
+
+  test('focus moves to the reason rather than to the button that destroys something', () => {
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    // Not the confirm: a stray Enter must never land on a destructive control
+    // that was focused on the operator's behalf.
+    expect(document.activeElement).toBe(screen.getByLabelText(/why/i))
+  })
+
+  test('closing returns focus to the control that opened it', () => {
+    renderActions()
+    const opener = screen.getByRole('button', { name: /^cancel$/i })
+
+    fireEvent.click(opener)
+    fireEvent.click(screen.getByRole('button', { name: /keep it/i }))
+
+    expect(document.activeElement).toBe(opener)
+  })
+
+  test('a failed cancel keeps the dialog open with the words still in it', async () => {
+    vi.mocked(cancelMeeting).mockRejectedValue(TOO_LONG)
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+    fireEvent.change(screen.getByLabelText(/why/i), { target: { value: REASON } })
+    fireEvent.click(screen.getByRole('button', { name: /call it off/i }))
+    await screen.findByRole('alert')
+
+    // Cancel has no second option to offer, so a failure that dismissed the
+    // dialog would be a dead end — and the reason is the operator's typing.
+    expect(screen.getByRole('dialog')).toHaveProperty('open', true)
+    expect(screen.getByLabelText(/why/i)).toHaveProperty('value', REASON)
+  })
+
+  test('both buttons are disabled while the cancel is in flight', async () => {
+    vi.mocked(cancelMeeting).mockReturnValue(new Promise(() => {}) as never)
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /call it off/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /call it off/i })).toHaveProperty('disabled', true)
+      expect(screen.getByRole('button', { name: /keep it/i })).toHaveProperty('disabled', true)
+    })
+  })
+
+  test('the destructive action carries a shape as well as a colour', () => {
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    // DESIGN.md's Second Channel Rule: no state by hue alone, and this one has
+    // to survive a monochrome screenshot.
+    expect(screen.getByRole('button', { name: /call it off/i }).querySelector('svg')).not.toBeNull()
   })
 
   test('the lapse deadline on the row is a time as well as a date', () => {
