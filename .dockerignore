@@ -1,0 +1,47 @@
+# What never reaches the build context. Everything the image needs is a source
+# file or a lockfile; everything below is output, and output that travels from
+# a laptop into an image is output nothing reproduced.
+
+.git
+
+# Reinstalled by `npm ci` in the frontend stage, against the committed lockfile.
+# It is also the largest directory in this repository by a wide margin.
+**/node_modules
+
+# Rebuilt by `dotnet publish` in the backend stage. On a laptop these hold
+# binaries for the developer's own architecture, which is not necessarily the
+# one being built for.
+**/bin
+**/obj
+
+# A developer's local database, its write-ahead log and its shared-memory index.
+# The image ships no data; the volume it declares is where data goes.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# The SPA's build output, mirroring .gitignore: everything in wwwroot except the
+# vendored stylesheet, which is a committed source file rather than a build's.
+#
+# This is not tidiness. `npm run build` on a laptop leaves hashed bundles in
+# assets/, their names are unique per build, and nothing in the image build
+# overwrites or deletes them — so a stale one would be copied in and served
+# alongside the bundles this image actually built. The image builds the SPA
+# itself, from source, every time.
+backend/src/Kairos.Api/wwwroot/*
+!backend/src/Kairos.Api/wwwroot/kairos.css
+
+# Nothing below is an input to the image, and every one of them is edited often.
+# That is the point: the backend stage does `COPY backend/ ./`, so a file inside
+# that tree which the publish never reads still invalidates the layer and buys a
+# full rebuild. backend/tests/ is the expensive one — the API project is what is
+# published, and the test project is not restored, built or referenced by it.
+docs
+.github
+scripts
+backend/tests
+
+# Never in the context at all. Nothing here reads one, and an image is a bad
+# place to find out that something did.
+**/.env
+**/.env.*

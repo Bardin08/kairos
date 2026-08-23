@@ -1,0 +1,29 @@
+# The TLS-terminating proxy in front of compose.proxy.yaml's container, and only
+# that. This is a verification harness — see the header of compose.proxy.yaml for
+# what it is for and what it is not.
+#
+# Two names on one site block, deliberately:
+#
+#   kairos.test — the name every check uses. It is what a deployment looks like:
+#                 an ordinary host behind a certificate.
+#   localhost   — the same application, reached by the name ASP.NET Core's HSTS
+#                 middleware excludes by default (HstsOptions.ExcludedHosts is
+#                 localhost, 127.0.0.1 and [::1], and Program.cs does not clear
+#                 it). Kept so the difference between the two is observable
+#                 rather than a thing to be remembered: an HSTS check run against
+#                 localhost passes for the wrong reason and fails for none.
+#
+# `tls internal` is what keeps this offline. Caddy mints the certificate from its
+# own local CA instead of going to Let's Encrypt, which it would otherwise try
+# for kairos.test and fail at, having no public DNS to be challenged over.
+kairos.test, localhost {
+	tls internal
+
+	# Caddy's reverse_proxy adds X-Forwarded-For, X-Forwarded-Proto and
+	# X-Forwarded-Host of its own accord, and passes the original Host through
+	# untouched. Those first two are the whole point of the harness: without
+	# them Kairos sees a plaintext request from a container address, and both
+	# the cookie's Secure attribute and the HSTS header are decided on what it
+	# sees rather than on what the invitee's browser actually spoke.
+	reverse_proxy kairos:8080
+}

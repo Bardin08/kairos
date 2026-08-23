@@ -738,11 +738,48 @@ empty app, idle   84.7 MiB rss / 57 MB footprint     (Part A measured 80.5 / 52.
 
 So the floor drifted up by 4.2 MiB and Kairos's own share went from about 79 MiB to **105.5 MiB rss / 87 MB footprint**. Roughly 26 MiB of that is Kairos code and data rather than platform. It is not attributable to Part C alone: Part B added two hosted services that tick forever, a Google client factory and an SMTP path, and this instance has bookings in it where Part A's had fewer. What can be said precisely is that no part of this is the frontend — the workbench is 9 kB of JavaScript that never enters this process — and that the target was written for a Raspberry Pi on linux-arm64 with 4 KiB pages, which is a different runtime baseline entirely and where this has still never been measured.
 
-### The pod's limits — unrun
+### The pod's limits — the image exists, and the limit was run
 
-**There is no pod.** The repository contains no `Dockerfile`, no container image, no Kubernetes manifest and no Helm chart; `limits 192Mi/500m` is a number from the phase's conditions with nothing in the repository to attach it to. Nothing was measured against it and nothing could be.
+This section previously read "there is no pod", and said the smallest missing piece was the image. That is no longer true: the repository now carries a `Dockerfile`, and the readings below are the first this project has taken inside a cgroup rather than beside one. There is still no Kubernetes manifest and no Helm chart.
 
-The nearest available reading is the one above: the high-water mark across the whole run, load included, was 190.2 MiB — **1.8 MiB under 192Mi**, on a machine with 16 KiB pages and no cgroup at all. That margin is a coincidence of units rather than evidence, and it is not a comfortable one: a container on linux-arm64 with 4 KiB pages will not report this number, and a cgroup limit does not let a process idle at the edge of it, it kills it. Proving this condition needs a container image, a manifest carrying the limits, and `kubectl top pod` or a `memory.current` read while a booking page loads. Building that image is the smallest missing piece, and it is not a browser problem.
+Measured 2026-08-23 on macOS 27 / arm64, Docker 28.5.1, the image built from this tree, run as `--memory 192m --memory-swap 192m` — the phase's `limits 192Mi` expressed as the cgroup a kubelet would create. `memory.current` and `memory.peak` were read out of `/sys/fs/cgroup/docker/<id>` in the Docker VM, so these are the same counters `kubectl top pod` reports rather than a host process's RSS.
+
+```
+memory.max                        201,326,592     (192 MiB, the cap)
+idle       memory.current          79,691,776     76.0 MiB
+           memory.peak             82,604,032     78.8 MiB
+after 600 requests
+           memory.current          87,638,016     83.6 MiB
+           memory.peak             90,071,040     85.9 MiB   <- high-water
+```
+
+**It runs, and it runs at 45% of the limit.** `/healthz` and `/readyz` both answered 200 throughout, nothing was killed, and the high-water mark is 106 MiB clear of the cap.
+
+That is less than half the 190.2 MiB measured on the host above, and the difference is not an improvement to the application — no code changed between the two readings. Two things account for it, and both are the reason a host reading was never going to answer this question: the host is macOS/arm64 with 16 KiB pages while the container is Linux with 4 KiB, and a .NET process that finds a cgroup limit sizes its heap against that limit rather than against the machine's RAM. The Part A and Part C figures are not wrong; they were measuring a different thing.
+
+**Scope, so this is not read as more than it is.** The 600 requests were the single page, the vendored stylesheet, both probes and an admin route answering 401 — not the booking page with a month of slots that the section above loads, because the database in a fresh container has no links in it. So this is an idle-plus-probe-traffic figure and the allocation behaviour above it still stands unchallenged. What it settles is the condition this section was written to record as unrunnable: the limit was applied, and the process lived inside it.
+
+### The image
+
+```
+uncompressed   151,545,100 bytes   151.5 MB / 144.5 MiB   <- what lands on disk
+compressed      59,366,980 bytes    59.4 MB /  56.6 MiB   <- what is pulled
+```
+
+**Name the convention or the number means nothing.** `docker image inspect --format '{{.Size}}'` does not answer the same question on every machine: on a daemon using the containerd image store — this one — it reports the sum of the compressed blobs, and on a classic dockerd it reports the sum of the uncompressed layer diffs. The two differ by a factor of 2.5 here. The uncompressed figure is the honest one for a target about disk on a Raspberry Pi; the compressed figure is the honest one for a target about pull time. Both are above, and the uncompressed one was cross-checked by summing `docker history` and by summing the exported rootfs.
+
+Against the project's stated target of under 150 MB, the uncompressed figure is **1.5 MB over if that target is decimal MB, and 5.5 MiB under if it is MiB**. The target does not say which. Recorded rather than argued.
+
+The number moved a long way to get there, and by removing dead weight rather than by tuning:
+
+```
+183.1 MB   the first working image
+151.5 MB   -31.6 MB   publish pinned to one runtime identifier
+```
+
+An architecture-agnostic `dotnet publish` copies `runtimes/` for every platform any dependency was built against — 23 of them, 34.2 MB, of which a linux-arm64 image can execute exactly one. SQLitePCLRaw alone shipped `libe_sqlite3` for Windows, macOS, Mac Catalyst, browser-wasm, s390x, ppc64le, riscv64 and every musl variant. Publishing with `-r linux-arm64 --no-self-contained` leaves the single native library in `/app` and the tree gone.
+
+What remains is not Kairos. The 89.2 MB layer is the .NET shared framework inside the chiselled base image, and the application's own layer is 19.1 MB of which BouncyCastle — a MailKit dependency — is 4.9 MB. Getting materially below this means self-contained publishing with trimming, which is a different decision with its own risks, and it has not been taken.
 
 ## The register of what is not covered
 
@@ -763,7 +800,7 @@ Everything below was carried into this task as unproved. Each line says what was
   A real blocked override reaching a real dimmed cell, with the reason in the accessible name. No stubbed fetch anywhere in it.
 - **The admin boundary from outside.** With no cookie, `/api/v1/admin/links`, `/meetings`, `/patterns`, `/settings` and `/integrations` all answer **401**. An unmatched `/api/` path answers **404** with no content type rather than 200 with HTML. `/admin/links` still answers 200 `text/html`, which is the single page and is correct.
 - **`CalendarSyncState.Pending` reads as not-synced — and reads wrong.** A `Pending` row was inserted for a confirmed booking. The API answers `calendarSynced: false`, `calendarProvider: "google"`, `calendarError: null`, and the workbench renders **"Not synced — No calendar was connected when this was booked, so nothing was written."** For a `Pending` row that sentence is false: a calendar *is* connected and the write has not finished. `whyNotSynced` branches on `calendarError === null` alone, so it cannot tell "never attempted" from "in flight". Small, and worth a third branch.
-- **Data protection keys are not persisted.** There is no `AddDataProtection` or `PersistKeysTo` call anywhere in `backend/src`, so the key ring is the framework default — `$HOME/.aspnet/DataProtection-Keys` — which in a container with no volume dies with the pod, and the operator logs in again after every restart. Accepted for one operator; now written down.
+- **Data protection keys are not persisted.** There is no `AddDataProtection` or `PersistKeysTo` call anywhere in `backend/src`, so the key ring is the framework default — `$HOME/.aspnet/DataProtection-Keys` — which in a container with no volume dies with the pod, and the operator logs in again after every restart. Accepted for one operator; now written down. No longer a deduction: the image logs it on every start — `Storing keys in a directory '/home/app/.aspnet/DataProtection-Keys' that may not be persisted outside of the container`, on the container's own writable layer and not on the `/var/lib/kairos` volume beside it. Pointing the key ring at that volume is one call and has not been made.
 
 **Found while running, not previously recorded:**
 

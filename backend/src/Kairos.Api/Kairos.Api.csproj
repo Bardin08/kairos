@@ -5,6 +5,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Copied to the build output, where `dotnet run` needs it, and kept out of the publish
+         output, where nothing should. It holds a deliberately public sign-in block and a
+         deliberately public secret key, both labelled and both harmless on a laptop; in a
+         published image they are one ASPNETCORE_ENVIRONMENT away from being live, and an
+         artefact that ships a key nobody chose is worse than one that refuses to start. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Versions come from Directory.Packages.props. A version here would be a second answer. -->
     <PackageReference Include="NodaTime" />
     <PackageReference Include="Google.Apis.Calendar.v3" />

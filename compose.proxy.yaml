@@ -1,0 +1,117 @@
+# A verification harness, and nothing anybody should deploy.
+#
+# This file exists to make two decisions observable that are invisible anywhere
+# else. Kairos is written to sit behind a TLS-terminating reverse proxy: the
+# session cookie is issued Secure unconditionally, and HSTS is sent only on a
+# request that arrived over HTTPS — which, behind such a proxy, is a fact that
+# lives entirely in X-Forwarded-Proto. Run the container on its own and every
+# request is plaintext, so neither decision can be told from its opposite. Put a
+# real proxy holding a real certificate in front of it and both can. That is the
+# whole job of this file.
+#
+# It is NOT compose.yaml. It publishes the container's own port beside the
+# proxy's so a check can bypass the hop, it carries a committed key, and it
+# trusts a proxy at a hard-coded address on a hard-coded subnet. A deployment
+# gets its own compose file; this one is a test fixture with a YAML extension.
+#
+# Run it:
+#   docker compose -f compose.proxy.yaml up -d --build
+#   curl -sD - -o /dev/null -k --resolve kairos.test:443:127.0.0.1 \
+#     https://kairos.test/healthz
+#   curl -sD - -o /dev/null -H 'Host: kairos.test' \
+#     http://localhost:8080/healthz
+#   docker compose -f compose.proxy.yaml down -v
+#
+# The SAME path both ways, and that is the whole design of the check. The two
+# requests must differ in one thing only — whether a trusted proxy forwarded a
+# scheme — so that the header that appears in one and not the other can only be
+# explained by that. An earlier version of this file used /api/v1/links/whatever
+# for the direct leg, which is a DomainException route, and at the time those
+# answered without HSTS over TLS as well; the check passed and would have gone on
+# passing with the proto gate torn out. Two hostnames, one path: vary one thing.
+#
+# It also only works on one machine at a time. The subnet below is fixed, so a
+# second copy of this harness — another worktree, a colleague's clone — fails to
+# start with "Pool overlaps with other one on this address space". Change the
+# 10.201.0 prefix everywhere it appears below, or take the other one down first.
+services:
+  kairos:
+    # Built from this repository rather than pulled: the point is to check the
+    # image this tree produces, and a tag would let it check a different one.
+    build: .
+    environment:
+      # PUBLIC, in the same sense as the key in appsettings.Development.json:
+      # committed, in every clone and every fork, and never to be set outside a
+      # harness. It is here rather than left to that file because this container
+      # runs in Production, where the file is not read — and running the harness
+      # in Development to borrow the key would relax the one thing Program.cs
+      # branches on for the environment, which is not a thing to relax under a
+      # check that exists to prove production behaviour.
+      Security__SecretKey: aGFybmVzcy1rZXktcHVibGljLW5vdC1zZWNyZXQhISE=
+
+      # Never contacted. Nothing in this harness starts a sign-in — a challenge
+      # needs an identity provider to fetch metadata from, and standing one up
+      # over plaintext would need Development for its transport. These three are
+      # present because Program.cs refuses to start without them, and their
+      # values are as fictional as they look.
+      Authentication__Authority: https://id.example.test
+      Authentication__ClientId: kairos
+      Authentication__ClientSecret: placeholder
+
+      # The address below, and the reason the subnet is fixed. UseForwardedHeaders
+      # ignores X-Forwarded-For and X-Forwarded-Proto from anybody not named here
+      # — which is the correct default and also exactly what would make this
+      # harness quietly prove nothing, since an unforwarded request looks like a
+      # plaintext one. Get it wrong and the checks fail rather than pass, which is
+      # measured: with this line removed, a request carrying a forged
+      # X-Forwarded-Proto: https comes back with no HSTS header at all.
+      Proxy__KnownProxies__0: 10.201.0.2
+    ports:
+      # Published beside the proxy on purpose: the check that HSTS is ABSENT
+      # without a forwarded hop has to be able to reach the container without
+      # going through Caddy. Loopback only, like compose.dev.yaml's provider.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - kairos-data:/var/lib/kairos
+    networks:
+      harness:
+    restart: unless-stopped
+
+  caddy:
+    # Pinned by tag AND digest, as everything else in this repository is.
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    ports:
+      - "127.0.0.1:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The local CA's key and the certificates it signs. A named volume so a
+      # restart does not mint a new authority and invalidate what a browser was
+      # told to trust; `down -v` is how you throw it away.
+      - caddy-data:/data
+    networks:
+      harness:
+        # Static, because Proxy__KnownProxies__0 above has to name it and an
+        # address handed out in start order is not a thing another file can name.
+        ipv4_address: 10.201.0.2
+    restart: unless-stopped
+
+volumes:
+  kairos-data:
+  caddy-data:
+
+networks:
+  harness:
+    ipam:
+      config:
+        # Declared rather than allocated, because the proxy's address is written
+        # into this file twice and has to be the same both times. 10.201.0.0/24
+        # is outside Docker's default pools, so fixing it takes nothing away from
+        # any other project on the machine.
+        #
+        # ip_range is what makes the static address safe: without it Docker hands
+        # out .2 to whichever container starts first, which is how the proxy came
+        # up second and was told its own address was already in use. Dynamic
+        # addresses come from the top half; the bottom half is reserved.
+        - subnet: 10.201.0.0/24
+          gateway: 10.201.0.1
+          ip_range: 10.201.0.128/25
