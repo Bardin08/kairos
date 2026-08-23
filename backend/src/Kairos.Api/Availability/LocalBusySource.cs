@@ -14,10 +14,12 @@ namespace Kairos.Api.Availability;
 /// would happily sell an hour another link already sold.
 /// </summary>
 /// <remarks>
-/// A hold is busy while its proposal is open and its expiry is in the future, and the expiry is
-/// compared here rather than trusted to the sweeper that marks lapsed rows. That is deliberate: a
-/// hold whose expiry has passed stops holding at that instant, so a sweeper that is late, dead or
-/// never started makes the mail late and never makes availability wrong.
+/// A hold is busy while its proposal is open, its expiry is in the future and the meeting behind
+/// it is still on. The expiry is compared here rather than trusted to the sweeper that marks
+/// lapsed rows, and the status is read rather than assumed closed with the booking: a hold whose
+/// expiry has passed or whose meeting was cancelled underneath it stops holding at that instant,
+/// so a sweeper that is late, dead or never started makes the mail late and never makes
+/// availability wrong.
 /// </remarks>
 public sealed class LocalBusySource(KairosDbContext context, IClock clock) : IBusySource
 {
@@ -62,6 +64,7 @@ public sealed class LocalBusySource(KairosDbContext context, IClock clock) : IBu
             from settings in context.Settings
             where settings.Id == Settings.SingletonId
                 && proposal.State == ProposalState.Open
+                && booking.Status == BookingStatus.Confirmed
                 && proposal.ExpiresAt > now
                 && (proposal.StartUtc - ((link.MarginMinutes ?? settings.MarginMinutes) * SecondsPerMinute)) < windowEnd
                 && (proposal.EndUtc + ((link.MarginMinutes ?? settings.MarginMinutes) * SecondsPerMinute)) > windowStart

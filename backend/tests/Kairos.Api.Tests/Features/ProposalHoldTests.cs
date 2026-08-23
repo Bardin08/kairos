@@ -73,6 +73,27 @@ public class ProposalHoldTests
     }
 
     /// <summary>
+    /// A hold is only as alive as the meeting under it. Nothing in this pull request closes a
+    /// proposal when its booking is cancelled, and correctness must not wait for the request that
+    /// will: an open, unexpired hold over a meeting that is off would otherwise keep its slot from
+    /// everyone for the rest of the hold window.
+    /// </summary>
+    [Fact]
+    public async Task GetSlots_AHoldOnACancelledMeeting_IsOfferedAgain()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(
+            app,
+            expiresInHours: SchedulingDefaults.ProposalHoldHours,
+            bookingStatus: BookingStatus.Cancelled);
+
+        var offered = await ReadSlotsAsync(app);
+
+        offered.ShouldContain(Held);
+    }
+
+    /// <summary>
     /// The write path's own answer, and the one that matters: BookingWriter counts clashes inside
     /// BEGIN IMMEDIATE and is the authority on what exists. A page that stopped offering the slot
     /// while the writer still accepted it would be a hold that holds nothing under contention.
@@ -96,6 +117,24 @@ public class ProposalHoldTests
         using var app = new KairosApp();
         SeedLink(app);
         SeedProposal(app, expiresInHours: HoursAlreadyLapsed);
+
+        WriteAsync(app).Success.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The same question at the writer, which is the authority. Its own test rather than a second
+    /// assertion on the one above, because the two readers share no line and a single test would
+    /// not say which of them let the dead hold through.
+    /// </summary>
+    [Fact]
+    public void TryCreate_AHoldOnACancelledMeeting_IsAccepted()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(
+            app,
+            expiresInHours: SchedulingDefaults.ProposalHoldHours,
+            bookingStatus: BookingStatus.Cancelled);
 
         WriteAsync(app).Success.ShouldBeTrue();
     }
@@ -168,7 +207,10 @@ public class ProposalHoldTests
     /// is elsewhere on purpose: what is being asserted is that the HOLD removes the slot, and a
     /// booking in the same place would remove it whether the hold worked or not.
     /// </summary>
-    private static void SeedProposal(KairosApp app, long expiresInHours) => app.Seed(context =>
+    private static void SeedProposal(
+        KairosApp app,
+        long expiresInHours,
+        BookingStatus bookingStatus = BookingStatus.Confirmed) => app.Seed(context =>
     {
         var link = context.Links.Single(candidate => candidate.Slug == Slug);
         var elsewhere = InstantPattern.ExtendedIso.Parse($"{Day}{ElsewhereTime}").Value.ToUnixTimeSeconds();
@@ -181,7 +223,7 @@ public class ProposalHoldTests
             LinkId = link.Id,
             StartUtc = elsewhere,
             EndUtc = elsewhere + (DurationMinutes * SecondsPerMinute),
-            Status = BookingStatus.Confirmed,
+            Status = bookingStatus,
             ManageTokenHash = Guid.CreateVersion7().ToString("N"),
             CreatedAt = now,
             Participants =

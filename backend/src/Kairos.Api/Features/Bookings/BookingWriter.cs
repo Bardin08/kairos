@@ -108,6 +108,8 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
             // The second term is the proposal hold. Its expiry is compared against the clock here
             // rather than against a row the sweeper has marked, for the reason LocalBusySource
             // gives: a hold that has lapsed must stop holding whether or not anything has run.
+            // The meeting behind it has to still be on for the same reason — a proposal left open
+            // over a booking cancelled underneath it would hold a slot for a meeting that is off.
             var clashes = context.Database.SqlQuery<int>($"""
                 SELECT
                   (SELECT COUNT(*)
@@ -124,6 +126,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
                    JOIN Links pl ON pl.Id = pb.LinkId
                    LEFT JOIN Settings ps ON ps.Id = {Settings.SingletonId}
                    WHERE p.State = {openProposal}
+                     AND pb.Status = {ConfirmedStatus}
                      AND p.ExpiresAt > {now}
                      AND p.StartUtc - (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
                      AND p.EndUtc   + (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc})
