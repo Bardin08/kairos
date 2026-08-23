@@ -15,6 +15,16 @@ namespace Kairos.Api.Tests.Features;
 /// descriptions of the same world drift, and the cross-link margin rule is exactly the thing that
 /// stops being tested when they do.
 /// </summary>
+/// <remarks>
+/// <see cref="MeetingsAdminTests"/> keeps its own seed and is deliberately not folded into this
+/// one. Its world differs in four ways, and every one of them is load-bearing for what that suite
+/// asserts: meetings are 25 minutes rather than 30, the booker reads them in <c>Asia/Tokyo</c>
+/// rather than <c>Europe/Warsaw</c> — the point being a zone that is not the organizer's UTC —
+/// the pattern opens Monday alone rather than all seven days, and its bookings sit on three fixed
+/// consecutive days its range filter tests assert on both edges of. Merging the two would not
+/// remove a duplicate; it would change what those tests mean, which is worse than two fixtures.
+/// This world is instead the one <see cref="ProposalHoldTests"/> seeds, widened by a second link.
+/// </remarks>
 public static class MeetingsFixture
 {
     public const string Slug = "consulting";
