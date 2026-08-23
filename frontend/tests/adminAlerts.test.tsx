@@ -138,3 +138,18 @@ test('a refused alerts read leaves the shell standing and draws no indicator', a
   await waitFor(() => expect(screen.getAllByText('Links').length).toBeGreaterThan(0))
   expect(container.querySelector('.alertpanel')).toBeNull()
 })
+
+// The shell mounts the panel twice — the rail and the tab bar are both always
+// rendered, and kairos.css picks which one is seen. A literal id would therefore
+// be in the document twice, and every aria-controls pointing at it ambiguous.
+test('two mounted panels do not share one element id', async () => {
+  vi.mocked(getAlerts).mockResolvedValue([reconnect])
+
+  renderShell('/admin/links')
+
+  const triggers = await screen.findAllByLabelText(/problem needs attention/)
+  expect(triggers.length).toBeGreaterThan(1)
+
+  const targets = triggers.map((trigger) => trigger.getAttribute('aria-controls'))
+  expect(new Set(targets).size).toBe(targets.length)
+})

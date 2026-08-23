@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 import AlertIcon from '../../components/AlertIcon'
 import type { Alert } from './adminAlerts'
@@ -60,6 +60,12 @@ function lastWorked(since: string | null): string | null {
 export default function AlertPanel({ alerts }: { alerts: Alert[] }) {
   const [open, setOpen] = useState(false)
 
+  // Per instance, not a constant. AdminShell mounts this twice — once in the
+  // rail and once in the tab bar, because kairos.css decides which of the two is
+  // drawn and both are always rendered — so a literal id would be in the
+  // document twice and every `aria-controls` pointing at it would be ambiguous.
+  const listId = useId()
+
   if (alerts.length === 0) return null
 
   const label = `${alerts.length} ${alerts.length === 1 ? 'problem needs' : 'problems need'} attention`
@@ -73,7 +79,7 @@ export default function AlertPanel({ alerts }: { alerts: Alert[] }) {
         type="button"
         className="icon-btn"
         aria-expanded={open}
-        aria-controls="alertpanel-list"
+        aria-controls={listId}
         aria-label={label}
         onClick={() => setOpen(!open)}
       >
@@ -83,7 +89,7 @@ export default function AlertPanel({ alerts }: { alerts: Alert[] }) {
 
       {/* Announced without stealing focus: the operator may be typing in the
           editor when a page load discovers this. */}
-      <div id="alertpanel-list" role="status" aria-live="polite" hidden={!open}>
+      <div id={listId} role="status" aria-live="polite" hidden={!open}>
         {open && (
           <div className="card card-pad-sm">
             <div className="rowgroup">
