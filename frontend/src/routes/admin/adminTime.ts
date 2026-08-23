@@ -1,20 +1,17 @@
 // The calendar helpers only the workbench uses.
 //
-// Here rather than in lib/time.ts for the same measured reason adminMeetings.ts
-// exists beside it: lib/time.ts is imported by the booking page, so a helper
-// left in it ships in the entry chunk even when nothing an invitee can reach
-// calls it — Rollup shakes out an export nobody imports, but not one a lazy
-// chunk imports, because the module it lives in is already in the eager graph.
-// Every one of these is the workbench's alone. Anything the booking page also
-// needs belongs back in lib/time.ts, whose header explains the two vocabularies
-// these follow: an INSTANT is what the API speaks, a DATE KEY is a civil date
-// with no zone of its own.
+// Here rather than in lib/time.ts, which the booking page imports: a helper left
+// there ships in the entry chunk even when nothing an invitee can reach calls it
+// — Rollup shakes out an export nobody imports, but not one a lazy chunk
+// imports, because the module it lives in is already in the eager graph.
+// Anything the booking page also needs belongs back in lib/time.ts, whose header
+// defines the two vocabularies these follow: an INSTANT is what the API speaks,
+// a DATE KEY is a civil date with no zone of its own.
 //
-// A third vocabulary starts here and nowhere else: a MINUTE OF DAY, which is
-// what an availability rule holds — minutes from local midnight in the
-// organizer's zone, with no date attached and therefore no instant to derive.
-// A DRAFT is the same window while it is still in a form, and the two travel
-// together: everything that turns one into the other is below.
+// A third vocabulary starts here: a MINUTE OF DAY, which is what an availability
+// rule holds — minutes from local midnight in the organizer's zone, with no date
+// attached and therefore no instant to derive. A DRAFT is the same window while
+// it is still in a form, and everything that turns one into the other is below.
 
 const LOCALE = 'en-GB'
 const START_OF_DAY = 'T00:00:00Z'
@@ -35,11 +32,10 @@ export function shortMonth(day: string): string {
 }
 
 /**
- * The date key `delta` days from this one. Negative goes back.
- *
- * Days rather than milliseconds: `setUTCDate` rolls the month and the year on
- * its own, and the key it produces is a civil date with no zone, so a clock
- * that shifted an hour in between cannot move it.
+ * The date key `delta` days from this one. Negative goes back. Days rather than
+ * milliseconds: `setUTCDate` rolls the month and the year on its own, and the
+ * key it produces is a civil date with no zone, so a clock that shifted an hour
+ * in between cannot move it.
  */
 export function shiftDays(day: string, delta: number): string {
   const date = new Date(day + START_OF_DAY)
@@ -55,11 +51,10 @@ export function clock(minuteOfDay: number): string {
 }
 
 /**
- * `09:00` → `540`, and null for anything else.
- *
- * `<input type="time">` answers with an empty string until it is filled in, so
- * null is "not stated yet" — which is what keeps a half-typed window out of the
- * request rather than out of the field.
+ * `09:00` → `540`, and null for anything else. `<input type="time">` answers
+ * with an empty string until it is filled in, so null is "not stated yet" —
+ * which keeps a half-typed window out of the request rather than out of the
+ * field.
  */
 export function minuteOfDay(value: string): number | null {
   const match = /^(\d{2}):(\d{2})$/.exec(value)
@@ -82,21 +77,18 @@ export type Draft = { start: string; end: string }
 /**
  * What Add window adds, and what a day with nothing to borrow opens on.
  *
- * Empty rather than a working nine-to-five, and that is a safety property
- * rather than an omission: hours nobody typed are hours nobody chose to offer,
- * and a default window on a day that already has one would also be an overlap
- * the server exists to refuse.
+ * Empty rather than a working nine-to-five, which is a safety property: hours
+ * nobody typed are hours nobody chose to offer, and a default window on a day
+ * that already has one would be an overlap the server exists to refuse.
  */
 export const BLANK: Draft = { start: '', end: '' }
 
 /**
- * The minutes a set of drafts would send, or null while any window in it is
- * unfinished.
- *
- * Order is kept, so the request reads the way the screen does and a refusal
- * naming a window can be found on it. A set with nothing in it is a set, not a
- * failure — what an empty one means is the caller's question, and the week pane
- * and the date panel answer it differently.
+ * The minutes a set of drafts would send, or null while any window is
+ * unfinished. Order is kept, so the request reads the way the screen does and a
+ * refusal naming a window can be found on it. A set with nothing in it is a set,
+ * not a failure — what an empty one means is the caller's question, and the week
+ * pane and the date panel answer it differently.
  */
 export function windowsOf(
   drafts: readonly Draft[],
