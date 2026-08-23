@@ -3,15 +3,13 @@ import type { Alert } from './adminAlerts'
 import { copyFor, lastWorked } from './conditionCopy'
 
 /**
- * The loud state of the condition surface: what is broken, said where the operator
- * is already reading.
+ * The loud state of the condition surface: what is broken, said where the
+ * operator is already reading.
  *
- * In the content column rather than anchored to a control in the rail, and that is
- * the whole reason it replaced a popover: the content column exists at every
- * width, so the phone layout needs no second design and nothing has to escape a
- * scroll container to be legible.
- *
- * Nothing is rendered when nothing is wrong.
+ * In the content column rather than anchored to a control in the rail, which is
+ * why it replaced a popover: the content column exists at every width, so the
+ * phone layout needs no second design and nothing has to escape a scroll
+ * container to be legible. Nothing is rendered when nothing is wrong.
  */
 export default function ConditionBanner({
   alerts,
@@ -32,8 +30,8 @@ export default function ConditionBanner({
           <div
             // `status` and `polite`, never `alert` and assertive: this is a
             // condition that has usually been true for minutes already, and
-            // interrupting whatever the operator is typing to say so would be the
-            // wrong trade.
+            // interrupting whatever the operator is typing would be the wrong
+            // trade.
             role="status"
             aria-live="polite"
             className="banner"

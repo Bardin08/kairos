@@ -4,9 +4,9 @@ import AlertIcon from '../../components/AlertIcon'
  * The quiet state of the condition surface: a marker that something is still
  * wrong, in the rail on desktop and beside Settings on a phone.
  *
- * It says a count rather than a provider name. At two conditions a name would have
- * to pick one, and this control's only job is to say there is something and to get
- * the operator back to the sentence that explains it.
+ * It says a count rather than a provider name — at two conditions a name would
+ * have to pick one, and this control's only job is to get the operator back to
+ * the sentence that explains it.
  *
  * A button and not a link: it expands the banner, it does not navigate. That is
  * also why it cannot reuse `.nav a`, whose every rule is written for anchors.

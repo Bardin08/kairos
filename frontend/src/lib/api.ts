@@ -278,11 +278,9 @@ export function rescheduleBooking(
 }
 
 /**
- * What the invitee is being asked, and what they would be leaving.
- *
- * Every instant here is the ORGANIZER's calendar, which is why `timeZone`
- * travels with them: a column of times belonging to nobody in particular is how
- * a call gets missed.
+ * What the invitee is being asked, and what they would be leaving. Every instant
+ * here is the ORGANIZER's calendar, which is why `timeZone` travels with them: a
+ * column of times belonging to nobody in particular is how a call gets missed.
  */
 export type Proposal = {
   bookingId: string
@@ -297,13 +295,11 @@ export type Proposal = {
   /** The ORGANIZER's zone, the one every time on the page is drawn in. */
   timeZone: string
   /**
-   * `open`, `accepted`, `declined`, `expired` or `withdrawn`.
-   *
-   * The server folds the clock into this: a hold whose expiry has passed reads
-   * `expired` whether or not anything has been round to mark it. Nothing on the
-   * client re-derives that — the expiry is the organizer's clock, not the
-   * browser's, and a second opinion about it would draw Accept over a
-   * suggestion that will refuse it.
+   * `open`, `accepted`, `declined`, `expired` or `withdrawn`. The server folds
+   * the clock into this: a hold whose expiry has passed reads `expired` whether
+   * or not anything has marked it. Nothing on the client re-derives that — the
+   * expiry is the organizer's clock, and a second opinion would draw Accept over
+   * a suggestion that will refuse it.
    */
   state: string
 }
@@ -314,11 +310,9 @@ export function getProposal(token: string, signal?: AbortSignal): Promise<Propos
 }
 
 /**
- * Moves the meeting, and answers the booking as it now stands.
- *
- * 409 if somebody already answered or if the hold lapsed — the two are separate
- * codes on the wire and neither is worth a separate sentence to a reader, since
- * what to do about both is to look at where things now stand.
+ * Moves the meeting, and answers the booking as it now stands. 409 if somebody
+ * already answered or if the hold lapsed — separate codes on the wire, but the
+ * reader does the same thing about both: look at where things now stand.
  */
 export function acceptProposal(token: string, signal?: AbortSignal): Promise<Booking> {
   return post<Booking>(`/bookings/proposals/${encodeURIComponent(token)}/accept`, undefined, signal)

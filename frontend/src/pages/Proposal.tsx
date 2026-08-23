@@ -15,9 +15,8 @@ const NOT_FOUND = 404
 
 // The lower-cased ProposalState the API answers with. Only `open` is a question
 // still being asked; the rest are outcomes, and `outcome` below gives each its
-// own sentence because they are not the same thing having happened — telling
-// somebody who let a suggestion lapse that they declined it is the failure that
-// separation exists to avoid.
+// own sentence — telling somebody who let a suggestion lapse that they declined
+// it is the failure that separation exists to avoid.
 const OPEN = 'open'
 const ACCEPTED = 'accepted'
 const DECLINED = 'declined'
@@ -38,10 +37,9 @@ function when(start: string, end: string, zone: string): string {
  * `Monday 9 September, 14:00` — the moment the hold runs out, to the minute.
  *
  * The date alone would be a lie by omission. `ExpiresAt` is the mint time plus
- * the hold in hours, so it lands on whatever clock time the operator happened
- * to press the button at, and the mail that sent the invitee here prints both
- * halves. "By Monday 9 September" read at 18:00 says an offer that died at
- * 14:00 is still open.
+ * the hold in hours, so it lands on whatever clock time the operator pressed the
+ * button at, and the mail prints both halves. "By Monday 9 September" read at
+ * 18:00 says an offer that died at 14:00 is still open.
  */
 function moment(instant: string, zone: string): string {
   return `${longDate(zonedDate(instant, zone))}, ${zonedTime(instant, zone)}`
@@ -58,9 +56,8 @@ function outcome(state: string): string {
       return 'Nobody answered in time, so this suggestion lapsed and the meeting stays where it is.'
     default:
       // `withdrawn`, and anything a later version of the API adds. The operator
-      // took it back, or an accept failed its re-check and put everything back
-      // — from here both are "this is no longer on offer", and neither is an
-      // answer the invitee gave.
+      // took it back, or an accept failed its re-check — from here both are
+      // "this is no longer on offer", and neither is an answer the invitee gave.
       return 'This suggestion is no longer on offer, so the meeting stays where it is.'
   }
 }
@@ -78,10 +75,9 @@ function Page({ children }: { children: ReactNode }) {
  * The page the invitee opens from "a new time is suggested".
  *
  * Its own route rather than a panel on the manage page, because the token is a
- * different token: this one answers one question and dies, and it cannot be
+ * different token: this one answers one question and dies, and cannot be
  * replayed to cancel the meeting. The path is BookingMailer.ProposalPath — the
- * mail is the only place this URL is ever built, so the two have to agree or
- * nothing is answerable.
+ * mail is the only place this URL is built, so the two have to agree.
  */
 export default function Proposal() {
   const { token } = useParams()
@@ -89,15 +85,13 @@ export default function Proposal() {
   const [offer, setOffer] = useState<Offer | null>(null)
   // WHICH answer is in flight, not merely that one is. `data-loading` blanks a
   // button's label and takes its pointer events, so marking both would leave the
-  // invitee looking at two pending actions with no way to tell which decision
-  // they had just made.
+  // invitee looking at two pending actions with no way to tell them apart.
   const [running, setRunning] = useState<'accept' | 'decline' | null>(null)
   const [message, setMessage] = useState('')
-  // Focus lands here when an answer replaces the question. On a server-rendered
-  // page the navigation would have moved it; in an SPA nothing does unless it is
-  // written, and this is the one transition an invitee causes on this page.
-  // Only for an answer given HERE — a page that loads already-declined must not
-  // steal focus from a reader who has only just arrived.
+  // Focus lands here when an answer replaces the question: on a server-rendered
+  // page the navigation would have moved it, and in an SPA nothing does unless
+  // it is written. Only for an answer given HERE — a page that loads
+  // already-declined must not steal focus from a reader who has just arrived.
   const outcomeRef = useRef<HTMLParagraphElement>(null)
   const answeredHere = useRef(false)
 
@@ -116,8 +110,7 @@ export default function Proposal() {
       .catch((error: unknown) => {
         // Only a 404 is "this link leads nowhere". A 500 or a dropped
         // connection rendered as one would tell an invitee the suggestion is
-        // gone while it sits there intact, waiting for the answer they came to
-        // give.
+        // gone while it sits there intact.
         if (!controller.signal.aborted) {
           setPhase(asApiError(error).status === NOT_FOUND ? 'missing' : 'broken')
         }
@@ -138,9 +131,8 @@ export default function Proposal() {
       if (accepting) {
         await acceptProposal(token)
         // The accept answers with the BOOKING, not the proposal — it is the
-        // booking that changed. The state is set here rather than read back so
-        // the page does not need a second round trip to stop offering a
-        // question it has just had answered.
+        // booking that changed. The state is set here rather than read back, so
+        // the page needs no second round trip to stop offering the question.
         setOffer((current) => (current === null ? current : { ...current, state: ACCEPTED }))
       } else {
         setOffer(await declineProposal(token))
@@ -148,9 +140,8 @@ export default function Proposal() {
       answeredHere.current = true
     } catch {
       // A 409 means somebody answered or the hold lapsed while this page sat
-      // open, and both are answered by what a reload shows rather than by a
-      // sentence guessing which. The buttons stay armed either way: nothing was
-      // recorded, so a page that disarmed them would be a dead end.
+      // open, and both are answered by what a reload shows. The buttons stay
+      // armed either way: nothing was recorded, so disarming them is a dead end.
       setMessage('That could not be recorded. Reload the page to see where things stand.')
     } finally {
       setRunning(null)
@@ -189,11 +180,10 @@ export default function Proposal() {
     )
   }
 
-  // The INVITEE's own zone, the one the proposal mail formatted against and the
-  // one the manage page for this same booking uses. Empty only for a booking
-  // carrying no booker at all, and then the browser's rather than the
-  // organizer's — `Intl` throws a RangeError on an empty zone, and here that
-  // would happen during render and take the whole page down over one bad row.
+  // The INVITEE's own zone, the one the proposal mail formatted against. Empty
+  // only for a booking carrying no booker at all, and then the browser's rather
+  // than the organizer's — `Intl` throws a RangeError on an empty zone, and here
+  // that would happen during render and take the whole page down over one row.
   const zone = offer.timeZone === '' ? localZone() : offer.timeZone
 
   if (offer.state !== OPEN) {
@@ -252,9 +242,8 @@ export default function Proposal() {
       <div className="row gap-2 wrap mt-5">
         {/* `disabled` as well as `data-loading`, and they are not the same guard.
             The attribute is a look — the stylesheet blanks the label and drops
-            pointer events — which a keyboard still fires Space through and a
-            screen reader says nothing about. `disabled` is the part that
-            actually stops the second answer and gets announced. */}
+            pointer events — which a keyboard still fires Space through.
+            `disabled` is the part that actually stops the second answer. */}
         <button
           className="btn btn-primary"
           type="button"

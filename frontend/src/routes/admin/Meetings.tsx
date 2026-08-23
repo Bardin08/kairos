@@ -133,9 +133,8 @@ export default function Meetings() {
   const [zone, setZone] = useState(localZone)
   // Which meeting the operator is choosing a time for, if any. The picker is a
   // whole screen rather than a panel in the Actions cell — see ProposePanel for
-  // the measurement that decided it — so the page owns the state and the row
-  // only asks. The meeting itself rather than its id: the picker needs the slug
-  // and the length, and the row already has both in hand.
+  // the measurement — so the page owns the state and the row only asks. The
+  // meeting itself rather than its id: the picker needs the slug and the length.
   const [proposing, setProposing] = useState<Meeting | null>(null)
 
   useEffect(() => {

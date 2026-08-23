@@ -4,15 +4,13 @@ import { shortDate, zonedDate, zonedTime } from '../../lib/time'
 import { cancelMeeting, withdrawProposal, type Meeting, type MeetingProposal } from './adminMeetings'
 import Failure from './Failure'
 
-// Which panel this row has open. Cancel is destructive and cannot be undone
-// from here, so it goes through `confirm` first — a panel rather than a modal,
-// because nothing here needs interrupting or protected focus. The same shape
-// the invitee's manage page uses for the same decision.
+// Which panel this row has open. Cancel is destructive and cannot be undone from
+// here, so it goes through `confirm` first — a panel rather than a modal,
+// because nothing here needs interrupting or protected focus.
 //
-// Proposing is deliberately NOT a third value. Picking a time needs a month
-// grid and a column of slots, and a browser measurement showed those do not fit
-// this cell at any desktop width — so `ProposePanel` swaps in over the whole
-// list, the way LinkEditor does, and this component only asks for it.
+// Proposing is deliberately NOT a third value. Picking a time needs a month grid
+// and a column of slots, and a browser measurement showed those do not fit this
+// cell at any desktop width — so `ProposePanel` swaps in over the whole list.
 type Panel = 'none' | 'confirm'
 
 // `CancelMeetingRequest.MaxReasonLength` on the server, which answers 400 above
@@ -22,9 +20,8 @@ const MAX_REASON = 2000
 
 // The one proposal state that is still a question. Everything else has been
 // answered, has lapsed or was taken back, and the row's answer to all of those
-// is to offer a fresh suggestion rather than to withdraw a closed one. The
-// server folds the clock into this word, so a hold whose expiry has passed
-// arrives as `expired` with nothing having swept it.
+// is a fresh suggestion rather than a withdrawal. The server folds the clock
+// into this word, so a hold whose expiry has passed arrives as `expired`.
 const OPEN = 'open'
 
 const DECLINED = 'declined'
@@ -33,11 +30,10 @@ const EXPIRED = 'expired'
 /**
  * What became of a closed suggestion, or null when there is nothing to report.
  *
- * A refusal and a silence are two different facts about the invitee and they
- * decide different things — whether the operator chases them — so one sentence
- * for both would be worse than saying nothing. `withdrawn` is silent on purpose:
- * the operator took it back themselves, and reporting somebody's own action
- * back to them is noise on a row that has other news to carry.
+ * A refusal and a silence are two different facts about the invitee and decide
+ * different things — whether the operator chases them — so one sentence for both
+ * would be worse than saying nothing. `withdrawn` is silent on purpose: the
+ * operator took it back themselves.
  */
 function outcome(proposal: MeetingProposal | null): string | null {
   if (proposal === null) return null
@@ -66,11 +62,9 @@ export default function MeetingActions({
   const [panel, setPanel] = useState<Panel>('none')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
-  // The error itself and not a sentence made from it: `Failure` reads the
-  // status and the code off it, and a 400 from the length bound, a 503 that
-  // changed nothing and a dead network are three different things to do next.
-  // One generic line for all three tells the operator to retry the one thing
-  // retrying cannot fix.
+  // The error itself and not a sentence made from it: `Failure` reads the status
+  // and the code off it, and a 400 from the length bound, a 503 that changed
+  // nothing and a dead network are three different things to do next.
   const [failure, setFailure] = useState<unknown>(null)
   // One row's field among many on the page, so the id cannot be written down.
   const reasonId = useId()
@@ -159,8 +153,7 @@ export default function MeetingActions({
         </p>
         {/* To the minute, because the hold is minted-plus-hours and lands on an
             arbitrary clock time — and because the mail the invitee is reading
-            says the same instant to the minute. A date alone would let an
-            operator think they had until the end of that day. */}
+            says the same instant to the minute. */}
         <p className="record-meta numeric">
           Lapses {shortDate(zonedDate(proposal.expiresAt, zone))},{' '}
           {zonedTime(proposal.expiresAt, zone)}
@@ -171,10 +164,9 @@ export default function MeetingActions({
             Withdraw
           </button>
           {/* Cancel stays. An open hold replaces PROPOSE, never the ability to
-              call the meeting off — every confirmed row could be cancelled
-              before this feature existed, and a branch that returned early
-              without it made the operator withdraw a suggestion first with
-              nothing on the row saying so. */}
+              call the meeting off — a branch that returned early without it made
+              the operator withdraw a suggestion first, with nothing on the row
+              saying so. */}
           <button
             className="btn btn-ghost btn-danger"
             type="button"
@@ -192,10 +184,9 @@ export default function MeetingActions({
   return (
     <div className="group">
       {/* What became of the last suggestion, next to the button that makes
-          another one — which is the operator's usual next move after either.
-          It is here rather than beside the meeting's own status because the
-          meeting's status did not change: a refused or lapsed suggestion leaves
-          a confirmed meeting exactly where it was. */}
+          another one. It is here rather than beside the meeting's own status
+          because that status did not change: a refused or lapsed suggestion
+          leaves a confirmed meeting exactly where it was. */}
       {news !== null && <p className="record-meta">{news}</p>}
       <Failure error={failure} />
       <div className="row gap-2 wrap">
