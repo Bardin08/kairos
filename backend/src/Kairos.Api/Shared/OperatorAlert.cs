@@ -4,7 +4,7 @@ namespace Kairos.Api.Shared;
 
 /// <summary>
 /// One thing the operator has to know about, from anywhere in the application. Provider- and
-/// feature-neutral: a stalled outbox would publish to it without the screen learning anything.
+/// feature-neutral: a stalled outbox would publish to it and the screen would not learn anything.
 /// </summary>
 /// <param name="Code">Machine-readable, never a sentence: the screen turns codes into copy.</param>
 /// <param name="Severity">One of <see cref="AlertSeverity"/>.</param>
@@ -15,8 +15,8 @@ namespace Kairos.Api.Shared;
 /// <see cref="Features.Admin.AlertsAdminEndpoints"/> refuses another origin. Null if nothing to press.
 /// </param>
 /// <param name="Details">
-/// What the copy interpolates and the fixed fields cannot hold — a label, a count, a recipient.
-/// Three rules keep it from becoming a second untyped API:
+/// What the copy interpolates and the fixed fields cannot hold. Three rules keep it from becoming a
+/// second untyped API:
 /// <list type="number">
 /// <item>Labels, codes and numbers, never prose, which <paramref name="Code"/> exists to prevent.</item>
 /// <item>Never a secret, or anything derived from one. The only reader is a browser.</item>

@@ -150,13 +150,12 @@ public sealed class SlotGenerator
     /// </summary>
     /// <remarks>
     /// A ZoneInterval is a maximal run of constant offset, so two probes landing in an equal one
-    /// prove no transition between them. They bracket local midnight a day behind and two ahead,
+    /// prove no transition between them; they bracket local midnight a day behind and two ahead,
     /// covering the local day for any real offset (widest ±14h). Inside one interval MapLocal
-    /// returns exactly <c>local.WithOffset(offset)</c> — the same answer, not an approximation.
-    /// Verified against MapLocal over 10.8M candidates across 9 zones, Lord Howe's half-hour shift
-    /// and Chatham's +12:45 included, with no disagreement. Value equality, not reference: equal
-    /// ZoneIntervals share a Start and an End, and NodaTime returns equal-but-distinct instances
-    /// often enough that ReferenceEquals drops 6% of ordinary days onto the slow path.
+    /// returns exactly <c>local.WithOffset(offset)</c>, so this is the same answer. Verified over
+    /// 10.8M candidates across 9 zones, Lord Howe and Chatham included, with no disagreement. Value
+    /// equality, not reference: NodaTime returns equal-but-distinct instances often enough that
+    /// ReferenceEquals drops 6% of ordinary days onto the slow path.
     /// </remarks>
     private static Offset? ConstantOffsetFor(LocalDate date, DateTimeZone zone)
     {

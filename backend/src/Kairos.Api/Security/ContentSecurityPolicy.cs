@@ -7,22 +7,20 @@ using Microsoft.Extensions.FileProviders;
 namespace Kairos.Api.Security;
 
 /// <summary>
-/// What the single page is allowed to load and run, written once at startup from the page on disk.
-/// Everything Kairos serves is same-origin — vendored fonts and stylesheet, no fetch but its own
-/// API — so every directive is <c>'self'</c> or narrower and only the inline script needs naming.
+/// What the single page may load and run, read once at startup from the page on disk. Everything
+/// Kairos serves is same-origin, so every directive is <c>'self'</c> or narrower and only the
+/// inline script needs naming.
 /// </summary>
 /// <remarks>
 /// The hash is computed, not baked in: a constant goes wrong the first time somebody edits that
-/// script, quietly — the browser refuses it, the pre-paint theme read never runs, the page flashes
-/// the wrong theme, nothing logged. Once at startup, since a build writes that page and this
-/// process does not.
+/// script, and quietly — the browser refuses it, the pre-paint theme read never runs, the page
+/// flashes the wrong theme, nothing logged.
 /// </remarks>
 /// <remarks>
 /// No <c>report-to</c> and no <c>report-uri</c>, decided rather than overlooked: a reporting
 /// endpoint is an unauthenticated write route taking JSON from any browser that ever loaded this
-/// origin, to be rate-limited, bounded and read by somebody — a task, not a directive. Of the two
-/// silent failures it covers, the hash drifting is closed above and a too-tight directive shows up
-/// in a console. It would arrive with its own route and retention.
+/// origin, to be rate-limited, bounded and read by somebody — a task, not a directive. The hash
+/// drifting is closed above, and a too-tight directive shows up in a console.
 /// </remarks>
 public static partial class ContentSecurityPolicy
 {

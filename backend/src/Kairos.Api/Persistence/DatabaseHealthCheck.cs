@@ -14,16 +14,14 @@ namespace Kairos.Api.Persistence;
 /// integration screen.
 /// <para>
 /// A table is queried rather than <c>CanConnectAsync</c>: on SQLite the provider CREATES the file
-/// it is pointed at, so connecting to a database deleted out from under the process opens happily
-/// and reports a healthy, empty one. Only a query through the schema tells the two apart. Pending
-/// migrations are deliberately not part of the answer — <c>Program.cs</c> migrates before
-/// <c>app.Run()</c>, so anything left to apply means this endpoint is never served.
+/// it points at, so connecting to a deleted database opens happily and reports a healthy, empty
+/// one. Pending migrations are deliberately not part of the answer — <c>Program.cs</c> migrates
+/// before <c>app.Run()</c>, so anything left to apply means this endpoint is never served.
 /// </para>
 /// <para>
 /// A busy database is degraded, not unready — the same call
-/// <see cref="Shared.DatabaseBusyExceptionHandler"/> made the other way. SQLITE_BUSY is a queue: the
-/// read that timed out succeeds a moment later, and unready would pull the one replica out of
-/// rotation over contention while it still answers reads.
+/// <see cref="Shared.DatabaseBusyExceptionHandler"/> made the other way. SQLITE_BUSY is a queue, and
+/// unready would pull the one replica out of rotation over contention it still answers through.
 /// </para>
 /// </remarks>
 public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck

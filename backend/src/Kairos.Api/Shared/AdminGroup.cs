@@ -16,16 +16,16 @@ public static class AdminGroup
     /// <item><c>GET /admin/logout</c> — the sign-out, a redirect for the same reason.</item>
     /// <item><c>GET /api/v1/integrations/{provider}/callback</c> — the OAuth return leg, its path
     /// registered byte-for-byte with the provider and its caller holding that provider's redirect
-    /// rather than our session. Signed <c>state</c> guards it: without one a caller buys an HMAC
-    /// check and a log line, never an outbound request.</item>
+    /// rather than our session. Signed <c>state</c> guards it: without one, an HMAC check and a log
+    /// line, never an outbound request.</item>
     /// <item><c>GET /api/v1/sign-in</c> — where to sign in, for a browser just refused; behind the
     /// gate it would 401 at the one reader it exists for. One configured string, no database. See
     /// <see cref="Features.Admin.SignInEndpoints"/>.</item>
     /// <item><c>/healthz</c> — liveness, GET and HEAD only, running no check at all. Anonymous
     /// because a kubelet holds no session.</item>
     /// <item><c>/readyz</c> — readiness, one existence query on a single-row table. Both probes are
-    /// polled on a fixed interval and refusing one restarts a working pod; both sit outside the
-    /// version prefix too, their paths being in a manifest a version bump must not move. See
+    /// polled on a fixed interval, refusing one restarts a working pod, and both sit outside the
+    /// version prefix, their paths being in a manifest a version bump must not move. See
     /// <see cref="HealthEndpoints"/>.</item>
     /// </list>
     /// <para>
