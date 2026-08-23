@@ -22,9 +22,6 @@ public sealed record AlertResponse(
     IReadOnlyDictionary<string, string> Details);
 
 /// <summary>
-/// Everything the operator has to know about, from every publisher, in one read.
-/// </summary>
-/// <remarks>
 /// <para>
 /// On the admin group like every other admin route, so ground rule 19's access decision is stated
 /// where the group is built and rule 20's rate-limit answer is the group's argued "none". The shell
@@ -32,19 +29,17 @@ public sealed record AlertResponse(
 /// without a poll or a socket.
 /// </para>
 /// <para>
-/// Sources are collected in registration order and the result is ordered by severity alone.
-/// Deliberately not by <see cref="OperatorAlert.Since"/>: a fault with no known last success would
-/// sort either first or last depending on how null is treated, and neither is a claim this can
-/// make honestly.
+/// Ordered by severity alone, deliberately not by <see cref="OperatorAlert.Since"/>: a fault with
+/// no known last success would sort first or last depending on how null is treated, and neither is
+/// a claim this can make honestly.
 /// </para>
-/// </remarks>
+/// </summary>
 public static class AlertsAdminEndpoints
 {
     /// <summary>Errors before warnings, and nothing else decides the order.</summary>
     private const int ErrorRank = 0;
     private const int WarningRank = 1;
 
-    /// <summary>What a link this will hand a browser has to start with.</summary>
     private const char PathRoot = '/';
 
     public static RouteGroupBuilder MapAlertsAdmin(this RouteGroupBuilder group)

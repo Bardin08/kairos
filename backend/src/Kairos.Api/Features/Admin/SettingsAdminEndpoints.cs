@@ -14,13 +14,10 @@ namespace Kairos.Api.Features.Admin;
 
 /// <summary>
 /// How many links have written their own value for each of the four, and therefore how many will
-/// ignore a change to the global beside it.
+/// ignore a change to the global beside it. Counted rather than named: the question asked while
+/// changing a global is "will this reach anything?", and the links screen one door away already
+/// says which limits are its own.
 /// </summary>
-/// <remarks>
-/// Counted rather than named. The links themselves are one screen away and already say which of
-/// their limits are their own; what this answers is the question asked while changing a global —
-/// "will this actually reach anything?" — and a count answers it in a word.
-/// </remarks>
 public sealed record OverrideCountsResponse(
     int MarginMinutes,
     int MinNoticeMinutes,
@@ -33,15 +30,14 @@ public sealed record OverrideCountsResponse(
 /// </summary>
 /// <remarks>
 /// <para>
-/// The four limits are the globals themselves, so they are plain <c>int</c> and never nullable.
-/// This is the level a link's null inherits from; a nullable field here would imply a level above
-/// the global that does not exist.
+/// The four limits are plain <c>int</c> and never nullable: this is the level a link's null
+/// inherits from, and a nullable field here would imply a level above the global that does not
+/// exist.
 /// </para>
 /// <para>
-/// <see cref="SignedInAs"/> is the operator's name as the identity provider gave it, and null when
-/// it gave none — Kairos never invents one. It rides on this response rather than on a route of
-/// its own because the workbench asks both questions in the same breath when it opens, and a
-/// second route to answer one string is a route with no other reader.
+/// <see cref="SignedInAs"/> is the operator's name as the identity provider gave it, null when it
+/// gave none. It rides on this response because the workbench asks both questions in the same
+/// breath when it opens, and a second route to answer one string would have no other reader.
 /// </para>
 /// </remarks>
 public sealed record SettingsResponse(
@@ -55,14 +51,11 @@ public sealed record SettingsResponse(
     OverrideCountsResponse Overrides);
 
 /// <summary>
-/// One zone as the picker offers it: the IANA id, and what it is reading right now.
+/// One zone as the picker offers it. The offset is the zone's offset at this instant, a label
+/// rather than a fact about the zone — <c>Europe/Warsaw</c> is <c>+01:00</c> in January and
+/// <c>+02:00</c> in July. It is here because the id means nothing to somebody scanning for
+/// <c>+02:00</c>, and nothing reads it back.
 /// </summary>
-/// <remarks>
-/// The offset is the zone's offset at this instant and is therefore a label rather than a fact
-/// about the zone — <c>Europe/Warsaw</c> is <c>+01:00</c> in January and <c>+02:00</c> in July. It
-/// is here because <c>Europe/Warsaw</c> means nothing to somebody scanning for <c>+02:00</c>, and
-/// nothing reads it back.
-/// </remarks>
 public sealed record TimeZoneOptionResponse(string Id, string Offset);
 
 /// <summary>
@@ -90,14 +83,12 @@ public sealed record SaveSettingsRequest
     [Range(MinLimit, int.MaxValue)]
     public required int DailyCap { get; init; }
 
-    /// <summary>The one of the four with a different floor. Zero never advances the slot grid.</summary>
     [Range(MinIncrementMinutes, int.MaxValue)]
     public required int StartIncrementMinutes { get; init; }
 
     /// <summary>
-    /// How long a proposed move holds its slot. The second of the values with a floor above zero,
-    /// and for the same shape of reason the start increment has one: a zero-hour hold has lapsed
-    /// before the invitee's mail is composed, so the proposal mechanism would hold nothing.
+    /// How long a proposed move holds its slot. Floored above zero because a zero-hour hold has
+    /// lapsed before the invitee's mail is composed, leaving the mechanism holding nothing.
     /// </summary>
     [Range(MinProposalHoldHours, int.MaxValue)]
     public required int ProposalHoldHours { get; init; }
@@ -109,24 +100,20 @@ public sealed record SaveSettingsRequest
 }
 
 /// <summary>
-/// The organizer's zone, the four global limits every link's overrides resolve against, and how
-/// long a proposed move holds its slot.
-/// </summary>
-/// <remarks>
 /// <para>
 /// <b>Changing the zone rewrites nothing.</b> Every booking's <c>StartUtc</c> is an instant and
-/// stays exactly where it is. What moves is the wall clock the availability rules describe: a
-/// pattern that says 09:00–17:00 means nine to five in whichever zone this row names, so the
-/// window offered tomorrow shifts while the meetings already made do not.
+/// stays where it is. What moves is the wall clock the availability rules describe: a pattern that
+/// says 09:00–17:00 means nine to five in whichever zone this row names, so the window offered
+/// tomorrow shifts while the meetings already made do not.
 /// </para>
 /// <para>
 /// <b>No provider list to maintain.</b> The picker's options are
-/// <see cref="DateTimeZoneProviders.Tzdb"/>, which NodaTime already carries — so there is no
-/// hand-kept list to go stale and no ICU dependency to reintroduce. It is also the same database
-/// the scheduler resolves against, which is why the check on the way in reads from it rather than
-/// from anything the operating system happens to know.
+/// <see cref="DateTimeZoneProviders.Tzdb"/>, which NodaTime already carries: no hand-kept list to
+/// go stale and no ICU dependency to reintroduce. It is also the database the scheduler resolves
+/// against, which is why the check on the way in reads from it rather than from anything the
+/// operating system happens to know.
 /// </para>
-/// </remarks>
+/// </summary>
 public static class SettingsAdminEndpoints
 {
     /// <summary>A zone id this build's TZDB does not carry. Refused here rather than at the first booking.</summary>
@@ -187,9 +174,6 @@ public static class SettingsAdminEndpoints
         return await DescribeAsync(context, user, cancellationToken);
     }
 
-    /// <summary>
-    /// Every zone in the TZDB, by id, each labelled with what it is reading now.
-    /// </summary>
     private static IReadOnlyList<TimeZoneOptionResponse> ListTimeZones(IClock clock)
     {
         var now = clock.GetCurrentInstant();
@@ -221,15 +205,12 @@ public static class SettingsAdminEndpoints
     }
 
     /// <summary>
-    /// Whatever the identity provider called this operator, or null.
+    /// <see cref="ClaimsIdentity.Name"/> is the id token's <c>name</c> claim, which the OIDC
+    /// handler asks for with the <c>profile</c> scope it requests by default. A provider that sends
+    /// no name leaves this null and the workbench draws no identity block; the alternative is a
+    /// subject identifier or an email address presented as a person's name, and a made-up name is
+    /// worse than none.
     /// </summary>
-    /// <remarks>
-    /// <see cref="ClaimsIdentity.Name"/> is the <c>name</c> claim of the id token, which the OIDC
-    /// handler asks for with the <c>profile</c> scope it requests by default. A provider that
-    /// sends no name leaves this null and the workbench simply draws no identity block — the
-    /// alternative is a subject identifier or an email address presented as a person's name, and
-    /// a made-up name is worse than none.
-    /// </remarks>
     private static string? SignedInAs(ClaimsPrincipal user)
     {
         var name = user.Identity?.Name;
@@ -237,14 +218,10 @@ public static class SettingsAdminEndpoints
     }
 
     /// <summary>
-    /// The four counts, off one read of the four nullable columns.
+    /// Counted in memory rather than as four SQL aggregates: this is a single-operator scheduler
+    /// whose links table is read whole on the screen next door, so the row count cannot make that
+    /// query shape matter.
     /// </summary>
-    /// <remarks>
-    /// Counted in memory rather than as four SQL aggregates. This is a single-operator scheduler
-    /// whose links table is read whole on the screen next door, and four conditional counts pushed
-    /// into one statement is a query shape worth arguing with the provider about only if the row
-    /// count could ever make it matter.
-    /// </remarks>
     private static async Task<OverrideCountsResponse> CountOverridesAsync(
         KairosDbContext context,
         CancellationToken cancellationToken)

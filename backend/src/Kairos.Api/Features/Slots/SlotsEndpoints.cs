@@ -12,11 +12,10 @@ using NodaTime.Text;
 namespace Kairos.Api.Features.Slots;
 
 /// <summary>
-/// Four inputs from three binding sources, which is what a request record is for. The rule the
-/// whole feature folder follows: an input gets a record and an attribute where the attribute
-/// decides something nothing downstream would — presence of a query value, a numeric bound, an
-/// address shape. A lone route segment that goes straight into a resolver gets neither, which is
-/// why <c>GET /links/{slug}</c> and the three <c>/bookings/{token}</c> routes take a bare
+/// The rule the whole feature folder follows: an input gets a record and an attribute where the
+/// attribute decides something nothing downstream would — presence of a query value, a numeric
+/// bound, an address shape. A lone route segment that goes straight into a resolver gets neither,
+/// which is why <c>GET /links/{slug}</c> and the three <c>/bookings/{token}</c> routes take a bare
 /// parameter: a route segment cannot be absent, and "no such thing" is the resolver's 404 rather
 /// than a 400 about a regular expression.
 /// </summary>
@@ -50,10 +49,10 @@ public sealed record GetSlotsRequest
 
 /// <summary>
 /// The public booking page's only read. The handler has no failure branch: malformed shapes are
-/// refused by the attributes above before it runs, the two date parses throw, and everything
-/// else — unknown slug, inactive link, a duration the link does not offer, a range wider than
-/// the query answers for — is thrown inside <see cref="SlotQuery"/> and turned into
-/// ProblemDetails by <see cref="DomainExceptionHandler"/>.
+/// refused by the attributes above before it runs, the two date parses throw, and everything else —
+/// unknown slug, inactive link, an unoffered duration, a range wider than the query answers for —
+/// is thrown inside <see cref="SlotQuery"/> and turned into ProblemDetails by
+/// <see cref="DomainExceptionHandler"/>.
 /// </summary>
 public static class SlotsEndpoints
 {
