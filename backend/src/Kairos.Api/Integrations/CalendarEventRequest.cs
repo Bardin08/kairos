@@ -7,14 +7,10 @@ namespace Kairos.Api.Integrations;
 /// vendor's API asks for it.
 /// </summary>
 /// <remarks>
-/// What is deliberately absent is as much of the design as what is present. There is no calendar
-/// id, because a booking has no opinion about which calendar it lands in — that is the adapter's
-/// account, and the adapter is the only thing that knows it. There is no organizer, for the same
-/// reason: the connected account <em>is</em> the organizer, so passing it would be a field every
-/// adapter ignores. There is no time zone, because a meeting is two instants; a zone is how
-/// somebody reads them, which belongs to the page and to the <c>.ics</c>, not to a write. And
-/// there is no conference of any kind — that is <see cref="IConferenceCreator"/>'s job, and the
-/// two fail independently.
+/// What is absent is as much of the design as what is present. No calendar id and no organizer:
+/// both are the adapter's connected account, and only the adapter knows it. No time zone: a
+/// meeting is two instants, and a zone is how the page and the <c>.ics</c> render them. No
+/// conference — that is <see cref="IConferenceCreator"/>'s, and the two fail independently.
 /// </remarks>
 /// <param name="BookingId">The correlation key an adapter is expected to build its own
 /// idempotency on.</param>

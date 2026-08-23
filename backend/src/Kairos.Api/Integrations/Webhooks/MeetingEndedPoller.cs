@@ -12,23 +12,18 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// has to notice it.
 /// </summary>
 /// <remarks>
-/// It enqueues and it never delivers. Those are separate jobs on purpose — a service that
-/// noticed and sent would retry the noticing whenever the sending failed, and a retry storm on
-/// the send side would become a duplicate storm on the notice side. Delivery is
-/// <see cref="OutboxDispatcher"/>'s, from the queue, at its own pace.
+/// It enqueues and never delivers. A service that noticed and sent would retry the noticing
+/// whenever the sending failed, turning a send-side retry storm into a duplicate storm; delivery
+/// is <see cref="OutboxDispatcher"/>'s, at its own pace.
 ///
-/// The unique index on (BookingId, Type) is what makes announcing twice impossible, not the
-/// query below. The insert is attempted, a duplicate is rejected, the rejection is swallowed —
-/// that backstop is the guarantee and nothing here replaces it. What the query's last clause
-/// does is stop the service from re-attempting every meeting it has ever announced on every
-/// tick: measured at 300 already-announced bookings, a sweep issued 301 inserts of which 300
-/// failed, and that is per minute for the life of the deployment.
+/// The unique index on (BookingId, Type) is the guarantee, not the query below: the insert is
+/// attempted, a duplicate rejected, the rejection swallowed. The query's last clause only stops
+/// the service re-attempting every meeting it has ever announced — measured at 300 announced
+/// bookings, a sweep issued 301 inserts of which 300 failed, every minute for the life of the
+/// deployment.
 ///
-/// The clause is not the check-then-act the design ruled out. That is read, decide, then write
-/// with a window in between for another writer; this is one statement, filter and selection
-/// evaluated together by SQLite, and no window at all. If a duplicate somehow reaches the insert
-/// anyway — a second process, a sweep overlapping itself — the index still refuses it and the
-/// swallow below still handles it.
+/// That clause is not the check-then-act the design ruled out: one statement, filter and
+/// selection evaluated together by SQLite, no window for another writer.
 /// </remarks>
 public sealed class MeetingEndedPoller(
     IServiceScopeFactory scopes,
@@ -81,10 +76,9 @@ public sealed class MeetingEndedPoller(
 
     private async Task SweepAsync(CancellationToken cancellationToken)
     {
-        // A scope per sweep, and never a context shared with the dispatcher or with the previous
-        // sweep: DbContext is not thread-safe, and two services ticking on their own schedules
-        // through one context is "a second operation was started on this context" waiting for a
-        // busy minute to happen on.
+        // A scope per sweep, never a context shared with the dispatcher or the previous sweep:
+        // DbContext is not thread-safe, and two services ticking through one is "a second
+        // operation was started on this context" waiting for a busy minute.
         using var scope = scopes.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
         var outbox = scope.ServiceProvider.GetRequiredService<OutboxWriter>();
@@ -125,10 +119,8 @@ public sealed class MeetingEndedPoller(
     }
 
     /// <summary>
-    /// One booking, one SaveChanges. Per row rather than per sweep because a single duplicate in
-    /// a batch would roll the whole batch back, and the steady state of this service is a sweep
-    /// in which every row is a duplicate — so the batch that failed would be all of them, every
-    /// minute, forever.
+    /// One SaveChanges per row, not per sweep: a single duplicate rolls a whole batch back, and
+    /// the steady state here is a sweep in which every row is a duplicate.
     /// </summary>
     private async Task AnnounceAsync(
         KairosDbContext context,

@@ -8,10 +8,9 @@ namespace Kairos.Api.Integrations;
 /// conferencing in another.
 /// </summary>
 /// <remarks>
-/// The booking id is the whole input, and that is deliberate. A conference is identified by the
-/// meeting it belongs to, not by whatever the calendar happened to call it, so an implementation
-/// that derives its provider-side identity from the booking id is idempotent under retry without
-/// the caller having to hold anything between two calls.
+/// The booking id is the whole input. A conference is identified by the meeting it belongs to, so
+/// an implementation deriving its provider-side identity from the booking id is idempotent under
+/// retry without the caller holding anything between two calls.
 /// </remarks>
 public interface IConferenceCreator
 {

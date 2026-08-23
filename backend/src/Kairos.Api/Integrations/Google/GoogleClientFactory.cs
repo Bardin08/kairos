@@ -15,12 +15,11 @@ namespace Kairos.Api.Integrations.Google;
 /// Nothing outside this folder names a Google type.
 /// </summary>
 /// <remarks>
-/// A singleton, because the cache is the point: <see cref="UserCredential"/> holds the current
-/// access token in memory and refreshes it when it goes stale, so one instance means one refresh
-/// an hour instead of one per request. The token is never written anywhere — only the refresh
-/// token is durable, and it is encrypted by <see cref="IntegrationCredentialStore"/>. Being a
-/// singleton is also why the store is reached through a scope rather than injected: the store
-/// rides on the request's DbContext.
+/// A singleton, because the cache is the point: <see cref="UserCredential"/> holds the access
+/// token in memory and refreshes it when stale, so one instance means one refresh an hour rather
+/// than one per request. Only the refresh token is durable, encrypted by
+/// <see cref="IntegrationCredentialStore"/>. Being a singleton is also why the store is reached
+/// through a scope rather than injected: it rides on the request's DbContext.
 /// </remarks>
 public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
 {
@@ -32,9 +31,8 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
 
     /// <summary>
     /// Not decoration. Google issues a refresh token on the <em>first</em> consent for a client
-    /// and omits it on every re-authorisation unless consent is forced — so a reconnect after a
-    /// revoke would store a credential that cannot be refreshed, and the failure would surface
-    /// weeks later when the access token expires.
+    /// and omits it on re-authorisation unless consent is forced, so a reconnect after a revoke
+    /// would store a credential that cannot be refreshed — surfacing weeks later at expiry.
     /// </summary>
     private const string ForceConsent = "consent";
 
@@ -111,10 +109,9 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
                 + "https://myaccount.google.com/permissions and connect again.");
         }
 
-        // Doubles as the proof that the grant works and that the Calendar API is enabled on the
-        // project: the alternative is a row that reads "connected" and a first booking that
-        // discovers otherwise. The primary calendar's id is the account's address, which is
-        // exactly the label the page wants and is not a secret.
+        // Doubles as proof that the grant works and the Calendar API is enabled on the project;
+        // the alternative is a row reading "connected" and a first booking that discovers
+        // otherwise. The primary calendar's id is the account's address, and is not a secret.
         var label = await ReadPrimaryCalendarIdAsync(token, cancellationToken);
 
         await using var scope = _scopes.CreateAsyncScope();
@@ -138,11 +135,10 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     }
 
     /// <summary>
-    /// An authorised client for the connected account, or null when there is nothing to
-    /// authorise with — unconfigured, or never connected. Null rather than an exception because
-    /// both are ordinary states of a self-hosted instance, and a booking must not fail over
-    /// either. The token is refreshed here rather than lazily inside somebody else's HTTP call,
-    /// so a dead grant is caught at a point that can record it.
+    /// An authorised client, or null when there is nothing to authorise with — unconfigured, or
+    /// never connected. Null rather than an exception because both are ordinary states of a
+    /// self-hosted instance. The token is refreshed here rather than lazily inside somebody else's
+    /// HTTP call, so a dead grant is caught at a point that can record it.
     /// </summary>
     public async Task<UserCredential?> GetCredentialAsync(CancellationToken cancellationToken)
     {
@@ -246,11 +242,10 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     /// crosses no signature that anything else can see.
     /// </summary>
     /// <remarks>
-    /// It used to carry a reconnect flag as well. That is a property of the credential now, so a
-    /// second provider inherits it rather than re-inventing it — and a credential written before
-    /// the move deserialises into this untouched, because an extra JSON property is ignored.
-    /// Nothing is re-encrypted and there is no data migration; the flag those rows carry is lost,
-    /// and the next refresh against a dead grant re-derives it.
+    /// It used to carry a reconnect flag. That is a property of the credential now, so a second
+    /// provider inherits it — and a credential written before the move deserialises untouched,
+    /// since an extra JSON property is ignored. No re-encryption and no data migration; the flag
+    /// those rows carry is lost, and the next refresh against a dead grant re-derives it.
     /// </remarks>
     private sealed record GoogleCredentialPayload(string RefreshToken);
 }

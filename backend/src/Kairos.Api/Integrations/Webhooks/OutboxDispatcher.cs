@@ -17,15 +17,13 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// and signed.
 /// </summary>
 /// <remarks>
-/// The mark comes after the send, never before. A crash in the gap therefore redelivers, which
-/// is the failure worth having: a duplicate is visible at the receiver and a receiver can be
-/// idempotent, whereas a drop is invisible to everybody forever.
+/// The mark comes after the send, never before. A crash in the gap redelivers, which is the
+/// failure worth having: a duplicate is visible at the receiver and a receiver can be idempotent,
+/// whereas a drop is invisible forever.
 ///
-/// There is no lease column and no claim. Part A's notes describe one for concurrent workers,
-/// and Kairos has exactly one process running exactly one of these, so there is nothing to
-/// contend with — a lease that never contends is a column, a query and a stale-lease recovery
-/// path all maintained for a scenario that does not exist. If this ever runs two replicas, the
-/// table is already the right shape to add one.
+/// No lease column and no claim. Part A's notes describe one for concurrent workers; Kairos runs
+/// exactly one of these, so a lease would be a column, a query and a stale-lease recovery path
+/// maintained for a scenario that does not exist. The table is already the right shape to add one.
 /// </remarks>
 public sealed class OutboxDispatcher(
     IServiceScopeFactory scopes,
@@ -34,11 +32,9 @@ public sealed class OutboxDispatcher(
     ILogger<OutboxDispatcher> logger) : BackgroundService
 {
     /// <summary>
-    /// Shorter than the poller's minute, because this one bounds how long a booking waits to be
-    /// announced and a booking is announced the instant it is made. Ten seconds is a delay a
-    /// person reads as "immediately" and a tick that finds nothing costs one indexed query
-    /// against a column whose whole purpose is that query. Not shorter: the outbox is a queue,
-    /// not a bus, and a tighter loop would buy latency nobody is measuring.
+    /// Shorter than the poller's minute, because this bounds how long a booking waits to be
+    /// announced. Ten seconds reads as "immediately", and a tick that finds nothing costs one
+    /// indexed query. Not shorter: the outbox is a queue, not a bus.
     /// </summary>
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(10);
 
@@ -75,9 +71,8 @@ public sealed class OutboxDispatcher(
         if (string.IsNullOrEmpty(_options.Url))
         {
             // Said once and then gone. Returning ends the service, so an unconfigured Kairos —
-            // which is every fresh one — has no timer, no query and no log line a minute for
-            // work that cannot exist. Messages keep queueing: the outbox is the record that
-            // something happened, and subscribing later is allowed to mean receiving the backlog.
+            // every fresh one — has no timer, no query and no log line a minute. Messages keep
+            // queueing: subscribing later is allowed to mean receiving the backlog.
             logger.LogInformation(
                 "No {Section}:Url is configured, so nothing is subscribed and the outbox is not "
                 + "drained. Messages continue to be queued.",
@@ -88,9 +83,8 @@ public sealed class OutboxDispatcher(
         if (string.IsNullOrEmpty(_options.Secret))
         {
             // An error rather than a shrug, and still not a crash. Delivering unsigned would hand
-            // a receiver bodies it cannot tell from anyone else's, which is the single thing the
-            // signature exists to prevent — so the honest answer is to deliver nothing and say
-            // why, loudly, at startup.
+            // a receiver bodies it cannot tell from anyone else's, which is the one thing the
+            // signature exists to prevent — so deliver nothing and say why, loudly, at startup.
             logger.LogError(
                 "{Section}:Url is set but {Section}:Secret is not. Nothing will be delivered: an "
                 + "unsigned webhook is one a receiver cannot tell from a forgery.",
@@ -139,19 +133,17 @@ public sealed class OutboxDispatcher(
 
     private async Task DrainAsync(WebhookSigner signer, CancellationToken cancellationToken)
     {
-        // A scope per tick. The context is tracking the rows this tick is about to mark, and
-        // holding one across ticks would keep every message ever dispatched alive in the change
-        // tracker — quite apart from DbContext not being thread-safe and the poller ticking
-        // alongside on its own schedule.
+        // A scope per tick. The context tracks the rows this tick is about to mark, and holding
+        // one across ticks would keep every dispatched message alive in the change tracker —
+        // quite apart from DbContext not being thread-safe and the poller ticking alongside.
         using var scope = scopes.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
 
         var maxAttempts = _options.MaxAttempts;
 
-        // Exhausted rows leave the queue rather than staying in it and being skipped: a filter
-        // that only decided not to send would still re-read every dead message on every tick for
-        // the life of the deployment. The row keeps its Attempts and its LastError, which is
-        // where an operator reads what happened.
+        // Exhausted rows leave the queue rather than being skipped in it: a filter that only
+        // declined to send would re-read every dead message on every tick forever. The row keeps
+        // its Attempts and LastError, which is where an operator reads what happened.
         var pending = await context.OutboxMessages
             .Where(message => message.DispatchedAt == null && message.Attempts < maxAttempts)
             .OrderBy(message => message.CreatedAt)

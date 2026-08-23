@@ -12,17 +12,16 @@ namespace Kairos.Api.Integrations;
 /// no vendor namespace among them, and adding one would be the bug.
 /// </summary>
 /// <remarks>
-/// It never throws. Ground rule 14 in one sentence: a booking the domain accepted is never lost
-/// because a third party had a bad minute, and the only way to mean that is for every path out of
-/// here to be a return. A provider that refuses becomes a <see cref="CalendarSyncState.Failed"/>
-/// row with the reason on it; a provider nobody connected becomes nothing at all.
+/// It never throws. Ground rule 14: a booking the domain accepted is never lost because a third
+/// party had a bad minute, so every path out of here is a return. A provider that refuses becomes
+/// a <see cref="CalendarSyncState.Failed"/> row with the reason on it; one nobody connected
+/// becomes nothing at all.
 ///
-/// The three entry points are three verbs on one row. <see cref="CalendarEntry"/> is unique per
-/// (booking, provider), so a booking has one row for its whole life and the state on it is the
-/// answer to "where is this meeting, really" — <see cref="CalendarSyncState.Synced"/> at the time
-/// the booking says, <see cref="CalendarSyncState.Failed"/> with the provider's reason, or
-/// <see cref="CalendarSyncState.Cancelled"/> for an event that was withdrawn. Nothing here
-/// deletes a row: the id of an event that once existed is the only evidence it did.
+/// <see cref="CalendarEntry"/> is unique per (booking, provider), so a booking has one row for its
+/// whole life and the state on it answers "where is this meeting, really" —
+/// <see cref="CalendarSyncState.Synced"/>, <see cref="CalendarSyncState.Failed"/> with the
+/// provider's reason, or <see cref="CalendarSyncState.Cancelled"/>. Nothing here deletes a row:
+/// the id of an event that once existed is the only evidence it did.
 /// </remarks>
 public sealed class CalendarSyncService(
     ICalendarWriter calendars,
@@ -46,13 +45,11 @@ public sealed class CalendarSyncService(
     /// the booking.
     /// </summary>
     /// <remarks>
-    /// Called after the booking is confirmed at its new time and never while a reschedule has it
-    /// released. A reschedule is release, re-check, re-place: it sets the booking cancelled and
-    /// back to confirmed on every path out, the failing ones included, so anything hung on the
-    /// status change would withdraw the event for every meeting that merely moved — and the
-    /// attendee who had already accepted would watch it disappear from their calendar. That is
-    /// the same trap the <c>booking.cancelled</c> announcement is kept out of, for the same
-    /// reason, and it is why moving and withdrawing are two methods here rather than one hook.
+    /// Called after the booking is confirmed at its new time, never while a reschedule has it
+    /// released. A reschedule sets the booking cancelled and back to confirmed on every path out,
+    /// so anything hung on the status change would withdraw the event for every meeting that
+    /// merely moved. That is the trap the <c>booking.cancelled</c> announcement is kept out of,
+    /// and why moving and withdrawing are two methods rather than one hook.
     /// </remarks>
     public Task RescheduleAsync(Booking booking, CancellationToken cancellationToken) =>
         GuardedAsync(booking.Id, () => MoveAsync(booking, cancellationToken));
@@ -64,11 +61,9 @@ public sealed class CalendarSyncService(
         GuardedAsync(bookingId, () => WithdrawAsync(bookingId, cancellationToken));
 
     /// <summary>
-    /// The outer net, and the reason none of the three has a failure of its own to report: by the
-    /// time any of them runs, the domain has committed and the caller is about to answer. An
-    /// exception escaping here would turn a booking that exists — or a cancellation that has
-    /// already happened — into a 500 the caller reads as "it did not work", which is the exact
-    /// outcome ground rule 14 forbids.
+    /// The outer net, and why none of the three reports a failure of its own: by the time any of
+    /// them runs the domain has committed and the caller is about to answer. An exception escaping
+    /// here would turn a booking that exists into a 500 the caller reads as "it did not work".
     /// </summary>
     private async Task GuardedAsync(Guid bookingId, Func<Task> work)
     {
@@ -120,20 +115,18 @@ public sealed class CalendarSyncService(
 
         await AddConferenceAsync(booking.Id, cancellationToken);
 
-        // One SaveChanges, so the entry and the link commit together — a join URL recorded
-        // without the event that carries it would be a meeting nobody can find twice over.
-        // Uncancellable: this describes work a third party has already done, and a booker who
-        // closed the tab is not a reason to lose the only record that it happened.
+        // One SaveChanges, so the entry and the link commit together — a join URL recorded without
+        // the event that carries it would be a meeting nobody can find twice over. Uncancellable:
+        // a booker who closed the tab is not a reason to lose the record of work already done.
         await context.SaveChangesAsync(CancellationToken.None);
     }
 
     /// <summary>
-    /// The move. No connectivity check, unlike <see cref="PlaceAsync"/>, and that is the design
-    /// rather than an omission: reaching here with an event id means a calendar <em>was</em>
-    /// connected when this booking was made, so a provider that now refuses is a real failure an
-    /// operator has to see — an event sitting in a calendar at a time the booking no longer
-    /// claims is precisely the two-plausible-times problem this method exists to end. The adapter
-    /// throws on a missing credential and that throw becomes the row.
+    /// No connectivity check, unlike <see cref="PlaceAsync"/>, and that is the design: reaching
+    /// here with an event id means a calendar <em>was</em> connected when the booking was made, so
+    /// a provider that now refuses is a real failure an operator has to see — an event sitting at
+    /// a time the booking no longer claims is the two-plausible-times problem this method ends.
+    /// The adapter throws on a missing credential and that throw becomes the row.
     /// </summary>
     private async Task MoveAsync(Booking booking, CancellationToken cancellationToken)
     {
@@ -142,10 +135,8 @@ public sealed class CalendarSyncService(
         {
             // Nothing was ever written, so there is nothing to move: either no calendar was
             // connected when the booking was made, or the write was refused and the Failed row
-            // beside it already says so. Placing it now would hide a second decision inside a
-            // reschedule — the meeting would appear in a calendar the booker was never told it
-            // was in — and the sync state on the booking read is where that gap is meant to
-            // become visible instead.
+            // says so. Placing it now would hide a second decision inside a reschedule, putting
+            // the meeting in a calendar the booker was never told it was in.
             return;
         }
 
@@ -172,16 +163,13 @@ public sealed class CalendarSyncService(
 
     /// <remarks>
     /// <see cref="CalendarEntry"/> is kept, with its event id, and moved to
-    /// <see cref="CalendarSyncState.Cancelled"/>. Deleting it would erase the only record that
-    /// this booking was ever in a calendar and make a withdrawn meeting indistinguishable from
-    /// one that never synced — the two states an operator most needs told apart. Leaving it
-    /// Synced would be a row asserting an event that is no longer there.
+    /// <see cref="CalendarSyncState.Cancelled"/>. Deleting it would make a withdrawn meeting
+    /// indistinguishable from one that never synced — the two states an operator most needs told
+    /// apart — and leaving it Synced would assert an event that is no longer there.
     ///
-    /// <see cref="ConferenceLink"/> is left exactly as it is, and deliberately so. It has no
-    /// state column by design — the row exists or it does not — and the booking's own status is
-    /// already the single answer to whether this meeting is happening; copying that answer into a
-    /// second table is a second place for it to go stale. What the row records is that a
-    /// conference was provisioned, which stays true after a cancellation.
+    /// <see cref="ConferenceLink"/> is left exactly as it is. It has no state column by design,
+    /// and the booking's own status already answers whether this meeting is happening; the row
+    /// records that a conference was provisioned, which stays true after a cancellation.
     /// </remarks>
     private async Task WithdrawAsync(Guid bookingId, CancellationToken cancellationToken)
     {
@@ -209,11 +197,10 @@ public sealed class CalendarSyncService(
     }
 
     /// <summary>
-    /// Best effort, and separately so. The event is already in the calendar at this point, so a
-    /// conferencing failure must not downgrade a real <see cref="CalendarSyncState.Synced"/> to
-    /// <see cref="CalendarSyncState.Failed"/> — that would report the one thing that worked as
-    /// broken. <see cref="ConferenceLink"/> has no state column for the same reason: the row
-    /// exists or it does not, and its absence is what "no join link" looks like.
+    /// Best effort, separately so. The event is already in the calendar, so a conferencing failure
+    /// must not downgrade a real <see cref="CalendarSyncState.Synced"/> to
+    /// <see cref="CalendarSyncState.Failed"/>. <see cref="ConferenceLink"/> has no state column
+    /// for the same reason: its absence is what "no join link" looks like.
     /// </summary>
     private async Task AddConferenceAsync(Guid bookingId, CancellationToken cancellationToken)
     {

@@ -24,16 +24,14 @@ namespace Kairos.Api.Integrations.Google;
 /// capabilities and a provider that only did one of them would implement only that one.
 /// </summary>
 /// <remarks>
-/// Freebusy rather than the events list on the read side: it is one call for the whole window, it
-/// needs no pagination, it expands recurrences server-side, and it returns intervals rather than
-/// events — which is all availability wants, and it means the titles and attendees of the
-/// organizer's private calendar never enter this process.
+/// Freebusy rather than the events list on the read side: one call for the whole window, no
+/// pagination, recurrences expanded server-side, intervals rather than events — all availability
+/// wants, and the organizer's private titles and attendees never enter this process.
 ///
-/// The read path and the write path fail differently on purpose, and the catch below is scoped to
-/// the read alone. A freebusy call that fails is one source with no opinion. A calendar write that
-/// fails is a booking with no meeting, and swallowing that here would hide it from the one place
-/// built to record it — <see cref="CalendarSyncService"/>, which turns it into a
-/// <see cref="CalendarSyncState.Failed"/> row an operator can see.
+/// The read and write paths fail differently on purpose, and the catch below is scoped to the
+/// read alone. A failed freebusy call is one source with no opinion; a failed calendar write is a
+/// booking with no meeting, and swallowing it here would hide it from
+/// <see cref="CalendarSyncService"/> and its <see cref="CalendarSyncState.Failed"/> row.
 /// </remarks>
 public sealed class GoogleCalendarAdapter(
     GoogleClientFactory clients,
@@ -61,11 +59,9 @@ public sealed class GoogleCalendarAdapter(
     public IntegrationProvider Provider => IntegrationProvider.Google;
 
     /// <summary>
-    /// Every busy period Google reports over <paramref name="window"/>, each carrying the
-    /// <em>global</em> margin: an external event has no Kairos link behind it to state one, and
-    /// the organizer's global setting is the only answer that exists for it.
-    /// <see cref="SlotGenerator"/> still takes the larger of this and the querying link's margin,
-    /// so a link that wants more breathing room than the global still gets it.
+    /// Every busy period Google reports over <paramref name="window"/> carries the <em>global</em>
+    /// margin: an external event has no Kairos link to state one. <see cref="SlotGenerator"/>
+    /// still takes the larger of this and the querying link's margin.
     /// </summary>
     /// <remarks>
     /// No cache. The poll runs per page load — the spec chose that over push channels, which
@@ -107,16 +103,15 @@ public sealed class GoogleCalendarAdapter(
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // The trade, stated plainly: an empty set is not "the organizer is free", it is "this
-            // source has no opinion". Slots that a real Google event covers will be offered, and
-            // the booking that takes one WILL be written — Kairos has no record of the conflict,
-            // so nothing downstream can refuse it. That is still the right side to fail on for a
-            // page a stranger is looking at: the alternative is a public booking page that returns
-            // 500 because a third party is having an outage, which costs every booking rather than
-            // the few that overlap. Double-booked and recoverable beats unreachable.
+            // The trade: an empty set is not "the organizer is free", it is "this source has no
+            // opinion". Slots a real Google event covers will be offered and the booking that
+            // takes one WILL be written, since Kairos has no record of the conflict. Still the
+            // right side to fail on for a page a stranger is looking at: the alternative returns
+            // 500 over a third party's outage, costing every booking rather than the overlapping
+            // few.
             //
-            // Not swallowed silently: this is the line that explains a booking the organizer
-            // cannot account for, so it is logged at Warning with the window it was asked about.
+            // Logged at Warning with the window, because this is the line that explains a booking
+            // the organizer cannot account for.
             logger.LogWarning(
                 exception,
                 "Google freebusy failed for {Start}..{End}; treating Google as having no busy time. "
@@ -132,15 +127,13 @@ public sealed class GoogleCalendarAdapter(
         await clients.GetCredentialAsync(cancellationToken) is not null;
 
     /// <remarks>
-    /// Two idempotency keys, both the booking id, because Google offers two and they guard
-    /// different things. <c>CreateConferenceRequest.RequestId</c> makes the <em>conference</em>
-    /// idempotent: a retry presents the same id and Google returns the conference it already
-    /// minted rather than a second one. The event's own id makes the <em>event</em> idempotent:
-    /// a retry is refused as a duplicate instead of putting the same meeting in the calendar
-    /// twice. A UUID's hex is thirty-two characters drawn from 0-9a-f, and Google's event ids are
-    /// base32hex — lowercase a-v and 0-9, five to 1024 long — so the booking id is a legal event
-    /// id as it stands, and choosing it is also what lets
-    /// <see cref="CreateAsync"/> find this event again knowing only the booking.
+    /// Two idempotency keys, both the booking id, guarding different things.
+    /// <c>CreateConferenceRequest.RequestId</c> makes the <em>conference</em> idempotent: a retry
+    /// presents the same id and Google returns the conference it already minted. The event's own
+    /// id makes the <em>event</em> idempotent: a retry is refused as a duplicate. A UUID's hex is
+    /// thirty-two characters from 0-9a-f and Google's event ids are base32hex — lowercase a-v and
+    /// 0-9, five to 1024 long — so the booking id is a legal event id as it stands, and choosing
+    /// it lets <see cref="CreateAsync"/> find this event again knowing only the booking.
     /// </remarks>
     public async Task<string> CreateEventAsync(
         CalendarEventRequest request,
@@ -184,17 +177,15 @@ public sealed class GoogleCalendarAdapter(
     }
 
     /// <remarks>
-    /// <c>Patch</c> rather than <c>Update</c>, and the difference is the whole of this method's
-    /// correctness. Update replaces the resource: every field absent from the body is cleared,
-    /// which on this body would be the attendee list, the answers those attendees have already
-    /// given, and the <c>conferenceData</c> carrying the Meet the invitee has a link to. Patch
-    /// merges, so what is not written here is not touched.
+    /// <c>Patch</c> rather than <c>Update</c>, and the difference is this method's correctness.
+    /// Update replaces the resource, clearing every field absent from the body — here the attendee
+    /// list, the answers those attendees have given, and the <c>conferenceData</c> carrying the
+    /// Meet the invitee has a link to. Patch merges.
     ///
-    /// The attendees are deliberately not written even though the request carries one. A
-    /// reschedule keeps its booker — the duration is fixed and the identifier is the same, so
-    /// there is nobody new to add — and re-sending the list is how a Google event loses everyone's
-    /// RSVP for no gain. <c>conferenceDataVersion</c> is likewise absent, because it is only read
-    /// when the body touches conference data and this one does not.
+    /// Attendees are deliberately not written even though the request carries one: a reschedule
+    /// keeps its booker, and re-sending the list is how a Google event loses everyone's RSVP for
+    /// no gain. <c>conferenceDataVersion</c> is likewise absent, only being read when the body
+    /// touches conference data.
     /// </remarks>
     public async Task UpdateEventAsync(
         string externalEventId,
@@ -223,13 +214,11 @@ public sealed class GoogleCalendarAdapter(
     }
 
     /// <summary>
-    /// The Meet for this booking. A read rather than a write, and that is not a shortcut: with
-    /// Google, conferencing is requested as part of the event insert and provisioned
-    /// <em>asynchronously</em>, so the insert can come back with the request still pending and no
-    /// entry points on it. Re-reading the event is how the API documents finding out what the
-    /// conference turned into, and the deterministic event id from
-    /// <see cref="CreateEventAsync"/> is what makes it reachable from a booking id alone — no
-    /// state carried between the two calls, and no ordering hidden in a field.
+    /// A read rather than a write, and not a shortcut: with Google, conferencing is requested as
+    /// part of the event insert and provisioned <em>asynchronously</em>, so the insert can come
+    /// back with the request still pending and no entry points on it. Re-reading the event is how
+    /// the API documents finding out what the conference turned into, and the deterministic event
+    /// id from <see cref="CreateEventAsync"/> makes it reachable from a booking id alone.
     /// </summary>
     public async Task<ConferenceDetails> CreateAsync(
         Guid bookingId,
@@ -275,10 +264,9 @@ public sealed class GoogleCalendarAdapter(
         });
 
     /// <summary>
-    /// The write path's counterpart to the read path's null check. Null is still the ordinary
-    /// state of an unconnected instance, but a write asked to happen against no account has
+    /// The write path's counterpart to the read path's null check. A write against no account has
     /// nothing to return, so it throws and <see cref="CalendarSyncService"/> records it. Reaching
-    /// this means the account was disconnected between the connectivity check and the write.
+    /// here means the account was disconnected between the connectivity check and the write.
     /// </summary>
     private async Task<UserCredential> RequireCredentialAsync(CancellationToken cancellationToken) =>
         await clients.GetCredentialAsync(cancellationToken)

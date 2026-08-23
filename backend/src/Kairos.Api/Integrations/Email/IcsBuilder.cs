@@ -10,11 +10,10 @@ namespace Kairos.Api.Integrations.Email;
 /// every time in UTC.
 /// </summary>
 /// <remarks>
-/// Hand-rolled rather than delegated to Ical.Net because the four rules that matter here —
-/// CRLF endings, TEXT escaping, folding at 75 octets and the UTC DATE-TIME format — are each
-/// a few lines and each directly tested, while the output stays byte-for-byte ours. The email
-/// body and the Gmail/Outlook verification downstream pin this exact text, so property order
-/// must not be a library's to change.
+/// Hand-rolled rather than delegated to Ical.Net: the four rules that matter — CRLF endings, TEXT
+/// escaping, folding at 75 octets and the UTC DATE-TIME format — are each a few lines and each
+/// directly tested. The email body and the Gmail/Outlook verification downstream pin this exact
+/// text, so property order must not be a library's to change.
 /// </remarks>
 public sealed class IcsBuilder(IClock? clock = null)
 {
@@ -70,10 +69,9 @@ public sealed class IcsBuilder(IClock? clock = null)
     }
 
     /// <summary>
-    /// The METHOD keyword this object carries, which is also what the MIME <c>method=</c>
-    /// parameter around it has to spell. Public so the two are one value rather than two
-    /// literals: a part labelled REQUEST wrapping a CANCEL is discarded by clients in silence,
-    /// which is the same failure mode a wrong SEQUENCE has and just as hard to see.
+    /// The METHOD keyword this object carries, which the MIME <c>method=</c> parameter around it
+    /// has to spell too. Public so the two are one value: a part labelled REQUEST wrapping a
+    /// CANCEL is discarded by clients in silence, like a wrong SEQUENCE.
     /// </summary>
     public static string Keyword(IcsMethod method) => method switch
     {

@@ -10,14 +10,12 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// verbatim afterwards.
 /// </summary>
 /// <remarks>
-/// It names its own event rather than leaving that to a header, and the reason is the signature:
-/// <see cref="WebhookSigner"/> covers the body, so an event name in the body cannot be changed in
-/// flight, while one carried only in a header could be. It also makes a captured delivery
-/// self-describing, which is the difference between a debuggable log line and a bare object.
+/// It names its own event rather than leaving that to a header: <see cref="WebhookSigner"/> covers
+/// the body, so an event name in the body cannot be changed in flight, and a captured delivery is
+/// self-describing.
 ///
-/// The instants are ISO-8601 strings rather than the Unix seconds the database stores. A webhook
-/// body is read by other people's code, and a number that needs a comment to interpret is a
-/// worse contract than a string that does not.
+/// The instants are ISO-8601 strings rather than the Unix seconds the database stores — a webhook
+/// body is read by other people's code, and a number that needs a comment is a worse contract.
 /// </remarks>
 public sealed record BookingEventPayload(
     string Event,
@@ -48,12 +46,10 @@ public sealed record BookingEventPayload(
         For(BookingCancelled, bookingId, slug, start, end);
 
     /// <summary>
-    /// Announced after the fact, and still the same six fields. A shape designed for creation
-    /// turned out to fit: the times are the meeting's own, not the moment of the announcement,
-    /// so a subscriber joining <c>booking.created</c> to <c>meeting.ended</c> compares like with
-    /// like. Adding an <c>EndedAt</c> would only restate <see cref="End"/> with worse precision —
-    /// the poller notices a meeting up to a tick after it ends, and that lag is the poller's, not
-    /// the meeting's.
+    /// Announced after the fact, and still the same six fields: the times are the meeting's own,
+    /// not the moment of the announcement, so a subscriber joining <c>booking.created</c> to
+    /// <c>meeting.ended</c> compares like with like. An <c>EndedAt</c> would only restate
+    /// <see cref="End"/> with worse precision — the poller's lag, not the meeting's.
     /// </summary>
     public static BookingEventPayload Ended(
         Guid bookingId,

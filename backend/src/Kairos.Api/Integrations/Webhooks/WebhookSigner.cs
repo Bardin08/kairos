@@ -8,10 +8,9 @@ namespace Kairos.Api.Integrations.Webhooks;
 /// HMAC-SHA256 over the raw body, keyed by a secret only the two ends know.
 /// </summary>
 /// <remarks>
-/// The timestamp is signed <em>with</em> the body rather than sent merely alongside it. Signing
-/// the body alone leaves a captured delivery valid forever — replay it in a year and the
-/// signature still checks out. Inside the signed string, the receiver can reject anything older
-/// than its own window and the signature is what stops the timestamp being edited to suit.
+/// The timestamp is signed <em>with</em> the body, not merely sent alongside it. Signing the body
+/// alone leaves a captured delivery valid forever; inside the signed string the receiver can
+/// reject anything older than its window, and the signature stops the timestamp being edited.
 /// </remarks>
 public sealed class WebhookSigner
 {
