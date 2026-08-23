@@ -32,10 +32,13 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 
 const TOKEN = 'a'.repeat(64)
 
-// The ORGANIZER's, and deliberately neither UTC nor the zone the machine
-// running these tests is in — every time assertion below is the proof that the
-// page renders the zone the API sent rather than the browser's own.
-const ORGANIZER_ZONE = 'Asia/Tokyo'
+// The INVITEE's own — the zone the booking carries, the one the proposal mail
+// formatted against and the one the manage page for this booking renders. NOT
+// the organizer's, which is the whole point: this is the third surface an
+// invitee sees about one booking and all three have to say the same clock time.
+// Deliberately neither UTC nor the zone this machine is in, so every assertion
+// below is also proof the page renders what the API sent rather than a guess.
+const INVITEE_ZONE = 'Asia/Tokyo'
 
 // September, so Tokyo is +09:00 throughout. 11:00Z is 20:00 there and 14:00Z is
 // 23:00, which are two numbers a page reading the machine's clock cannot
@@ -46,7 +49,10 @@ const CURRENT_TIME = '20:00'
 const PROPOSED_START = '2030-09-09T14:00:00Z'
 const PROPOSED_END = '2030-09-09T14:30:00Z'
 const PROPOSED_TIME = '23:00'
-const EXPIRES_AT = '2030-09-11T14:00:00Z'
+// 09:30Z is 18:30 in Tokyo — deliberately not either time above, so an
+// assertion on it cannot pass by matching one of them.
+const EXPIRES_AT = '2030-09-11T09:30:00Z'
+const EXPIRES_TIME = '18:30'
 const LINK_NAME = 'Consulting call'
 
 const NOT_FOUND = 404
@@ -61,7 +67,7 @@ const open: Offer = {
   proposedStart: PROPOSED_START,
   proposedEnd: PROPOSED_END,
   expiresAt: EXPIRES_AT,
-  timeZone: ORGANIZER_ZONE,
+  timeZone: INVITEE_ZONE,
   state: 'open',
 }
 
@@ -97,7 +103,7 @@ test('shows what is being left and what is being offered, both in the organizer 
   expect(await screen.findByText(LINK_NAME)).toBeDefined()
   expect(screen.getByText(new RegExp(CURRENT_TIME))).toBeDefined()
   expect(screen.getByText(new RegExp(PROPOSED_TIME))).toBeDefined()
-  expect(screen.getByText(new RegExp(ORGANIZER_ZONE))).toBeDefined()
+  expect(screen.getByText(new RegExp(INVITEE_ZONE))).toBeDefined()
 })
 
 test('accepting sends the token from the path and nothing else', async () => {
@@ -200,7 +206,66 @@ test('an answer that lost a race sends the invitee to the page rather than guess
   // answered by what a reload shows rather than by a sentence guessing.
   expect((await screen.findByRole('alert')).textContent).toMatch(/reload/i)
   // Still armed: nothing was recorded, so the buttons have to stay pressable.
-  expect(screen.getByRole('button', { name: /accept/i })).toBeDefined()
+  expect(screen.queryByRole('button', { name: /accept/i })).not.toBeNull()
+})
+
+test('the lapse deadline is a time as well as a date', async () => {
+  renderProposal()
+  await screen.findByText(LINK_NAME)
+
+  // ExpiresAt is the mint time plus the hold in hours, so it lands on an
+  // arbitrary clock time — and the mail that sent the invitee here prints both
+  // halves. A date alone tells somebody reading at 18:30 that an offer which
+  // died at 18:30 is still open.
+  expect(screen.getByText(new RegExp(EXPIRES_TIME))).toBeDefined()
+})
+
+test('only the answer in flight spins, not both of them', async () => {
+  // Never resolves: the point is what the page looks like WHILE one answer is
+  // being recorded, which a resolved promise skips straight past.
+  vi.mocked(acceptProposal).mockReturnValue(new Promise(() => {}))
+  renderProposal()
+
+  fireEvent.click(await screen.findByRole('button', { name: /accept/i }))
+
+  const accept = screen.getByRole('button', { name: /accept/i })
+  const decline = screen.getByRole('button', { name: /decline/i })
+
+  // `data-loading` blanks the label and drops pointer events, so marking both
+  // leaves the invitee looking at two pending actions unable to tell which
+  // decision they just made.
+  expect(accept.getAttribute('data-loading')).toBe('true')
+  expect(decline.getAttribute('data-loading')).toBeNull()
+
+  // Both are nonetheless unpressable, and by `disabled` rather than by the
+  // stylesheet: pointer-events does not stop a keyboard firing Space, and it
+  // tells a screen reader nothing.
+  expect(accept).toHaveProperty('disabled', true)
+  expect(decline).toHaveProperty('disabled', true)
+})
+
+test('answering moves focus to what replaced the question, and announces it', async () => {
+  vi.mocked(declineProposal).mockResolvedValue({ ...open, state: 'declined' })
+  renderProposal()
+
+  fireEvent.click(await screen.findByRole('button', { name: /decline/i }))
+
+  const outcome = await screen.findByRole('status')
+  expect(outcome.textContent).toMatch(/stays where it is/i)
+  // The SPA's debt: a server-rendered page would have moved focus by
+  // navigating, and this is the one transition an invitee causes here.
+  await waitFor(() => expect(document.activeElement).toBe(outcome))
+})
+
+test('a page that opens already answered does not steal focus from the reader', async () => {
+  vi.mocked(getProposal).mockResolvedValue({ ...open, state: 'declined' })
+  renderProposal()
+
+  await screen.findByRole('status')
+
+  // Nothing changed under them — they have only just arrived, and moving focus
+  // on arrival is the behaviour that makes screen readers talk over themselves.
+  expect(document.activeElement).toBe(document.body)
 })
 
 test('every class the page renders exists in kairos.css', async () => {

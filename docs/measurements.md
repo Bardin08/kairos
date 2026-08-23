@@ -1085,3 +1085,33 @@ Within that constraint the order taken is the shortest one there is, and the two
 **Nothing here was measured on a phone.** Check 7's 899 px is the stacked layout at a desktop height; the editor at 440×956, where the tab bar is drawn and `.admin-main` under-reserves for it by the six pixels Part C recorded, has not been looked at.
 
 **Idle memory was not re-measured.** Part C's 190.2 MiB against a target of under 100 Mi is the last reading, and this work adds no hosted service, no client and no dependency to the process. The frontend does not enter it.
+
+---
+
+# Operator cancel and propose
+
+## Why this section exists
+
+Only to correct a number this work moved. The last recorded reading for the invitee's first load was 71,879 bytes gzipped, and that figure has been the one quoted since; this work added a route the entry chunk carries, so the figure is now wrong for a reason that belongs to this change rather than to drift. Nothing else here is re-audited — the ten checks, the seven design conditions and the register above all still describe the runs that produced them.
+
+## Bundle
+
+Both ends measured with `npm run build && bash scripts/bundle-budget.sh`, the base built in a throwaway worktree with the same toolchain so the two are comparable:
+
+```
+                                  booking route          admin chunk
+5236698  the commit before           71,904                13,858
+HEAD     cancel and propose          72,727    +823        15,085   +1,227
+─────────────────────────────────────────────────────────────────────────
+                        budget       76,800   (4,073 free, 94.7% used)
+```
+
+**The invitee pays 823 bytes for a route they may never open, and that is deliberate.** `/proposal/:token` is where the "a new time is suggested" mail sends them, so `App.tsx` imports `Proposal` eagerly for the reason `/integrations` is imported eagerly: a link pasted into a message must not land on a chunk boundary. Making it lazy would move those bytes to a second request on the one route that exists to be opened from an email, which is the trade Part C already refused for the OAuth callback.
+
+The operator's half — the picker, the row's controls and the admin HTTP calls — is the 1,227 bytes in the admin chunk and is charged to nobody: `routes/admin/` is reachable only through `lazy(() => import('./routes/admin/AdminShell'))`.
+
+## The register of what is not covered
+
+**The `propose-*` checks in `scripts/measure-ui.mjs` are run by hand and nothing gates them.** They caught two defects no unit test could see — a month grid collapsing to single-digit day squares inside a table cell, and a commit button hidden below 861px by a class that pairs with an action bar the admin shell does not have — and they hold those guarantees only as often as somebody runs them. `verify.sh` does not, and should not: they need a seeded instance, an operator session and a browser download.
+
+**Nothing about the invitee's proposal page was measured in a browser.** The picker was, at six viewports; the page the invitee actually opens from the mail was not, and its own layout claims rest on unit tests and reading alone.

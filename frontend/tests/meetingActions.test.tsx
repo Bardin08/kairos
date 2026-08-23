@@ -23,7 +23,10 @@ const ORGANIZER_ZONE = 'Europe/Warsaw'
 // September, so Warsaw is +02:00. 14:00Z is 16:00 there.
 const PROPOSED_SLOT = '2030-09-09T14:00:00Z'
 const PROPOSED_TIME = '16:00'
-const EXPIRES_AT = '2030-09-11T14:00:00Z'
+// 09:30Z is 11:30 in Warsaw in September — deliberately not the suggested time
+// above, so an assertion on it cannot pass by matching that instead.
+const EXPIRES_AT = '2030-09-11T09:30:00Z'
+const EXPIRES_TIME = '11:30'
 const LAPSE_DAY = /11 Sep/
 
 const openProposal: MeetingProposal = {
@@ -90,7 +93,7 @@ describe('MeetingActions', () => {
 
     // And the panel is still open with the button still armed: cancel has no
     // second option to offer, so a failure that closed it would be a dead end.
-    expect(screen.getByRole('button', { name: /call it off/i })).toBeDefined()
+    expect(screen.queryByRole('button', { name: /call it off/i })).not.toBeNull()
   })
 
   test('a busy server and a rejected field do not read the same', async () => {
@@ -155,7 +158,7 @@ describe('MeetingActions', () => {
 
     // Only one hold may be open at a time — the server answers proposal_open —
     // so a row offering Propose over an open one is offering a 409.
-    expect(screen.getByRole('button', { name: /withdraw/i })).toBeDefined()
+    expect(screen.queryByRole('button', { name: /withdraw/i })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /suggest a new time/i })).toBeNull()
   })
 
@@ -175,13 +178,34 @@ describe('MeetingActions', () => {
     await waitFor(() => expect(withdrawProposal).toHaveBeenCalledWith(MEETING_ID, PROPOSAL_ID))
   })
 
+  test('an open hold replaces Propose, and never the ability to call the meeting off', () => {
+    renderActions(openProposal)
+
+    // Every confirmed row could be cancelled before this feature existed. An
+    // open hold is a reason not to offer a SECOND suggestion — the server
+    // answers proposal_open — and no reason at all to make the operator
+    // withdraw one before they can call the meeting off.
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(screen.queryByLabelText(/why/i)).not.toBeNull()
+  })
+
+  test('the lapse deadline on the row is a time as well as a date', () => {
+    renderActions(openProposal)
+
+    // The hold is minted-plus-hours, so it runs out at an arbitrary clock time,
+    // and the invitee is reading that same instant to the minute in their mail.
+    // A date alone lets the operator think they have until the end of that day.
+    expect(screen.getByText(new RegExp(EXPIRES_TIME))).toBeDefined()
+  })
+
   test('a lapsed proposal is offered again rather than offered for withdrawal', () => {
     // The server folds the clock into the state, so `expired` arrives whether
     // or not anything has swept it. Withdraw over one would ask the operator to
     // close something already closed, and would leave them no way to re-offer.
     renderActions({ ...openProposal, state: 'expired' })
 
-    expect(screen.getByRole('button', { name: /suggest a new time/i })).toBeDefined()
+    expect(screen.queryByRole('button', { name: /suggest a new time/i })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /withdraw/i })).toBeNull()
   })
 })

@@ -157,13 +157,32 @@ export default function MeetingActions({
         <p className="record-meta numeric">
           Suggested {shortDate(zonedDate(proposal.start, zone))}, {zonedTime(proposal.start, zone)}
         </p>
+        {/* To the minute, because the hold is minted-plus-hours and lands on an
+            arbitrary clock time — and because the mail the invitee is reading
+            says the same instant to the minute. A date alone would let an
+            operator think they had until the end of that day. */}
         <p className="record-meta numeric">
-          Lapses {shortDate(zonedDate(proposal.expiresAt, zone))}
+          Lapses {shortDate(zonedDate(proposal.expiresAt, zone))},{' '}
+          {zonedTime(proposal.expiresAt, zone)}
         </p>
         <Failure error={failure} />
-        <button className="btn" type="button" onClick={withdraw} data-loading={busy || undefined}>
-          Withdraw
-        </button>
+        <div className="row gap-2 wrap">
+          <button className="btn" type="button" onClick={withdraw} data-loading={busy || undefined}>
+            Withdraw
+          </button>
+          {/* Cancel stays. An open hold replaces PROPOSE, never the ability to
+              call the meeting off — every confirmed row could be cancelled
+              before this feature existed, and a branch that returned early
+              without it made the operator withdraw a suggestion first with
+              nothing on the row saying so. */}
+          <button
+            className="btn btn-ghost btn-danger"
+            type="button"
+            onClick={() => setPanel('confirm')}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     )
   }

@@ -74,10 +74,19 @@ export default function ProposePanel({
   const [start, setStart] = useState<string | null>(null)
   const [animate, setAnimate] = useState(false)
   const [busy, setBusy] = useState(false)
-  // The error itself and not a sentence made from it: `Failure` reads the status
-  // and the code off it, and a deactivated link, a slot taken while the operator
-  // was choosing and a deployment with no mail relay are three different things
-  // to do next.
+  // Two failures, and they are not one state with two causes. A READ that never
+  // arrived leaves nothing on screen to act on, so it replaces the times; a
+  // refused SUGGESTION leaves every time still there and still pickable, so it
+  // sits under them. Collapsing the two put an error where the calendar should
+  // be and drew "nothing here has a gap this meeting fits into" over a dropped
+  // connection — a claim about the operator's calendar made when nothing at all
+  // was known about it.
+  //
+  // The error itself and not a sentence made from it either way: `Failure`
+  // reads the status and the code off it, and a deactivated link, a slot taken
+  // while the operator was choosing and a deployment with no mail relay are
+  // three different things to do next.
+  const [readFailure, setReadFailure] = useState<unknown>(null)
   const [failure, setFailure] = useState<unknown>(null)
   const listRef = useRef<HTMLElement>(null)
 
@@ -90,6 +99,7 @@ export default function ProposePanel({
     const days = monthCells(month).filter((cell): cell is string => cell !== null)
     const controller = new AbortController()
     setSlots(null)
+    setReadFailure(null)
 
     getSlots(
       meeting.slug,
@@ -99,12 +109,21 @@ export default function ProposePanel({
       .then(setSlots)
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setSlots([])
-        setFailure(error)
+        // NOT setSlots([]). An empty month and a month nobody could read are
+        // different answers, and the empty state's sentence — "nothing here has
+        // a gap this meeting fits into" — is a claim about the calendar. Said
+        // over a dropped connection it tells the operator this link is full
+        // when nothing is known about it at all. Book.tsx draws its failure
+        // INSTEAD of its empty state for the same reason.
+        setSlots(null)
+        setReadFailure(error)
       })
 
+    // `zone` decides which day each instant is grouped under and which month
+    // the picker opened on, so a zone that changed under this effect has to
+    // re-ask rather than regroup a month that was never requested.
     return () => controller.abort()
-  }, [month, meeting.slug, meeting.durationMinutes])
+  }, [month, zone, meeting.slug, meeting.durationMinutes])
 
   // Keyed on the ORGANIZER's calendar, because that is what `from` and `to`
   // meant to the request that produced these instants, and therefore what a
@@ -218,7 +237,13 @@ export default function ProposePanel({
           />
 
           <div>
-            {slots === null ? (
+            {/* The failed read comes first, and it is the whole point of the
+                order: below it `slots === null` also means "still loading", and
+                either of the two branches after it would be a sentence about a
+                calendar this panel could not read. */}
+            {readFailure !== null ? (
+              <Failure error={readFailure} />
+            ) : slots === null ? (
               <p className="prose t-sm">Finding open times…</p>
             ) : activeDay === null ? (
               <div className="empty">
@@ -240,7 +265,10 @@ export default function ProposePanel({
               />
             )}
 
-            <Failure error={failure} className="mt-4" />
+            {/* A refusal of the SUGGESTION, under the times it was made against
+                and never instead of them. Suppressed while a read has failed, so
+                one broken month cannot stack two errors on one column. */}
+            {readFailure === null && <Failure error={failure} className="mt-4" />}
 
             {/* Absent until a time is picked rather than present and disabled: a
                 button that cannot be pressed still reads as an action, and there

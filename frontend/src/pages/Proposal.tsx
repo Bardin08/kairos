@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'wouter'
 
 import AlertIcon from '../components/AlertIcon'
@@ -9,7 +9,7 @@ import {
   getProposal,
   type Proposal as Offer,
 } from '../lib/api'
-import { longDate, zonedDate, zonedTime } from '../lib/time'
+import { localZone, longDate, zonedDate, zonedTime } from '../lib/time'
 
 const NOT_FOUND = 404
 
@@ -32,6 +32,19 @@ type Phase = 'loading' | 'ready' | 'missing' | 'broken'
 /** `Monday 9 September, 20:00–20:30` in the given zone. */
 function when(start: string, end: string, zone: string): string {
   return `${longDate(zonedDate(start, zone))}, ${zonedTime(start, zone)}–${zonedTime(end, zone)}`
+}
+
+/**
+ * `Monday 9 September, 14:00` — the moment the hold runs out, to the minute.
+ *
+ * The date alone would be a lie by omission. `ExpiresAt` is the mint time plus
+ * the hold in hours, so it lands on whatever clock time the operator happened
+ * to press the button at, and the mail that sent the invitee here prints both
+ * halves. "By Monday 9 September" read at 18:00 says an offer that died at
+ * 14:00 is still open.
+ */
+function moment(instant: string, zone: string): string {
+  return `${longDate(zonedDate(instant, zone))}, ${zonedTime(instant, zone)}`
 }
 
 /** What is true now that the suggestion is closed, in the invitee's terms. */
@@ -74,8 +87,19 @@ export default function Proposal() {
   const { token } = useParams()
   const [phase, setPhase] = useState<Phase>('loading')
   const [offer, setOffer] = useState<Offer | null>(null)
-  const [busy, setBusy] = useState(false)
+  // WHICH answer is in flight, not merely that one is. `data-loading` blanks a
+  // button's label and takes its pointer events, so marking both would leave the
+  // invitee looking at two pending actions with no way to tell which decision
+  // they had just made.
+  const [running, setRunning] = useState<'accept' | 'decline' | null>(null)
   const [message, setMessage] = useState('')
+  // Focus lands here when an answer replaces the question. On a server-rendered
+  // page the navigation would have moved it; in an SPA nothing does unless it is
+  // written, and this is the one transition an invitee causes on this page.
+  // Only for an answer given HERE — a page that loads already-declined must not
+  // steal focus from a reader who has only just arrived.
+  const outcomeRef = useRef<HTMLParagraphElement>(null)
+  const answeredHere = useRef(false)
 
   useEffect(() => {
     if (token === undefined) {
@@ -102,9 +126,13 @@ export default function Proposal() {
     return () => controller.abort()
   }, [token])
 
+  useEffect(() => {
+    if (answeredHere.current) outcomeRef.current?.focus()
+  }, [offer?.state])
+
   async function answer(accepting: boolean) {
-    if (token === undefined || busy) return
-    setBusy(true)
+    if (token === undefined || running !== null) return
+    setRunning(accepting ? 'accept' : 'decline')
     setMessage('')
     try {
       if (accepting) {
@@ -117,6 +145,7 @@ export default function Proposal() {
       } else {
         setOffer(await declineProposal(token))
       }
+      answeredHere.current = true
     } catch {
       // A 409 means somebody answered or the hold lapsed while this page sat
       // open, and both are answered by what a reload shows rather than by a
@@ -124,7 +153,7 @@ export default function Proposal() {
       // recorded, so a page that disarmed them would be a dead end.
       setMessage('That could not be recorded. Reload the page to see where things stand.')
     } finally {
-      setBusy(false)
+      setRunning(null)
     }
   }
 
@@ -160,7 +189,12 @@ export default function Proposal() {
     )
   }
 
-  const zone = offer.timeZone
+  // The INVITEE's own zone, the one the proposal mail formatted against and the
+  // one the manage page for this same booking uses. Empty only for a booking
+  // carrying no booker at all, and then the browser's rather than the
+  // organizer's — `Intl` throws a RangeError on an empty zone, and here that
+  // would happen during render and take the whole page down over one bad row.
+  const zone = offer.timeZone === '' ? localZone() : offer.timeZone
 
   if (offer.state !== OPEN) {
     return (
@@ -174,7 +208,12 @@ export default function Proposal() {
           </p>
           <p className="summary-meta numeric">Times in {zone}</p>
         </div>
-        <p className="prose mt-5">{outcome(offer.state)}</p>
+        {/* Announced as well as focused: the question this replaced is gone from
+            the document, and a reader who cannot see that needs telling what
+            took its place. */}
+        <p className="prose mt-5" role="status" tabIndex={-1} ref={outcomeRef}>
+          {outcome(offer.state)}
+        </p>
       </Page>
     )
   }
@@ -187,7 +226,7 @@ export default function Proposal() {
         declining leaves it exactly where it is.
       </p>
 
-      {/* The two times, one under the other, in the organizer's zone and said
+      {/* The two times, one under the other, in the invitee's own zone and said
           so. Neither is a heading: they are the same fact twice, before and
           after, and a reader comparing them needs them the same size. */}
       <div className="group">
@@ -198,9 +237,9 @@ export default function Proposal() {
         <p className="summary-meta numeric">Times in {zone}</p>
       </div>
 
-      <p className="fine mt-5">
-        If nobody answers by {longDate(zonedDate(offer.expiresAt, zone))} the suggestion lapses and
-        the meeting stays where it is.
+      <p className="fine mt-5 numeric">
+        If nobody answers by {moment(offer.expiresAt, zone)} the suggestion lapses and the meeting
+        stays where it is.
       </p>
 
       {message !== '' && (
@@ -211,10 +250,16 @@ export default function Proposal() {
       )}
 
       <div className="row gap-2 wrap mt-5">
+        {/* `disabled` as well as `data-loading`, and they are not the same guard.
+            The attribute is a look — the stylesheet blanks the label and drops
+            pointer events — which a keyboard still fires Space through and a
+            screen reader says nothing about. `disabled` is the part that
+            actually stops the second answer and gets announced. */}
         <button
           className="btn btn-primary"
           type="button"
-          data-loading={busy || undefined}
+          data-loading={running === 'accept' || undefined}
+          disabled={running !== null}
           onClick={() => answer(true)}
         >
           Accept the new time
@@ -222,7 +267,8 @@ export default function Proposal() {
         <button
           className="btn"
           type="button"
-          data-loading={busy || undefined}
+          data-loading={running === 'decline' || undefined}
+          disabled={running !== null}
           onClick={() => answer(false)}
         >
           Decline

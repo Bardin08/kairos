@@ -542,13 +542,22 @@ public static class MeetingsAdminEndpoints
         // invitee answering at the same moment cannot have their answer written over by this. The
         // count is deliberately not checked: withdrawing something already closed is what a
         // double-clicked button asks for, and the honest answer to it is the row as it stands.
+        //
+        // Which closed state it lands in is decided by the row's own expiry rather than by the
+        // button that was pressed, and the same fold every other reader applies. The operator sees
+        // Withdraw on a hold that lapsed between the page rendering and the click; writing that as
+        // Withdrawn would say they took back a live suggestion — and would drop the lapse notice,
+        // because the sweeper looks for Expired rows nobody has been told about. NotifiedAt stays
+        // null here for exactly that reason.
         var now = clock.GetCurrentInstant();
         var decidedAt = now.ToUnixTimeSeconds();
         await context.BookingProposals
             .Where(row => (row.Id == proposalId) && (row.State == ProposalState.Open))
             .ExecuteUpdateAsync(
                 set => set
-                    .SetProperty(row => row.State, ProposalState.Withdrawn)
+                    .SetProperty(
+                        row => row.State,
+                        row => row.ExpiresAt <= decidedAt ? ProposalState.Expired : ProposalState.Withdrawn)
                     .SetProperty(row => row.DecidedAt, decidedAt),
                 cancellationToken);
 

@@ -216,7 +216,7 @@ test('a confirmed meeting can be called off from its own row', async () => {
 
   // The whole reason this tab stopped being read-only: the alternative was
   // editing the calendar by hand, which leaves it disagreeing with Kairos.
-  expect(within(row).getByRole('button', { name: 'Cancel' })).toBeDefined()
+  expect(within(row).queryByRole('button', { name: 'Cancel' })).not.toBeNull()
 })
 
 test('cancelling a row redraws that row from the answer rather than reloading the table', async () => {
@@ -343,7 +343,7 @@ test('a declined suggestion says so on the row, and offers another one', async (
   expect(within(row).getByText(/declined/i)).toBeDefined()
   // The recovery is on the row beside the news: the operator's next move after
   // a refusal is almost always a second suggestion.
-  expect(within(row).getByRole('button', { name: /suggest a new time/i })).toBeDefined()
+  expect(within(row).queryByRole('button', { name: /suggest a new time/i })).not.toBeNull()
 })
 
 test('a lapsed suggestion does not read as a refusal', async () => {
@@ -364,7 +364,7 @@ test('a meeting nobody ever proposed anything for says nothing about proposals',
   const row = await rowFor(synced)
 
   expect(within(row).queryByText(/declined|lapsed|no answer/i)).toBeNull()
-  expect(within(row).getByRole('button', { name: /suggest a new time/i })).toBeDefined()
+  expect(within(row).queryByRole('button', { name: /suggest a new time/i })).not.toBeNull()
 })
 
 /** 13:00 UTC, which is 09:00 in New York and 15:00 in Warsaw. */

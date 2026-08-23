@@ -356,6 +356,100 @@ public class ProposalEndpointsTests
         (await MeetingsFixture.SlotsOnOtherLinkAsync(app)).ShouldContain(MovedTo);
     }
 
+    /// <summary>
+    /// The invitee's page draws the invitee's clock, and this is the third surface that has to
+    /// agree about one booking.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Integrations.Email.BookingMailer.ComposeProposal"/> formats every time in the
+    /// booker's own zone, and the manage page renders the booking's. Answering the ORGANIZER's
+    /// here would print a different clock time for the same instant in the tab opened from that
+    /// mail — the fixture's booker is in Warsaw and the organizer is on UTC, so the two differ by
+    /// an hour or two all year and the mistake would never look like a bug, only like a wrong time.
+    /// </remarks>
+    [Fact]
+    public async Task GetProposal_AnOpenProposal_AnswersTheInviteesZoneAndNotTheOrganizers()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+
+        var answer = await app.Client.GetFromJsonAsync<ProposalResponse>(
+            $"{ApiVersions.V1}/bookings/proposals/{token}", TestContext.Current.CancellationToken);
+
+        answer!.TimeZone.ShouldBe(MeetingsFixture.BookerZone);
+        answer.TimeZone.ShouldNotBe(SchedulingDefaults.TimeZoneId);
+    }
+
+    /// <summary>
+    /// A hold that ran out between the row rendering and the operator pressing Withdraw is
+    /// recorded as having lapsed, not as having been taken back.
+    /// </summary>
+    /// <remarks>
+    /// Two reasons, and the second is the one that bites. Nobody withdrew a live suggestion, so
+    /// saying they did is a false record of what happened; and the sweeper's own predicate is
+    /// Expired rows with no <see cref="BookingProposal.NotifiedAt"/>, so writing Withdrawn drops
+    /// the notice telling the operator their suggestion lapsed. The marker stays null here for
+    /// exactly that reason.
+    /// </remarks>
+    [Fact]
+    public async Task Withdraw_AHoldThatHadAlreadyLapsed_IsRecordedAsExpiredAndStillAnnounceable()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        await ProposeAsync(client, booking, MovedTo);
+        var proposal = app.Read(context =>
+            context.BookingProposals.Single(row => row.BookingId == booking).Id);
+        Lapse(app, booking);
+
+        var answer = await client.DeleteAsync(
+            $"{ApiVersions.V1}/admin/meetings/{booking}/proposals/{proposal}",
+            TestContext.Current.CancellationToken);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var row = app.Read(context => context.BookingProposals.Single(candidate => candidate.Id == proposal));
+        row.State.ShouldBe(ProposalState.Expired);
+        row.DecidedAt.ShouldNotBeNull();
+        row.NotifiedAt.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// A lapse the sweeper has already written and one it has not reach the invitee as the same
+    /// sentence.
+    /// </summary>
+    /// <remarks>
+    /// The accept guard used to compare <see cref="BookingProposal.ExpiresAt"/> itself, which made
+    /// it a second copy of <see cref="ProposalWriter.StateAt"/>'s fold — and the copy had drifted:
+    /// a hold the sweeper HAD closed fell into the "already answered" branch, so which of two
+    /// sentences an invitee read depended on whether a background service had been round yet.
+    /// Nobody answered it either way.
+    /// </remarks>
+    [Fact]
+    public async Task Accept_AHoldTheSweeperAlreadyClosed_ReadsAsLapsedRatherThanAsAnswered()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+
+        // Exactly what a sweep leaves behind: the row closed, not merely past its expiry.
+        app.Seed(context =>
+        {
+            var row = context.BookingProposals.Single(candidate => candidate.BookingId == booking);
+            row.ExpiresAt = LapsedAt;
+            row.State = ProposalState.Expired;
+            row.DecidedAt = LapsedAt;
+        });
+
+        var answer = await AnswerAsync(app, token, AcceptAction);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
+            .ShouldContain(BookingsEndpoints.ProposalExpiredCode);
+    }
+
     [Fact]
     public async Task Accept_AnOpenProposal_MovesTheBookingAndAdvancesTheSequence()
     {
