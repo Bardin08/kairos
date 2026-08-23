@@ -3,9 +3,8 @@ using Kairos.Api.Scheduling;
 namespace Kairos.Api.Availability;
 
 /// <summary>
-/// One provider of intervals the organizer is not free in. Part A registers a single
-/// implementation and Part B adds Google as a second one; nothing that consumes this changes,
-/// because every source answers the same question over the same window and the answers
+/// One provider of intervals the organizer is not free in. Adding a source changes nothing
+/// downstream: every source answers the same question over the same window, and the answers
 /// concatenate into the one conflict pool <see cref="SlotGenerator"/> reads.
 /// </summary>
 public interface IBusySource

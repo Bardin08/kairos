@@ -18,10 +18,9 @@ public sealed class IntegrationCredential
     /// an account id. Encrypted as a whole, read as a whole, never queried by content.
     /// </summary>
     /// <remarks>
-    /// JSON is right here and was wrong for <see cref="BookingParticipant"/> because the reasons
-    /// that killed it there do not apply: a credential payload is never searched, never joined,
-    /// never constrained by a foreign key, and it is a secret — so it is a single opaque blob
-    /// whichever way it is stored. The queryable parts stay columns.
+    /// JSON is right here and was wrong for <see cref="BookingParticipant"/>: a credential payload
+    /// is never searched, never joined, never constrained by a foreign key, and it is a secret — so
+    /// it is a single opaque blob whichever way it is stored. The queryable parts stay columns.
     /// </remarks>
     public required string ProtectedPayload { get; set; }
 
@@ -29,9 +28,9 @@ public sealed class IntegrationCredential
     public string? AccountLabel { get; set; }
 
     /// <summary>
-    /// Whether this credential still works, written by whatever discovers that it does not.
-    /// Google's adapter is the only writer today, and that is an accident of there being one
-    /// provider — the column belongs to the credential, not to the adapter.
+    /// Written by whatever discovers the credential has stopped working. Google's adapter is the
+    /// only writer today, an accident of there being one provider — the column belongs to the
+    /// credential, not to the adapter.
     /// </summary>
     /// <remarks>
     /// Initialised rather than left to default(CredentialHealth), which is 0 and is not a value of
@@ -41,9 +40,9 @@ public sealed class IntegrationCredential
     public CredentialHealth Health { get; set; } = CredentialHealth.Healthy;
 
     /// <summary>
-    /// Unix seconds of the last proven use, or null when there has not been one. This is what
-    /// makes an alert actionable: "reconnect" without "it last worked in March" leaves the
-    /// operator unable to tell a five-minute outage from a season of lost meetings.
+    /// Unix seconds of the last proven use, or null when there has not been one. It is what makes
+    /// an alert actionable: "reconnect" without "it last worked in March" leaves the operator
+    /// unable to tell a five-minute outage from a season of lost meetings.
     /// </summary>
     public long? LastSuccessAt { get; set; }
 

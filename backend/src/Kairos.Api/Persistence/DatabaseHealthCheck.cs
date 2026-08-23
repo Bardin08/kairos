@@ -11,45 +11,41 @@ namespace Kairos.Api.Persistence;
 /// means here.
 /// </summary>
 /// <remarks>
-/// It checks the local database and nothing else — not the calendar provider, not the mail relay,
-/// not the webhook receiver, and not whatever adapter ships next. None of those can fail a
-/// booking: an unconfigured or disconnected provider contributes no busy time, mail that cannot be
-/// sent is logged, and the outbox keeps queueing for a receiver that refuses. A readiness check
-/// that named one would take the pod out of the load balancer over a revoked grant somewhere else
-/// — turning a broken integration into an outage, and doing it to every invitee who only wanted a
-/// slot. Provider trouble surfaces on the integration screen, where the operator can act on it.
+/// The local database and nothing else — not the calendar provider, not the mail relay, not the
+/// webhook receiver, not whatever adapter ships next. None of those can fail a booking: an
+/// unconfigured or disconnected provider contributes no busy time, mail that cannot be sent is
+/// logged, and the outbox keeps queueing for a receiver that refuses. A readiness check naming one
+/// would take the pod out of the load balancer over a revoked grant somewhere else, turning a
+/// broken integration into an outage for every invitee who only wanted a slot. Provider trouble
+/// surfaces on the integration screen, where the operator can act on it.
 /// <para>
 /// A table is queried rather than <c>CanConnectAsync</c>, because on SQLite connecting proves
-/// nothing: the provider CREATES the file it is pointed at, so a connection to a database that has
-/// been deleted or moved out from under the process opens happily and reports a healthy, empty
-/// database. That is precisely the state this check exists to catch, and putting a query through
-/// the schema is what tells the two apart.
+/// nothing: the provider CREATES the file it is pointed at, so a connection to a database deleted
+/// or moved out from under the process opens happily and reports a healthy, empty one. That is the
+/// state this check exists to catch, and a query through the schema is what tells the two apart.
 /// </para>
 /// <para>
 /// Pending migrations are deliberately not part of the answer. <c>Program.cs</c> runs
 /// <c>Database.Migrate()</c> before <c>app.Run()</c>, so a process with anything left to apply
-/// never reaches the point where this endpoint is served — the check would spend a second
-/// round-trip per probe to answer a question that is already true by construction, and would go on
-/// answering it at whatever interval the orchestrator polls.
+/// never reaches the point where this endpoint is served; checking would spend a round-trip per
+/// probe on a question already true by construction, at whatever interval the orchestrator polls.
 /// </para>
 /// <para>
-/// A busy database is degraded and not unready, which is the same decision
-/// <see cref="Shared.DatabaseBusyExceptionHandler"/> already made in the other direction: SQLITE_BUSY
-/// is a queue rather than a fault, and the read that timed out succeeds a moment later. Reported
-/// as unready it would take the one replica out of rotation over contention, and every invitee
-/// would meet the ingress's own 503 for a database that is still answering reads — the same shape
-/// of mistake the paragraph above refuses for a provider. Degraded keeps the process in service
-/// and still says out loud that something is contended.
+/// A busy database is degraded and not unready, the same decision
+/// <see cref="Shared.DatabaseBusyExceptionHandler"/> made in the other direction: SQLITE_BUSY is a
+/// queue rather than a fault, and the read that timed out succeeds a moment later. Reported as
+/// unready it would take the one replica out of rotation over contention, and every invitee would
+/// meet the ingress's 503 for a database still answering reads. Degraded keeps the process in
+/// service and still says out loud that something is contended.
 /// </para>
 /// </remarks>
 public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
 {
     /// <summary>
-    /// How long the probe query may spend waiting for a lock before it gives up and says so. The
-    /// provider's own default is 30 seconds, which is a pooled connection held for thirty seconds
-    /// per probe while a kubelet that gave up after one starts the next one — three of them in
-    /// flight at a ten-second period, competing with real traffic for the same pool. A probe that
-    /// cannot answer quickly has answered.
+    /// How long the probe query may wait for a lock before it gives up and says so. The provider's
+    /// default is 30 seconds — a pooled connection held that long per probe while a kubelet that
+    /// gave up after one starts the next, three in flight at a ten-second period, competing with
+    /// real traffic for the same pool. A probe that cannot answer quickly has answered.
     /// </summary>
     public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(QueryTimeoutSeconds);
 
@@ -57,11 +53,11 @@ public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
     private const int QueryTimeoutSeconds = 1;
 
     /// <summary>
-    /// The registration's own ceiling, and a multiple rather than a number of its own because the
-    /// commands below have to be what fires first. The health check service reports a registration
-    /// timeout as the failure status — unready — so a ceiling that beat them would classify a
-    /// contended database as unready and undo the decision recorded above. Three, because a probe
-    /// issues two bounded commands: the pragmas on opening a connection, and the query.
+    /// The registration's ceiling, a multiple rather than a number of its own because the commands
+    /// below have to fire first. The health check service reports a registration timeout as the
+    /// failure status — unready — so a ceiling that beat them would classify a contended database
+    /// as unready and undo the decision recorded above. Three, because a probe issues two bounded
+    /// commands: the pragmas on opening a connection, and the query.
     /// </summary>
     /// <remarks>
     /// It is a backstop and not the bound. A blocked SQLite call retries inside the native library
@@ -85,15 +81,14 @@ public sealed class DatabaseHealthCheck(KairosDbContext context) : IHealthCheck
         HealthCheckContext check,
         CancellationToken cancellationToken = default)
     {
-        // Both on the probe's own scope and nowhere else. The health check service resolves this
-        // check in a scope of its own, so these are deadlines for this probe rather than a global
-        // retune — a request writing a booking still gets the provider's default 30 seconds,
-        // because a booking is worth waiting for and a probe is not.
+        // Both on the probe's own scope and nowhere else: the health check service resolves this
+        // check in a scope of its own, so a request writing a booking still gets the provider's
+        // default 30 seconds. A booking is worth waiting for and a probe is not.
         //
-        // The connection's default covers the command the pragma interceptor runs when EF opens
-        // it, which is where a probe against an exclusively locked database actually stalls:
-        // measured at the full 30 seconds, before the query below was reached. That command is not
-        // this code's to configure directly, and it inherits this.
+        // The connection's default covers the command the pragma interceptor runs when EF opens it,
+        // which is where a probe against an exclusively locked database actually stalls — measured
+        // at the full 30 seconds, before the query below was reached. That command is not this
+        // code's to configure directly, and it inherits this.
         ((SqliteConnection)context.Database.GetDbConnection()).DefaultTimeout = QueryTimeoutSeconds;
         context.Database.SetCommandTimeout(QueryTimeout);
 
