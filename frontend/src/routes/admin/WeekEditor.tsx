@@ -72,12 +72,11 @@ function rulesOf(week: Week): Hours[] | null {
  * closing the day are one act — a row that has run out of windows draws itself
  * as closed and offers to be opened again.
  *
- * Edits are made against a draft and sent in one PUT when the operator asks. Not
- * caution about round trips: a pattern in use is live, so a keystroke in a time
- * field that widened a window would be an hour on offer the moment it was typed,
- * and a half-typed one would be refused as a window ending before it starts. The
- * endpoint has the same shape — it stores the whole set or refuses the whole set
- * — so the pane and the request agree about what one change is.
+ * Edits are made against a draft and sent in one PUT when the operator asks. A
+ * pattern in use is live, so a keystroke in a time field that widened a window
+ * would be an hour on offer the moment it was typed, and a half-typed one would
+ * be refused as a window ending before it starts. The endpoint has the same
+ * shape — it stores the whole set or refuses the whole set.
  *
  * Whether two windows overlap is the server's answer and not this pane's. The
  * same bound guards the booking engine, and a second copy here is the copy that
