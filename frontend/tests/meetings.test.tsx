@@ -386,18 +386,41 @@ const REMOTE_ZONE = 'America/New_York'
 const PROPOSED_REMOTE_TIME = '09:00'
 const PROPOSED_WARSAW_TIME = '15:00'
 
-test('the propose panel asks for the times of the link that row was booked through', async () => {
+test('the row opens the picker over the list, for the link that row was booked through', async () => {
   render(<Meetings />)
   const row = await rowFor(synced)
 
   fireEvent.click(within(row).getByRole('button', { name: /suggest a new time/i }))
 
+  // Over the list rather than inside the cell: a month grid measured 8px a
+  // square in the Actions column at 1280, so the picker takes the page the way
+  // LinkEditor does. The table is gone while it is up.
+  expect(await screen.findByRole('heading', { name: /suggest a new time/i })).toBeDefined()
+  expect(screen.queryByRole('table')).toBeNull()
+
   // The slug and not the link id: GET /links/{slug}/slots takes no id, so a row
   // handing its id down would ask about a link that does not exist — and would
   // do it silently, since an empty answer looks like a full calendar.
   await waitFor(() =>
-    expect(getSlots).toHaveBeenCalledWith(SLUG, expect.anything(), expect.anything()),
+    expect(getSlots).toHaveBeenCalledWith(
+      SLUG,
+      expect.objectContaining({ duration: synced.durationMinutes }),
+      expect.anything(),
+    ),
   )
+})
+
+test('backing out of the picker brings the list back rather than reloading it', async () => {
+  render(<Meetings />)
+  const row = await rowFor(synced)
+  const reads = vi.mocked(listMeetings).mock.calls.length
+
+  fireEvent.click(within(row).getByRole('button', { name: /suggest a new time/i }))
+  fireEvent.click(await screen.findByRole('button', { name: /back/i }))
+
+  expect(await screen.findByRole('table')).toBeDefined()
+  // The rows never left the page's own state, so coming back costs nothing.
+  expect(vi.mocked(listMeetings).mock.calls.length).toBe(reads)
 })
 
 test('an open hold is drawn on the row in the organizer zone, not the browser', async () => {
