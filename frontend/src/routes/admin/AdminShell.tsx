@@ -19,8 +19,8 @@ import { refusal, subscribeToRefusal } from './session'
  * One place the operator can be, and the icon that stands for it.
  *
  * Paths are relative: the shell is mounted with `nest`, so wouter's base is
- * `/admin` and both `<Link>` and `<Route>` prefix it. Writing `/admin/links`
- * here would produce `/admin/admin/links`.
+ * `/admin` and both `<Link>` and `<Route>` prefix it. `/admin/links` here would
+ * produce `/admin/admin/links`.
  */
 type Destination = {
   path: string
@@ -29,12 +29,9 @@ type Destination = {
 }
 
 /**
- * Three, and no fourth.
- *
- * These are the rail on desktop and the whole of the tab bar's grid on a phone,
- * and `.tabbar-inner` is `repeat(3, 1fr)` in kairos.css — a fourth entry here
- * wraps into a ragged second row. Settings is deliberately not one of them; see
- * SETTINGS.
+ * Three, and no fourth. These are the rail on desktop and the whole tab bar grid
+ * on a phone, and `.tabbar-inner` is `repeat(3, 1fr)` in kairos.css — a fourth
+ * entry wraps into a ragged second row. Settings is not one; see SETTINGS.
  */
 const DESTINATIONS: Destination[] = [
   {
@@ -92,13 +89,10 @@ const DESTINATIONS: Destination[] = [
 ]
 
 /**
- * The secondary destination.
- *
- * The organizer's timezone, the four global limit defaults and Part B's
- * integrations all live behind it, and all of them are visited about twice a
- * year. That is not a fourth daily destination, so it does not take a third of
- * the phone's tab bar: it sits at the foot of the rail, under the hairline, and
- * above the tab grid on a phone.
+ * The secondary destination. The organizer's timezone, the four global limit
+ * defaults and Part B's integrations live behind it, all visited about twice a
+ * year — not a fourth daily destination, so it does not take a third of the
+ * phone's tab bar. It sits at the foot of the rail, under the hairline.
  */
 const SETTINGS: Destination = {
   path: '/settings',
@@ -143,11 +137,9 @@ function initials(name: string): string {
 /**
  * A destination as a link, marked when it is the one being shown.
  *
- * `aria-current="page"` is the only thing that marks it, and it is what both
- * visual channels hang off: in the rail kairos.css answers it with an inset
- * fill and a heavier weight, in the tab bar with the accent AND a 2px edge bar
- * above the tab. Colour is never the only channel, which is the rule this
- * control has already broken twice.
+ * `aria-current="page"` is the only marker, and both visual channels hang off
+ * it: in the rail an inset fill and a heavier weight, in the tab bar the accent
+ * AND a 2px edge bar above the tab. Colour is never the only channel.
  */
 function destinationLink(destination: Destination, current: string) {
   return (
@@ -165,11 +157,10 @@ function destinationLink(destination: Destination, current: string) {
 /**
  * The operator's workbench: a rail on desktop, a bottom tab bar on a phone.
  *
- * Which of the two is drawn is kairos.css's decision alone — `.rail` and
- * `.tabbar` swap at 900px in a media query, and both are always rendered. No
- * width is read here and none should be: layout set in JavaScript stops
- * surviving a resize with JS busy, and the breakpoint would then exist in two
- * places that could disagree.
+ * Which is drawn is kairos.css's decision alone — `.rail` and `.tabbar` swap at
+ * 900px in a media query, and both are always rendered. No width is read here:
+ * layout set in JavaScript stops surviving a resize with JS busy, and the
+ * breakpoint would exist in two places that could disagree.
  */
 export default function AdminShell() {
   // Relative to the mount point, so `/admin/links` reads as `/links` and
@@ -178,9 +169,8 @@ export default function AdminShell() {
 
   // Whether any admin call has been refused, and which refusal it was.
   // `useSyncExternalStore` rather than state plus an effect because a refusal
-  // can land in the window between render and subscribe — the shell's own read
-  // below is fired from an effect, and so is every page's — and this is the
-  // hook that cannot miss it.
+  // can land in the window between render and subscribe, and this is the hook
+  // that cannot miss it.
   const refused = useSyncExternalStore(subscribeToRefusal, refusal)
 
   // Whatever the identity provider called this operator, or null. Null is the
@@ -213,9 +203,8 @@ export default function AdminShell() {
 
         setDismissed(dismissedFor(arrived))
       })
-      // Silent, exactly like the settings read below. The rail is navigation, and
-      // nothing about it should turn red because a fetch did — least of all the
-      // control whose whole job is to be believed when it does.
+      // Silent, exactly like the settings read below — least of all the control
+      // whose whole job is to be believed when it does turn red.
       .catch(() => {})
 
     return () => controller.abort()
@@ -244,12 +233,10 @@ export default function AdminShell() {
     return () => controller.abort()
   }, [])
 
-  // Everything below this line is chrome, and none of it may be drawn once a
-  // call has been refused. Not hidden — absent: a rail the operator can tab
-  // into, a New link button that cannot succeed and an empty state asserting
-  // there is nothing to show are each a lie told by a screen that was refused
-  // permission to ask. Placed after the hooks above, which run unconditionally,
-  // because the read that discovers the refusal is one of them.
+  // Everything below is chrome, and none of it may be drawn once a call has been
+  // refused. Not hidden — absent: a tabbable rail, a New link button that cannot
+  // succeed and an empty state asserting there is nothing to show are each a lie.
+  // After the hooks above, because the read that discovers the refusal is one.
   if (refused === 'no-session') return <Locked />
   if (refused === 'not-an-operator') return <NotOperator />
 
@@ -279,14 +266,12 @@ export default function AdminShell() {
 
           {/* `.rail-foot` pins itself to the bottom and draws the hairline that
               says "not one of the three". The inner `.nav` is a div, not a
-              second navigation landmark: one link is not a set of them, and it
-              is only there because `.nav a` is what keeps a link off the
-              accent colour it would otherwise inherit from the base `a` rule.
+              second navigation landmark: it is only there because `.nav a` keeps
+              a link off the accent colour the base `a` rule would give it.
 
-              `.rail-foot` is a flex row, so the identity and the link are
-              stacked inside one `.grow` child rather than laid side by side —
-              240px does not hold an avatar, a name and a labelled link on one
-              line without one of them being cut. */}
+              It is a flex row, so the identity and the link stack inside one
+              `.grow` child — 240px does not hold an avatar, a name and a
+              labelled link on one line. */}
           <div className="rail-foot">
             <div className="grow">
               <ConditionRow

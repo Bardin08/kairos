@@ -1,19 +1,12 @@
 // The settings half of the operator's HTTP surface.
 //
-// Here rather than in lib/api.ts, and the reason is measured rather than
-// stylistic: lib/api.ts is imported by the booking page, so anything added to
-// it lands in the entry chunk and is downloaded by every invitee who opens a
-// link on their phone — endpoints they can never call. This module is imported
-// only by pages behind the lazily imported admin shell, so Rollup places it in
-// the admin chunk. It still makes no fetch of its own: it goes through
-// `adminRequest`, which wraps lib/api's `request` — still the one place a
-// failure becomes an ApiError — and latches session.ts on a 401 so the shell
-// can replace itself with the locked screen.
+// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is in
+// the booking route's entry chunk, so anything added to it is downloaded as
+// endpoints the invitee can never call. This is reached only through the lazily
+// imported admin shell, and still goes through `adminRequest`.
 //
-// Named adminSettings rather than settings, like its sibling adminLinks.ts and
-// for the same dull reason: Settings.tsx sits in this directory, and on a
-// case-insensitive filesystem `./settings` and `./Settings` are the same name
-// to the module resolver.
+// Named adminSettings rather than settings: Settings.tsx sits in this directory,
+// and on a case-insensitive filesystem the two are the same name.
 
 import { adminRequest } from './session'
 
@@ -30,12 +23,9 @@ export type OverrideCounts = {
 
 /**
  * The organizer's zone, the four globals, the proposal hold, and who is signed
- * in.
- *
- * The four limits are plain numbers and never null: this IS the level a link's
- * null inherits from, so there is nothing above it for one of them to defer to.
- * `signedInAs` is null when the identity provider sent no name — the workbench
- * draws no identity block in that case rather than inventing one.
+ * in. The four limits are plain numbers and never null: this IS the level a
+ * link's null inherits from. `signedInAs` is null when the identity provider
+ * sent no name, and the workbench then draws no identity block at all.
  */
 export type Settings = {
   /** IANA id. Every time the API returns is derived from it. */
@@ -45,18 +35,16 @@ export type Settings = {
   minNoticeMinutes: number
   dailyCap: number
   startIncrementMinutes: number
-  /** How long a proposed move holds its slot before it lapses. Hours. */
+  /** How long a proposed move holds its slot before it lapses. */
   proposalHoldHours: number
   overrides: OverrideCounts
 }
 
 /**
- * One zone as the picker offers it.
- *
- * `offset` is what the zone reads right now — `+02:00` — and is a label rather
- * than a fact about the zone: Warsaw is `+01:00` in January. Nothing sends it
- * back; it is there because `Europe/Warsaw` means nothing to somebody scanning
- * for `+02:00`.
+ * One zone as the picker offers it. `offset` is what the zone reads right now —
+ * `+02:00` — and is a label rather than a fact about the zone: Warsaw is
+ * `+01:00` in January. It is there because `Europe/Warsaw` means nothing to
+ * somebody scanning for `+02:00`, and nothing sends it back.
  */
 export type TimeZoneOption = { id: string; offset: string }
 
@@ -67,7 +55,7 @@ export type SettingsDraft = {
   minNoticeMinutes: number
   dailyCap: number
   startIncrementMinutes: number
-  /** How long a proposed move holds its slot before it lapses. Hours. */
+  /** How long a proposed move holds its slot before it lapses. */
   proposalHoldHours: number
 }
 
@@ -88,11 +76,9 @@ export function saveSettings(draft: SettingsDraft): Promise<Settings> {
 }
 
 /**
- * Every zone this build's TZDB carries, by id.
- *
- * Served by the backend rather than read from `Intl.supportedValuesOf`, and the
- * difference is not academic: the browser's tz database and NodaTime's are two
- * databases, so a zone this browser knows and that one does not would be
+ * Every zone this build's TZDB carries, by id. Served by the backend rather than
+ * read from `Intl.supportedValuesOf`: the browser's tz database and NodaTime's
+ * are two databases, so a zone this browser knows and that one does not would be
  * offered here and refused by the save.
  */
 export function listTimeZones(signal?: AbortSignal): Promise<TimeZoneOption[]> {

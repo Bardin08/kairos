@@ -19,11 +19,9 @@ export type DayState = 'open' | 'closed' | 'blocked' | 'past'
 
 /**
  * A month of days, keyed on the ORGANIZER's calendar — which is what the slots
- * endpoint's `from` and `to` mean, and therefore what a square can be said to
- * contain.
+ * endpoint's `from` and `to` mean.
  *
- * Days with nothing in them stay in place and dimmed rather than vanishing. An
- * invitee needs to see that a month is mostly full; a calendar with holes
+ * Days with nothing in them stay in place and dimmed. A calendar with holes
  * punched in it reads as a rendering fault, not as a busy fortnight.
  */
 export default function MonthGrid({
@@ -35,10 +33,9 @@ export default function MonthGrid({
 }: {
   month: string
   /**
-   * Slots per date key. A day missing from the map has none — and the whole map
-   * missing means times are not known at all, which is not the same thing: the
-   * pattern editor's default preview is days alone, and it has no link to count
-   * the times of.
+   * Slots per date key. A day missing from the map has none; the whole map
+   * missing means times are not known at all — the pattern editor's default
+   * preview is days alone, with no link to count the times of.
    */
   counts?: Map<string, number>
   /**
@@ -61,13 +58,11 @@ export default function MonthGrid({
       <div className="days" role="group" aria-label={monthLabel(month)}>
         {monthCells(month).map((day, index) => {
           if (day === null) {
-            // The squares before the first of the month, and the padding
-            // after the last that keeps every month six rows tall (see
-            // `monthCells`). Rendered rather than skipped, or the columns
-            // stop lining up under their headings — and a short month stops
-            // lining up with a long one. Keyed on the index alone: neither
-            // group has a date key of its own, and the index is already
-            // unique across the whole array.
+            // The squares before the first of the month, and the padding after
+            // the last that keeps every month six rows tall (see `monthCells`).
+            // Rendered rather than skipped, or the columns stop lining up under
+            // their headings. Keyed on the index alone: neither group has a date
+            // key, and the index is already unique across the array.
             return (
               <span
                 className="day"
@@ -86,10 +81,10 @@ export default function MonthGrid({
           // empty day it is, which is the answer the editor is checking for.
           const open = counts === undefined ? state === 'open' : count > 0
           // Every square is live in the pattern editor: blocking a Sunday the
-          // pattern never opens is a legitimate thing to do, and there is no
-          // count on that day to say so. A day already past is the exception,
-          // and it is the caller's word rather than a date this component works
-          // out — the day it has passed is the organizer's, not this browser's.
+          // pattern never opens is legitimate, and there is no count on that day
+          // to say so. A day already past is the exception, and it is the
+          // caller's word — the day it has passed is the organizer's, not this
+          // browser's.
           const actionable = (open || state !== undefined) && state !== 'past'
 
           return (

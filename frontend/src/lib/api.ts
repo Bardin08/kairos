@@ -3,35 +3,29 @@
 // reimplements a fetch, because the two failure shapes below are the part that
 // is easy to get wrong twice.
 //
-// The workbench's own calls are NOT here. They live in the admin chunk —
-// routes/admin/patterns.ts, adminLinks.ts, adminSettings.ts, adminMeetings.ts —
-// because a module in this file's chunk is downloaded by every invitee who
-// opens a link on their phone, whether or not they could ever call it.
+// The workbench's own calls live in the admin chunk instead — patterns.ts,
+// adminLinks.ts, adminSettings.ts, adminMeetings.ts — because a module in this
+// chunk is downloaded by every invitee.
 //
-// Integrations is the one operator page whose calls stay here, and the reason is
-// its route rather than its reader: /integrations is where the OAuth callback
-// redirects a browser, App.tsx imports that page eagerly so the redirect never
-// lands on a chunk boundary, and a call reached from an eager page is in the
-// eager graph wherever it is written. Moving these two would move the bytes and
-// not remove them.
+// Integrations is the exception because of its route: /integrations is where the
+// OAuth callback redirects, App.tsx imports it eagerly so the redirect never
+// lands on a chunk boundary, and a call reached from an eager page is eager
+// wherever it is written. Moving these two moves the bytes, not removes them.
 
 const BASE = '/api/v1'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 /**
  * A write waited out the full SQLite busy timeout and gave up. 503, and the
- * write did NOT happen, so it is safe to send again — which is what separates
- * it from a 409. A 409 means the slot is gone and the user must choose
- * differently; this means nothing at all changed and the same request will
- * probably work. Every write can answer it: create, cancel and reschedule.
+ * write did NOT happen, so it is safe to send again — unlike a 409, where the
+ * slot is gone. Every write can answer it: create, cancel and reschedule.
  */
 export const DATABASE_BUSY = 'database_busy'
 
 /**
  * The app cancelled this request — a duration changed, a month turned, a
- * component unmounted. Not a failure, and never something to render. It exists
- * so a caller can tell "we called this off" apart from "the network is gone",
- * which otherwise look identical from a catch block.
+ * component unmounted. Not a failure. It lets a caller tell "we called this off"
+ * apart from "the network is gone", which look identical from a catch block.
  */
 export const REQUEST_ABORTED = 'request_aborted'
 
@@ -63,21 +57,18 @@ export type Booking = {
   notes: string
   /**
    * Non-null exactly once, in the 201 from `createBooking`. The database keeps
-   * only a SHA-256 hash of it, so nothing can hand it back a second time — a
-   * booking whose token is not carried into a URL at this moment is a booking
-   * nobody can ever cancel or move.
+   * only a SHA-256 hash of it, so a booking whose token is not carried into a
+   * URL at this moment is a booking nobody can ever cancel or move.
    */
   manageToken: string | null
   /**
-   * Where this meeting is in the organizer's calendar: `synced`, `failed`,
-   * `pending` or `cancelled`. Null means nothing was ever attempted — the
-   * ordinary state of a deployment with no calendar connected — so it must not
-   * be rendered the same as `failed`, or every booking on a Kairos that was
-   * never asked to sync carries a red mark.
+   * `synced`, `failed`, `pending` or `cancelled`. Null means nothing was ever
+   * attempted — the ordinary state of a deployment with no calendar connected —
+   * so it must not be rendered like `failed`.
    *
-   * The provider's own error text is deliberately not exposed: it is unfiltered
-   * third-party prose on a response a manage token can read, and it routinely
-   * carries the organizer's account address.
+   * The provider's own error text is deliberately not exposed: unfiltered
+   * third-party prose on a response a manage token can read, routinely carrying
+   * the organizer's account address.
    */
   calendarSync: string | null
   /** Where to join, or null if this meeting has no second channel. */
@@ -87,11 +78,9 @@ export type Booking = {
 /**
  * A failed request, with the machine-readable code when the server sent one.
  *
- * Two 400 shapes come back from this API. A domain failure carries `code`
- * (`slot_taken`, `pattern_invalid`, …). A DataAnnotations failure carries
- * `errors` and no `code` at all, and is nothing more specific than a bad
- * request — so `code` is null there, and callers branching on a code must
- * treat null as generic rather than as a code they have not seen yet.
+ * Two 400 shapes come back. A domain failure carries `code` (`slot_taken`,
+ * `pattern_invalid`, …); a DataAnnotations failure carries `errors` and no
+ * `code`, so callers branching on a code must treat null as generic.
  */
 export class ApiError extends Error {
   readonly status: number
@@ -120,30 +109,24 @@ export class ApiError extends Error {
 /**
  * Whatever a rejected call threw, as something with a status and a code.
  *
- * A `catch` here receives five different things: an ApiError this module built;
- * an AbortError when the app itself cancelled the request; a TypeError from
- * `fetch` when the network is not there; a SyntaxError if a 200 arrives with a
- * body that is not JSON; and a RangeError if `Intl` was handed a zone that does
- * not exist. The last four carry messages written for a developer console, so
- * they are replaced rather than shown to an invitee.
+ * A `catch` here receives five things: an ApiError this module built; an
+ * AbortError when the app cancelled the request; a TypeError from `fetch` when
+ * the network is not there; a SyntaxError if a 200 arrives with a body that is
+ * not JSON; and a RangeError if `Intl` was handed a zone that does not exist.
+ * The last four carry developer-console messages, so they are replaced.
  *
- * Status 0 means no HTTP status was reached — the request was cancelled, or it
- * never got an answer. It does NOT mean the request failed to complete: a 200
- * whose body is not JSON lands here too, having very much got an answer.
+ * Status 0 means no HTTP status was reached, not that the request failed to
+ * complete: a 200 whose body is not JSON lands here too.
  *
- * An abort gets its own code because it is not a failure at all. Both callers
- * check `signal.aborted` before they touch the result, so nothing leaks today,
- * but this module is shared and the first caller to forget that guard would
- * otherwise tell an invitee "could not reach the server" about a request the
- * app cancelled on purpose.
+ * An abort gets its own code because it is not a failure. Both callers check
+ * `signal.aborted`, but this module is shared and the first to forget would tell
+ * an invitee "could not reach the server" about a deliberate cancel.
  */
 export function asApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error
   // Matched on the name, not on `instanceof DOMException`, which is
-  // realm-sensitive: under the jsdom test environment the abort arrives as a
-  // DOMException built in another realm and the instanceof is false, so the
-  // guard was correct in a browser and untestable here. The name is the same
-  // in every realm.
+  // realm-sensitive: under jsdom the abort arrives as a DOMException built in
+  // another realm and the instanceof is false. The name is the same everywhere.
   if (error instanceof Error && error.name === 'AbortError') {
     return new ApiError(0, REQUEST_ABORTED, 'The request was cancelled.')
   }
@@ -192,12 +175,9 @@ async function toError(response: Response): Promise<ApiError> {
 }
 
 /**
- * One request, and the only place a failure becomes an ApiError.
- *
- * Exported so a module outside this file can make a call without reimplementing
- * `fetch` — which is the whole reason this module exists, and why the workbench's
- * own calls can live in the admin chunk without a second copy of the two failure
- * shapes above. See this file's header for which calls are where and why.
+ * One request, and the only place a failure becomes an ApiError. Exported so a
+ * module outside this file — the admin chunk — can make a call without a second
+ * copy of the two failure shapes above.
  */
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(BASE + path, init)
@@ -231,8 +211,8 @@ export function getLink(slug: string, signal?: AbortSignal): Promise<Link> {
 /**
  * Every start this link offers between two dates, inclusive, as the verbatim
  * strings a booking has to echo back. `from` and `to` are ISO calendar dates in
- * the ORGANIZER's zone and may span at most 31 days. `duration` may be omitted
- * only when the link offers exactly one.
+ * the ORGANIZER's zone, at most 31 days apart. `duration` may be omitted only
+ * when the link offers exactly one.
  */
 export function getSlots(
   slug: string,
@@ -298,11 +278,9 @@ export function rescheduleBooking(
 }
 
 /**
- * What the invitee is being asked, and what they would be leaving.
- *
- * Every instant here is the ORGANIZER's calendar, which is why `timeZone`
- * travels with them: a column of times belonging to nobody in particular is how
- * a call gets missed.
+ * What the invitee is being asked, and what they would be leaving. Every instant
+ * here is the ORGANIZER's calendar, which is why `timeZone` travels with them: a
+ * column of times belonging to nobody in particular is how a call gets missed.
  */
 export type Proposal = {
   bookingId: string
@@ -317,13 +295,11 @@ export type Proposal = {
   /** The ORGANIZER's zone, the one every time on the page is drawn in. */
   timeZone: string
   /**
-   * `open`, `accepted`, `declined`, `expired` or `withdrawn`.
-   *
-   * The server folds the clock into this: a hold whose expiry has passed reads
-   * `expired` whether or not anything has been round to mark it. Nothing on the
-   * client re-derives that — the expiry is the organizer's clock, not the
-   * browser's, and a second opinion about it would draw Accept over a
-   * suggestion that will refuse it.
+   * `open`, `accepted`, `declined`, `expired` or `withdrawn`. The server folds
+   * the clock into this: a hold whose expiry has passed reads `expired` whether
+   * or not anything has marked it. Nothing on the client re-derives that — the
+   * expiry is the organizer's clock, and a second opinion would draw Accept over
+   * a suggestion that will refuse it.
    */
   state: string
 }
@@ -334,11 +310,9 @@ export function getProposal(token: string, signal?: AbortSignal): Promise<Propos
 }
 
 /**
- * Moves the meeting, and answers the booking as it now stands.
- *
- * 409 if somebody already answered or if the hold lapsed — the two are separate
- * codes on the wire and neither is worth a separate sentence to a reader, since
- * what to do about both is to look at where things now stand.
+ * Moves the meeting, and answers the booking as it now stands. 409 if somebody
+ * already answered or if the hold lapsed — separate codes on the wire, but the
+ * reader does the same thing about both: look at where things now stand.
  */
 export function acceptProposal(token: string, signal?: AbortSignal): Promise<Booking> {
   return post<Booking>(`/bookings/proposals/${encodeURIComponent(token)}/accept`, undefined, signal)
@@ -351,39 +325,31 @@ export function declineProposal(token: string, signal?: AbortSignal): Promise<Pr
 
 /**
  * The deployment has no client credentials for that provider, so the consent
- * screen it would send the operator to does not exist. Answered by `connect`,
- * and predicted by `configured: false` on the row — the page reads the flag and
- * does not offer the button, so this code arrives only when the configuration
- * changed under a page that was already open.
+ * screen it would send the operator to does not exist. Answered by `connect` and
+ * predicted by `configured: false` on the row, so this code arrives only when
+ * the configuration changed under a page that was already open.
  */
 export const PROVIDER_NOT_CONFIGURED = 'provider_not_configured'
 
 /**
- * The stored credential will not decrypt: it was written under a different
- * `Security:SecretKey` than the deployment is running with now, so the row is
- * there and unusable.
- *
- * Arrives on `fault` rather than as a failed request, and that is the whole
- * point of it being a code on a row: reconnecting is the fix, the Connect
- * button is what does it, and a listing that refused would have taken the
- * button away with it.
+ * The stored credential will not decrypt: written under a different
+ * `Security:SecretKey` than the deployment runs with now, so the row is there
+ * and unusable. It arrives on `fault` rather than as a failed request because
+ * reconnecting is the fix, and a listing that refused would have taken the
+ * Connect button away with it.
  */
 export const CREDENTIAL_UNREADABLE = 'credential_unreadable'
 
 /**
- * One provider and where its connection stands.
+ * One provider and where its connection stands. `provider` is the lowercase enum
+ * name the connect path takes, and nothing here is vendor-specific, so a
+ * provider the backend learns to connect appears without a frontend change.
  *
- * `provider` is the lowercase enum name — the same string the connect path
- * takes — and nothing here is specific to any one vendor. The integrations page
- * renders whatever this array holds, so a provider the backend learns to
- * connect appears in the UI without a line of frontend changing.
- *
- * The four states the page distinguishes are all in these flags, and they are
- * not the same question asked twice. `configured` is about the deployment: no
- * client credentials, nothing to connect to. `connected` is about the operator:
- * a credential is stored. `reconnectRequired` is about that credential still
- * working — a grant revoked in the provider's own account settings leaves the
- * row connected and useless, and only a fresh consent fixes it.
+ * The flags are not one question asked three times. `configured` is about the
+ * deployment: no client credentials, nothing to connect to. `connected` is about
+ * the operator: a credential is stored. `reconnectRequired` is about that
+ * credential still working — a grant revoked in the provider's own settings
+ * leaves the row connected and useless, and only fresh consent fixes it.
  */
 export type Integration = {
   provider: string
@@ -395,12 +361,10 @@ export type Integration = {
   connectedAt: string | null
   reconnectRequired: boolean
   /**
-   * A code for a stored credential this deployment cannot use, or null. Today
-   * the only one is `CREDENTIAL_UNREADABLE`. It is a separate field from
-   * `reconnectRequired` because the two have different causes and want
-   * different sentences — one is the provider refusing a grant, the other is
-   * this deployment being unable to read what it stored — even though both end
-   * at the same button.
+   * A code for a stored credential this deployment cannot use, or null; today
+   * only `CREDENTIAL_UNREADABLE`. Separate from `reconnectRequired` because the
+   * causes differ — the provider refusing a grant, against this deployment being
+   * unable to read what it stored — even though both end at the same button.
    */
   fault: string | null
 }
@@ -411,12 +375,10 @@ export function listIntegrations(signal?: AbortSignal): Promise<Integration[]> {
 }
 
 /**
- * Where to send the browser to ask the provider for consent.
- *
- * The URL is returned rather than followed, and the caller must NAVIGATE to it
- * — `location.assign`, not `fetch`. It is another origin's consent screen: a
- * fetch would be refused by CORS, and even if it were not, the thing on the far
- * end is a page for a human to press a button on, not an API.
+ * Where to send the browser to ask the provider for consent. Returned rather
+ * than followed, and the caller must NAVIGATE to it — `location.assign`, not
+ * `fetch`. It is another origin's consent screen: a fetch is refused by CORS,
+ * and the far end is a page for a human to press a button on.
  */
 export async function connectIntegration(
   provider: string,

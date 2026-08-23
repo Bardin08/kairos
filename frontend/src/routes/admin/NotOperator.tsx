@@ -1,20 +1,13 @@
 /**
  * The whole screen when the account is signed in and this Kairos does not admit
- * it — the workbench replaced rather than decorated, for the same reason
- * `Locked` replaces it: chrome around a request that was refused invites
- * actions that cannot succeed.
+ * it, replacing the workbench the way `Locked` does.
  *
- * A separate screen rather than another wording of `Locked`, because the two
- * refusals have different remedies and only one of them is the operator's to
- * apply. A session that ran out is fixed by signing in again. This is not: the
- * identity provider was happy to authenticate this account, and Kairos does not
- * recognise it as an operator, so the fix is a group membership somebody with
- * the provider has to grant. Offering "Sign in" here would send an operator
- * round the whole browser leg to land back on this same screen.
- *
- * No sign-in link and no group name on screen: the first is the loop above, and
- * the second is deployment configuration this bundle does not know and should
- * not guess — the server logs which group it expects, once, at startup.
+ * A separate screen rather than another wording of `Locked`: a session that ran
+ * out is fixed by signing in again, and this is not. The fix is a group
+ * membership somebody with the provider has to grant, so a "Sign in" link would
+ * send an operator round the whole browser leg back to this screen. The group is
+ * not named: it is deployment configuration this bundle should not guess, and
+ * the server logs it at startup.
  *
  * No new CSS: `.page`, `.card`, `.card-narrow`, `.card-pad`, `.title-page` and
  * `.prose` are the same ones `Locked` draws.

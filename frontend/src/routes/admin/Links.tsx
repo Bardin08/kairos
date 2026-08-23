@@ -7,8 +7,7 @@ import LinkEditor from './LinkEditor'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is why
 // they are shapes: `live` fills the 7px dot, `paused` leaves it hollow at the
-// same size. The state survives a monochrome screenshot and a colour-blind
-// reader, and the word beside the dot says which is which regardless.
+// same size. The word beside the dot says which is which regardless.
 const LIVE = 'live'
 const PAUSED = 'paused'
 
@@ -22,11 +21,9 @@ type Phase = 'loading' | 'ready' | 'broken'
 type Editing = { link: AdminLink | null }
 
 /**
- * A margin cell that says where its number came from.
- *
- * An inherited 15 and an overridden 15 are the same digits, so the difference
- * has to be in the words. This is the list's half of the same distinction
- * InheritableNumber draws in the form.
+ * A margin cell that says where its number came from. An inherited 15 and an
+ * overridden 15 are the same digits, so the difference has to be in the words —
+ * the list's half of the distinction InheritableNumber draws in the form.
  */
 function margin(link: AdminLink, globals: GlobalLimits) {
   if (link.marginMinutes === null) {

@@ -1,28 +1,23 @@
 // Every calendar calculation the booking and manage pages need, on `Intl` and
 // `Date` alone.
 //
-// Helpers only the workbench uses are NOT here, for the same reason its HTTP
-// calls are not in lib/api.ts: this module is in the booking route's chunk, and
-// Rollup shakes out an export nobody imports but keeps one a lazy chunk imports.
-// See routes/admin/adminTime.ts.
+// Helpers only the workbench uses are NOT here: this module is in the booking
+// route's chunk, and Rollup shakes out an export nobody imports but keeps one a
+// lazy chunk imports. See routes/admin/adminTime.ts.
 //
-// A date library would be the obvious reach and it is the one thing the budget
-// forbids: the shell already spends 61,641 of 76,800 gzipped bytes, and the
-// smallest useful date library is larger than everything Kairos writes. `Intl`
-// costs nothing, ships in every browser, and carries the whole tzdb — which is
-// what actually matters here, because the organizer's zone and the invitee's
-// zone are different zones and neither is the machine's offset.
+// A date library is the one thing the budget forbids: the shell already spends
+// 61,641 of 76,800 gzipped bytes, and the smallest useful one is larger than
+// everything Kairos writes. `Intl` costs nothing and carries the whole tzdb.
 //
 // Two vocabularies, and confusing them is the bug this file exists to prevent:
 //
-//   an INSTANT is what the API speaks — "2026-09-07T09:00:00Z", verbatim, and
-//   it goes back to the server byte for byte because an offset form is refused.
+//   an INSTANT is what the API speaks — "2026-09-07T09:00:00Z", verbatim: it
+//   goes back to the server byte for byte, because an offset form is refused.
 //
 //   a DATE KEY is what a calendar square is — "2026-09-07", a civil date with
-//   no time and therefore no zone of its own. Which zone produced it is the
-//   caller's business: the month grid keys on the ORGANIZER's date, because
-//   that is what `from`/`to` mean to the slots endpoint, while the times inside
-//   a day render in the INVITEE's zone and may fall on the day before or after.
+//   no zone of its own. The month grid keys on the ORGANIZER's, which is what
+//   `from`/`to` mean to the slots endpoint; times inside a day render in the
+//   INVITEE's and may fall on the day before or after.
 
 // Formatting is fixed to en-GB rather than the visitor's locale: a 24-hour
 // clock keeps a column of times one width, which is the whole point of the
@@ -80,7 +75,6 @@ export function localZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-/** The date key an instant falls on, in the given zone. */
 export function zonedDate(instant: string, zone: string): string {
   const parts = formatter('date', zone, {
     year: 'numeric',
@@ -103,12 +97,9 @@ export function zonedTime(instant: string, zone: string): string {
 /**
  * The zone's short offset at an instant — `GMT+2`, `GMT-4`.
  *
- * It exists for one hour a year. When a zone falls back, two different instants
- * an hour apart render the same clock time: in Warsaw on 2026-10-25 both
- * 00:30Z and 01:30Z are "02:30". The booking stays correct either way, because
- * the instant is echoed to the server verbatim and the selection keys on it —
- * but the invitee is shown two identical buttons and cannot tell which hour
- * they are choosing. The offset is what separates them.
+ * It exists for one hour a year. When a zone falls back, two instants an hour
+ * apart render the same clock time: in Warsaw on 2026-10-25 both 00:30Z and
+ * 01:30Z are "02:30", and the invitee cannot tell which hour they are choosing.
  */
 export function zonedOffset(instant: string, zone: string): string {
   const parts = formatter('offset', zone, {
@@ -121,9 +112,8 @@ export function zonedOffset(instant: string, zone: string): string {
 
 /**
  * How far the invitee's day is from the organizer's. A 17:00 Warsaw slot is
- * 00:00 the next day in Tokyo, and a slot list that renders it as plain 00:00
- * under a Monday heading has told the invitee the wrong day. Date keys sort
- * lexicographically, so a string compare is the whole comparison.
+ * 00:00 the next day in Tokyo, and rendering it as plain 00:00 under a Monday
+ * heading tells the invitee the wrong day. Date keys sort lexicographically.
  */
 export function dayOffset(instant: string, zone: string, day: string): number {
   const shown = zonedDate(instant, zone)
@@ -179,21 +169,15 @@ export function shiftMonth(day: string, delta: number): string {
 }
 
 /**
- * A month as the grid draws it: leading nulls for the squares before the
- * first, then a date key per day, then trailing nulls out to a fixed six
- * rows. The nulls are rendered rather than skipped, because the day columns
- * have to line up under their weekday headings — and, since the trailing
- * padding, because the calendar has to line up with itself from one month to
- * the next. A five-row February beside a six-row August is a booking card
- * that changes height when the invitee changes month and nothing else; padded
- * to the same cell count, every month draws the same number of rows and the
- * card stops moving.
+ * A month as the grid draws it: leading nulls for the squares before the first,
+ * then a date key per day, then trailing nulls out to a fixed six rows. The
+ * nulls are rendered rather than skipped so the day columns line up under their
+ * weekday headings and the calendar keeps one height month to month — a five-row
+ * February beside a six-row August moves the booking card.
  *
  * The first and last real-day keys are also the `from` and `to` of the slots
- * request. A 31-day month is exactly the 31 days that endpoint answers for,
- * so a month is the largest window it will ever be asked for and never a
- * wider one — the trailing nulls are not part of that window, only of the
- * grid drawn around it.
+ * request. A 31-day month is exactly the 31 days that endpoint answers for; the
+ * trailing nulls are grid, not window.
  */
 export function monthCells(month: string): (string | null)[] {
   const first = new Date(startOfMonth(month) + START_OF_DAY)

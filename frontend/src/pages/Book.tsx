@@ -58,11 +58,10 @@ function notice(title: string, body: string) {
 /**
  * The page a stranger opens from a pasted link.
  *
- * Two zones are in play throughout and mixing them is the bug worth naming
- * once: the month grid is keyed on the ORGANIZER's calendar, because that is
- * what `from` and `to` mean to the slots endpoint, while every time on screen
- * is rendered in the INVITEE's. The instant itself is never re-derived — the
- * string the server sent is the string that comes back to it.
+ * Two zones are in play and mixing them is the bug worth naming once: the month
+ * grid is keyed on the ORGANIZER's calendar, because that is what `from` and
+ * `to` mean to the slots endpoint, while every time on screen is the INVITEE's.
+ * The instant itself is never re-derived.
  */
 export default function Book() {
   const { slug = '' } = useParams()
@@ -75,13 +74,11 @@ export default function Book() {
   const [link, setLink] = useState<Link | null>(null)
   const [linkError, setLinkError] = useState<ApiError | null>(null)
 
-  // Null until the link resolves, and deliberately not seeded from the
-  // invitee's calendar. The grid is keyed on the ORGANIZER's dates — that is
-  // what `from` and `to` mean to the slots endpoint — so opening on the
+  // Null until the link resolves, and deliberately not seeded from the invitee's
+  // calendar. The grid is keyed on the ORGANIZER's dates, so opening on the
   // invitee's month puts the two out of step by a day across the date line: an
   // invitee in Tokyo at 00:30 on 1 September would open on September with
-  // Previous disabled, and the organizer's 31 August, still a whole working
-  // day, could never be reached.
+  // Previous disabled, and the organizer's 31 August could never be reached.
   const [month, setMonth] = useState<string | null>(null)
   const [duration, setDuration] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -98,10 +95,8 @@ export default function Book() {
   const [booked, setBooked] = useState<Booking | null>(null)
 
   // Lives here, not in the form. A 409 sends the invitee back to the times to
-  // choose again, which unmounts the form — and losing a typed name and email
-  // to a race they did not cause is a worse outcome than the lost slot. The
-  // 503 branch already promises "everything you typed is still here"; this is
-  // what makes the more likely failure keep the same promise.
+  // choose again, which unmounts the form — and losing a typed name and email to
+  // a race they did not cause is a worse outcome than the lost slot.
   const [details, setDetails] = useState({ name: '', email: '', notes: '' })
 
   const listRef = useRef<HTMLElement>(null)
@@ -177,11 +172,10 @@ export default function Book() {
     return { byDay, counts }
   }, [link, slots])
 
-  // Derived rather than stored. A duration change can close the day that was
-  // selected, and a fallback computed here cannot go stale the way a second
-  // copy in state would.
-  // Smallest key rather than the first inserted: date keys sort
-  // lexicographically, so this holds even if the endpoint ever stops returning
+  // Derived rather than stored: a duration change can close the day that was
+  // selected, and a fallback computed here cannot go stale the way a second copy
+  // in state would. Smallest key rather than the first inserted — date keys sort
+  // lexicographically, so this holds even if the endpoint stops returning
   // instants in ascending order.
   const earliestDay = [...grouped.byDay.keys()].reduce<string | null>(
     (found, key) => (found === null || key < found ? key : found),
@@ -209,23 +203,15 @@ export default function Book() {
     wantFocus.current = true
   }
 
-  // The SPA's debt: a server-rendered page would have moved focus by
-  // navigating, and here nothing does unless it is written. It runs after the
-  // commit rather than inside the click handler, because before the commit the
-  // section still carries the previous day's accessible name and a screen
-  // reader announces the day the invitee has just left.
+  // The SPA's debt: a server-rendered page would have moved focus by navigating.
+  // It runs after the commit rather than in the click handler, because before
+  // the commit the section still carries the previous day's accessible name.
   //
-  // Gated on intent rather than on `activeDay` changing. `activeDay` is
-  // DERIVED: it moves when the month pages and when the duration closes the
-  // selected day, neither of which is a request to go and read the times. Keyed
-  // on the value, paging forward three months threw focus out of the month
-  // arrow three times and a keyboard user had to Shift+Tab back to it after
-  // every press. The flag is consumed whatever happens, so an intent that
-  // cannot be honoured is not banked for a later, unrelated change.
-  // No dependency array on purpose. The trigger is the flag, not a value, so
-  // the effect wants to look after every commit — including one where the day
-  // chosen happens to be the day already showing, which a dependency on
-  // `activeDay` would skip. The body is a boolean read.
+  // Gated on intent rather than on `activeDay`, which is DERIVED: it moves when
+  // the month pages and when the duration closes the selected day, neither of
+  // which is a request to read the times. Keyed on the value, paging forward
+  // three months threw focus out of the month arrow three times. No dependency
+  // array, so the flag is what triggers it and not a value.
   useEffect(() => {
     if (!wantFocus.current) return
     wantFocus.current = false
@@ -283,8 +269,7 @@ export default function Book() {
     if (linkError !== null) {
       // Only a genuine 404 gets the "does not lead anywhere" heading. A link
       // that exists but cannot be used — a network failure, an unreadable
-      // organizer zone — is a different sentence, and pairing that heading
-      // with those messages reads as a contradiction.
+      // organizer zone — is a different sentence.
       const missing = linkError.code === NO_SUCH_LINK || linkError.status === NOT_FOUND
       return notice(
         missing ? 'This link does not lead anywhere' : 'This link cannot be opened',
@@ -372,9 +357,8 @@ export default function Book() {
           </div>
 
           {/* The manage token exists in exactly one response, this one. The
-              server keeps a hash and cannot reissue it, so a booking whose
-              token is not carried into a URL here can never be moved or
-              cancelled by the person who made it. */}
+              server keeps a hash and cannot reissue it, so a booking whose token
+              is not carried into a URL here can never be moved or cancelled. */}
           {managePath === null ? (
             <p className="field-error mt-5" role="alert">
               <AlertIcon />

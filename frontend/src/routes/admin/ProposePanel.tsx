@@ -39,22 +39,19 @@ function Chevron({ back }: { back: boolean }) {
 /**
  * Choosing the time to offer, over the whole page rather than inside the row.
  *
- * It is its own screen for a measured reason. The first version of this put the
- * month grid and the slot column in the Actions cell of `RecordTable`, and a
- * browser measurement said what no unit test could: that cell is 215px wide at
- * 1280 and 178px at 899, `.calendar-cols` resolves its month track to 55px and
- * then 18px, and seven day columns inside that render the weekday headings on
- * top of each other at single-digit widths — 8px at 1280 and under 3px at 899.
- * Illegible, and beneath DESIGN.md's 44px tap floor by a factor of five.
- * Reproduced independently by review at the same two widths, which is why the
- * numbers are quoted rather than the impression. Nothing in kairos.css
- * expresses a 300px calendar inside a 200px cell, and rule 17 is not the reason
- * it was not written: no width would have fixed a control that does not fit the
- * container it was put in.
+ * Its own screen for a measured reason. The first version put the month grid and
+ * the slot column in the Actions cell of `RecordTable`: that cell is 215px wide
+ * at 1280 and 178px at 899, `.calendar-cols` resolves its month track to 55px
+ * and then 18px, and seven day columns inside that render the weekday headings
+ * on top of each other — 8px at 1280 and under 3px at 899. Illegible, and
+ * beneath DESIGN.md's 44px tap floor by a factor of five. Reproduced
+ * independently by review at the same two widths. Nothing in kairos.css
+ * expresses a 300px calendar inside a 200px cell, and rule 17 is not why: no
+ * width fixes a control that does not fit its container.
  *
- * So it swaps in over the list, which is the shape `Links.tsx` already uses for
+ * So it swaps in over the list, the shape `Links.tsx` already uses for
  * `LinkEditor` and `Manage.tsx` for its own reschedule. Same components, same
- * classes, no new CSS, and the calendar gets the width it was drawn for.
+ * classes, no new CSS.
  */
 export default function ProposePanel({
   meeting,
@@ -76,16 +73,15 @@ export default function ProposePanel({
   const [busy, setBusy] = useState(false)
   // Two failures, and they are not one state with two causes. A READ that never
   // arrived leaves nothing on screen to act on, so it replaces the times; a
-  // refused SUGGESTION leaves every time still there and still pickable, so it
-  // sits under them. Collapsing the two put an error where the calendar should
-  // be and drew "nothing here has a gap this meeting fits into" over a dropped
-  // connection — a claim about the operator's calendar made when nothing at all
-  // was known about it.
+  // refused SUGGESTION leaves every time still there and pickable, so it sits
+  // under them. Collapsing the two drew "nothing here has a gap this meeting
+  // fits into" over a dropped connection — a claim about the operator's calendar
+  // made when nothing at all was known about it.
   //
-  // The error itself and not a sentence made from it either way: `Failure`
-  // reads the status and the code off it, and a deactivated link, a slot taken
-  // while the operator was choosing and a deployment with no mail relay are
-  // three different things to do next.
+  // The error itself and not a sentence made from it either way: `Failure` reads
+  // the status and the code off it, and a deactivated link, a slot taken while
+  // the operator was choosing and a deployment with no mail relay are three
+  // different things to do next.
   const [readFailure, setReadFailure] = useState<unknown>(null)
   const [failure, setFailure] = useState<unknown>(null)
   const listRef = useRef<HTMLElement>(null)
@@ -93,9 +89,8 @@ export default function ProposePanel({
   useEffect(() => {
     // A month is at most 31 days, which is exactly the widest range the slots
     // endpoint answers for. One request per month, never one per day. The
-    // duration is the meeting's own: the hold the server mints takes its length
-    // from the booking whatever this asks for, so asking for another length
-    // would only offer times the proposal could not keep.
+    // duration is the meeting's own: the hold takes its length from the booking
+    // whatever this asks for, so another length would offer times it cannot keep.
     const days = monthCells(month).filter((cell): cell is string => cell !== null)
     const controller = new AbortController()
     setSlots(null)
@@ -112,9 +107,8 @@ export default function ProposePanel({
         // NOT setSlots([]). An empty month and a month nobody could read are
         // different answers, and the empty state's sentence — "nothing here has
         // a gap this meeting fits into" — is a claim about the calendar. Said
-        // over a dropped connection it tells the operator this link is full
-        // when nothing is known about it at all. Book.tsx draws its failure
-        // INSTEAD of its empty state for the same reason.
+        // over a dropped connection it tells the operator this link is full when
+        // nothing is known about it. Book.tsx does the same for the same reason.
         setSlots(null)
         setReadFailure(error)
       })
@@ -126,9 +120,8 @@ export default function ProposePanel({
   }, [month, zone, meeting.slug, meeting.durationMinutes])
 
   // Keyed on the ORGANIZER's calendar, because that is what `from` and `to`
-  // meant to the request that produced these instants, and therefore what a
-  // square in the grid can be said to contain. Here the times inside a day are
-  // the organizer's too — this whole surface is theirs.
+  // meant to the request that produced these instants. Here the times inside a
+  // day are the organizer's too — this whole surface is theirs.
   const grouped = useMemo(() => {
     const byDay = new Map<string, string[]>()
     const counts = new Map<string, number>()
@@ -237,10 +230,9 @@ export default function ProposePanel({
           />
 
           <div>
-            {/* The failed read comes first, and it is the whole point of the
-                order: below it `slots === null` also means "still loading", and
-                either of the two branches after it would be a sentence about a
-                calendar this panel could not read. */}
+            {/* The failed read comes first, and that order is the point: below
+                it `slots === null` also means "still loading", and either later
+                branch would be a sentence about a calendar it could not read. */}
             {readFailure !== null ? (
               <Failure error={readFailure} />
             ) : slots === null ? (
@@ -277,10 +269,9 @@ export default function ProposePanel({
               // A plain row rather than Manage.tsx's `.desktop-cta`, and the
               // difference is measured: kairos.css hides that class below 861px
               // because the manage page pairs it with a fixed `.actionbar` on a
-              // phone. The admin shell has a tab bar in that space and reserves
-              // its own room for it, so borrowing the desktop half alone would
-              // leave the operator on a phone able to pick a time and with no
-              // button to send it.
+              // phone. The admin shell has a tab bar in that space, so borrowing
+              // the desktop half alone would leave an operator on a phone able
+              // to pick a time and with no button to send it.
               <div className="row gap-2 wrap mt-5">
                 <button
                   className="btn btn-primary"

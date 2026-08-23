@@ -5,13 +5,8 @@ import Integrations from './pages/Integrations'
 import Manage from './pages/Manage'
 import Proposal from './pages/Proposal'
 
-// The workbench is split out of the entry chunk deliberately. An invitee opens
-// /book/:slug from a link somebody pasted into a message, on a phone, on mobile
-// data, and has no use for the operator's admin surface — every byte of it
-// downloaded on that route is a byte spent against the bundle budget for a
-// screen that reader will never see. `lazy` is what keeps it in its own file:
-// import it statically and Rollup folds all four admin pages back into the
-// booking route's bundle.
+// Lazy so the admin surface stays out of the booking route's bundle. Import it
+// statically and Rollup folds all four admin pages back in, over budget.
 const AdminShell = lazy(() => import('./routes/admin/AdminShell'))
 
 export default function App() {
@@ -19,16 +14,11 @@ export default function App() {
     <Switch>
       <Route path="/book/:slug" component={Book} />
       {/* Keyed on the manage token, not on the booking's id. Every manage route
-          the API ships takes the token as its path segment and accepts no id at
-          all, and the token is the capability anyway: it is minted once, stored
-          only as a SHA-256 hash, and never handed back after the 201 that
-          created the booking. A `/manage/:id?token=` shape would need a second
-          identifier the server has no use for, and it would leak no less: a
-          Referer carries the whole URL, path included, so the query string is
-          not what makes the difference. What keeps the token out of a referrer
-          is the `no-referrer` policy the API sends on every response. This is
-          the URL the booking page shows after a booking; the two have to agree
-          or nothing is manageable. */}
+          takes the token as its path segment and accepts no id, and the token is
+          the capability anyway: minted once, stored only as a SHA-256 hash.
+          `/manage/:id?token=` would need a second identifier and leak no less —
+          a Referer carries the whole URL, path included. What keeps the token
+          out of a referrer is the `no-referrer` policy the API sends. */}
       <Route path="/manage/:token" component={Manage} />
       {/* Keyed on the PROPOSAL's token, which is not the manage token and
           cannot be exchanged for one: it answers a single question and is
@@ -42,11 +32,10 @@ export default function App() {
           browser onto the not-found page halfway through a connection. */}
       <Route path="/integrations" component={Integrations} />
       {/* `nest` makes /admin the base for everything the shell routes, so the
-          shell's own paths stay relative and it can be mounted somewhere else
-          without editing four <Route>s inside it. The fallback is nothing at
-          all: the chunk is a same-origin file already being fetched, and a
-          spinner that appears for one frame is worse than a frame of the page
-          it is about to become. */}
+          shell's own paths stay relative. The fallback is nothing at all: the
+          chunk is a same-origin file already being fetched, and a spinner that
+          appears for one frame is worse than a frame of the page it is about to
+          become. */}
       <Route path="/admin" nest>
         <Suspense fallback={null}>
           <AdminShell />

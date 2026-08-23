@@ -34,16 +34,13 @@ const NEXT_MONTH = 1
 
 /**
  * A write that waited out SQLite's busy timeout and gave up. Nothing happened,
- * which makes it the one failure here that is safe to repeat with the same
- * input — a 409 means "that instant is gone, choose another", this means "try
- * the same thing again shortly". The retry is left to the reader rather than
- * fired automatically: they are watching the button they just pressed, and a
- * silent retry would either look like nothing happened or fire a second write
- * they did not ask for.
+ * which makes it the one failure here safe to repeat with the same input — a 409
+ * means "that instant is gone, choose another". The retry is the reader's rather
+ * than automatic: they are watching the button they just pressed.
  *
- * The wait comes off the server's own Retry-After, which `api.ts` has already
- * parsed. Inventing a number here would be a second opinion about a value the
- * server derives from the busy timeout it actually waited out.
+ * The wait comes off the server's own Retry-After, already parsed by `api.ts`. A
+ * number invented here would be a second opinion about the timeout the server
+ * actually waited out.
  */
 function busyMessage(seconds: number | null): string {
   const wait = seconds === null ? 'in a few seconds' : `in ${seconds} seconds`
@@ -62,10 +59,9 @@ type Phase = 'loading' | 'ready' | 'missing' | 'broken'
 type Panel = 'actions' | 'confirmCancel' | 'reschedule'
 
 /**
- * `code` is null for a DataAnnotations 400, for a 400 the server sent with no
- * body at all, and for a request that never got an answer. All three are the
- * same thing to a reader: the move did not happen, and the recovery is to pick
- * again.
+ * `code` is null for a DataAnnotations 400, for a 400 with no body, and for a
+ * request that never got an answer. All three are the same to a reader: the move
+ * did not happen, and the recovery is to pick again.
  */
 function rescheduleMessage(code: string | null): string {
   switch (code) {
@@ -133,10 +129,9 @@ export default function Manage() {
     getBooking(token, controller.signal)
       .then(async (loaded) => {
         // The link carries two things the booking does not: what the meeting is
-        // called, and the ORGANIZER's zone, which is the calendar the month grid
-        // and the slots range are both keyed on. A link that has since been
-        // deactivated costs the title and the ability to move the meeting; it
-        // does not cost the page.
+        // called, and the ORGANIZER's zone, which the month grid and the slots
+        // range are both keyed on. A link since deactivated costs the title and
+        // the ability to move the meeting; it does not cost the page.
         const carrier = await getLink(loaded.slug, controller.signal).catch(() => null)
         if (controller.signal.aborted) return
         setBooking(loaded)
@@ -160,9 +155,8 @@ export default function Manage() {
 
     // A month is at most 31 days, which is exactly the widest range the slots
     // endpoint answers for. One request per month, never one per day. The
-    // duration is the booking's own and never changes: a different length would
-    // be a different meeting, and holding it fixed is what lets the identifier
-    // — and Part B's calendar UID — survive the move.
+    // duration is the booking's own and never changes: holding it fixed is what
+    // lets the identifier — and Part B's calendar UID — survive the move.
     const days = monthCells(month).filter((cell): cell is string => cell !== null)
     const controller = new AbortController()
     setSlots(null)
@@ -227,8 +221,7 @@ export default function Manage() {
       const { status, code, retryAfter } = asApiError(error)
       // Whichever branch this takes, the panel stays open and the button stays
       // armed: cancel has no second option to offer, so a failure that closed
-      // the panel would be a dead end, and one that showed the cancelled state
-      // would be a lie about a booking that is still confirmed.
+      // the panel would be a dead end.
       if (status === NOT_FOUND) setPhase('missing')
       else if (code === DATABASE_BUSY) setMessage(busyMessage(retryAfter))
       else setMessage('The meeting could not be cancelled. Reload the page and try again.')
@@ -508,8 +501,7 @@ export default function Manage() {
           {/* A button rather than an anchor carrying `.btn`: the stylesheet
               defines `.btn` for controls and an underline for anchors, and
               combining them is a treatment it does not have. This way the one
-              action on the page is a full 44px target and looks like every
-              other control in the product. */}
+              action on the page is a full 44px target. */}
           <button className="btn mt-5" type="button" onClick={() => navigate(`/book/${booking.slug}`)}>
             Book a new time
           </button>

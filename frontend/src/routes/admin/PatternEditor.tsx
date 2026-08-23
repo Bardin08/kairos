@@ -16,13 +16,10 @@ const LIST = '/availability'
  * One pattern, on a page of its own: the week on the left, what it produces on
  * the right.
  *
- * It reads the whole list and picks its row out of it, and that is deliberate
- * rather than lazy — there is no single-pattern GET, and adding one would be a
- * second endpoint to keep in step with the list that already answers with
- * `rules`, `overrides` and `usedBy`. The read goes through patterns.ts, so a
- * refused request latches session.ts and the shell above replaces itself with
- * the locked screen; a fetch of its own here would put this page back to
- * drawing a heading and two empty panes at somebody who has no session.
+ * It reads the whole list and picks its row out: there is no single-pattern GET,
+ * and adding one would be a second endpoint to keep in step. The read goes
+ * through patterns.ts, so a refused request latches session.ts and the shell
+ * replaces itself with the locked screen.
  */
 export default function PatternEditor({ params }: { params: { patternId: string } }) {
   const [pattern, setPattern] = useState<Pattern | null>(null)
