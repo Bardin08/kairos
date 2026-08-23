@@ -331,7 +331,12 @@ public static class BookingsEndpoints
     /// on a Sunday would succeed against a calendar that never offered it. Returns what the query
     /// resolved, so the write path never has to resolve the link or its margin a second time.
     /// </summary>
-    private static async Task<SlotResults> RequireOfferedAsync(
+    /// <remarks>
+    /// Reachable from <see cref="Admin.MeetingsAdminEndpoints"/> rather than private, and the
+    /// same for <see cref="ParseInstant"/>: the operator's propose enforces this identical rule,
+    /// and a second copy of it there would be a second place for the rule to drift.
+    /// </remarks>
+    internal static async Task<SlotResults> RequireOfferedAsync(
         SlotQuery slots,
         string slug,
         int durationMinutes,
@@ -435,7 +440,7 @@ public static class BookingsEndpoints
             conference?.JoinUrl);
     }
 
-    private static Instant ParseInstant(string value)
+    internal static Instant ParseInstant(string value)
     {
         var parsed = InstantPattern.ExtendedIso.Parse(value);
         if (!parsed.Success)

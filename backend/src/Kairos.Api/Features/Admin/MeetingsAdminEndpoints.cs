@@ -1,7 +1,9 @@
 using System.ComponentModel.DataAnnotations;
 
+using Kairos.Api.Availability;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
+using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
@@ -51,6 +53,14 @@ public sealed record CancelMeetingRequest
 
     [StringLength(MaxReasonLength)]
     public string Reason { get; init; } = string.Empty;
+}
+
+/// <summary>Where the operator would like the meeting to move. Its length does not change.</summary>
+public sealed record ProposeMeetingRequest
+{
+    /// <summary>One of the strings <c>GET /links/{slug}/slots</c> returned, verbatim.</summary>
+    [Required]
+    public required string Start { get; init; }
 }
 
 /// <summary>One link, as the filter's option list needs it. Not the link admin's shape.</summary>
@@ -125,6 +135,9 @@ public static class MeetingsAdminEndpoints
     /// <summary><c>to</c> is before <c>from</c>. An empty list would answer it as "no meetings".</summary>
     public const string RangeInvertedCode = "range_inverted";
 
+    /// <summary>A proposal for this meeting is already open and unanswered.</summary>
+    public const string ProposalOpenCode = "proposal_open";
+
     private const string FromParameter = "from";
     private const string ToParameter = "to";
 
@@ -134,6 +147,9 @@ public static class MeetingsAdminEndpoints
     {
         group.MapGet("/meetings", ListAsync).WithName("ListMeetings");
         group.MapPost("/meetings/{id:guid}/cancel", CancelAsync).WithName("CancelMeeting");
+        group.MapPost("/meetings/{id:guid}/proposals", ProposeAsync).WithName("ProposeMeeting");
+        group.MapDelete("/meetings/{id:guid}/proposals/{proposalId:guid}", WithdrawAsync)
+            .WithName("WithdrawProposal");
         return group;
     }
 
@@ -269,6 +285,109 @@ public static class MeetingsAdminEndpoints
             ?? throw DomainException.NotFound("Meeting");
 
         await canceller.CancelAsync(booking, request.Reason, manageToken: null, cancellationToken);
+
+        return await OneAsync(context, booking, cancellationToken);
+    }
+
+    /// <summary>
+    /// Offers the invitee a new time and holds it until they answer. Nothing about the meeting
+    /// changes here — that is the whole design: the invitee agreed to a time, so the operator
+    /// proposes and the invitee decides.
+    /// </summary>
+    /// <remarks>
+    /// The instant is run through the same check the public create path uses, so a proposal cannot
+    /// land on an hour the link does not offer or inside another meeting's margin. That is what
+    /// keeps this feature from being a way to write bookings the availability rules would never
+    /// have produced.
+    /// </remarks>
+    private static async Task<MeetingResponse> ProposeAsync(
+        Guid id,
+        ProposeMeetingRequest request,
+        KairosDbContext context,
+        SlotQuery slots,
+        ProposalWriter proposals,
+        BookingMailer mailer,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var now = clock.GetCurrentInstant();
+        var start = BookingsEndpoints.ParseInstant(request.Start);
+
+        var booking = await context.Bookings
+            .Include(row => row.Link)
+            .Include(row => row.Participants)
+            .FirstOrDefaultAsync(row => row.Id == id, cancellationToken)
+            ?? throw DomainException.NotFound("Meeting");
+
+        if (booking.Status != BookingStatus.Confirmed)
+        {
+            throw DomainException.Conflict(
+                BookingsEndpoints.BookingCancelledCode, "A cancelled booking cannot be moved.");
+        }
+
+        var settings = await context.Settings.AsNoTracking()
+            .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
+
+        await BookingsEndpoints.RequireOfferedAsync(
+            slots,
+            booking.Link.Slug,
+            (int)((booking.EndUtc - booking.StartUtc) / SecondsPerMinute),
+            start,
+            now,
+            DateTimeZoneProviders.Tzdb[settings.TimeZoneId],
+            cancellationToken);
+
+        var (proposal, token) = proposals.Add(booking, start, settings.ProposalHoldHours);
+
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (SqliteErrors.IsUniqueViolation(exception))
+        {
+            // The filtered unique index, which is the mechanism rather than a backstop here: two
+            // tabs proposing at once must not produce two holds for one meeting.
+            context.Entry(proposal).State = EntityState.Detached;
+            throw DomainException.Conflict(
+                ProposalOpenCode, "A proposal for this meeting is already open.");
+        }
+
+        // After the commit, so nothing mails a proposal that does not exist. The plaintext token
+        // is in hand only here, for the length of this call — the database holds its SHA-256,
+        // which is exactly why the send happens on this thread rather than behind the outbox.
+        await mailer.SendProposalAsync(booking, proposal, token, cancellationToken);
+
+        return await OneAsync(context, booking, cancellationToken);
+    }
+
+    /// <summary>
+    /// Takes a proposal back. Without it, an operator who names the wrong time holds a slot
+    /// hostage for the whole hold and cannot offer the right one, because only one proposal may be
+    /// open at a time.
+    /// </summary>
+    private static async Task<MeetingResponse> WithdrawAsync(
+        Guid id,
+        Guid proposalId,
+        KairosDbContext context,
+        IClock clock,
+        CancellationToken cancellationToken)
+    {
+        var proposal = await context.BookingProposals
+            .FirstOrDefaultAsync(
+                row => (row.Id == proposalId) && (row.BookingId == id), cancellationToken)
+            ?? throw DomainException.NotFound("Proposal");
+
+        if (proposal.State == ProposalState.Open)
+        {
+            proposal.State = ProposalState.Withdrawn;
+            proposal.DecidedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
+            await context.SaveChangesAsync(cancellationToken);
+        }
+
+        var booking = await context.Bookings
+            .Include(row => row.Link)
+            .Include(row => row.Participants)
+            .SingleAsync(row => row.Id == id, cancellationToken);
 
         return await OneAsync(context, booking, cancellationToken);
     }
