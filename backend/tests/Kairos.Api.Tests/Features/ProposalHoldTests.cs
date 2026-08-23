@@ -1,8 +1,12 @@
 using System.Net.Http.Json;
 
+using Kairos.Api.Features.Bookings;
+using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using NodaTime;
 using NodaTime.Text;
@@ -66,6 +70,52 @@ public class ProposalHoldTests
         var offered = await ReadSlotsAsync(app);
 
         offered.ShouldContain(Held);
+    }
+
+    /// <summary>
+    /// The write path's own answer, and the one that matters: BookingWriter counts clashes inside
+    /// BEGIN IMMEDIATE and is the authority on what exists. A page that stopped offering the slot
+    /// while the writer still accepted it would be a hold that holds nothing under contention.
+    /// </summary>
+    [Fact]
+    public void TryCreate_ASlotHeldByAnOpenProposal_IsRefused()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(app, expiresInHours: SchedulingDefaults.ProposalHoldHours);
+
+        var result = WriteAsync(app);
+
+        result.Success.ShouldBeFalse();
+        result.Reason.ShouldBe(BookingWriter.SlotTakenReason);
+    }
+
+    [Fact]
+    public void TryCreate_AHoldWhoseExpiryHasPassed_IsAccepted()
+    {
+        using var app = new KairosApp();
+        SeedLink(app);
+        SeedProposal(app, expiresInHours: HoursAlreadyLapsed);
+
+        WriteAsync(app).Success.ShouldBeTrue();
+    }
+
+    private static CreateBookingResult WriteAsync(KairosApp app)
+    {
+        using var scope = app.Services.CreateScope();
+        var writer = scope.ServiceProvider.GetRequiredService<BookingWriter>();
+        var context = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
+        var link = context.Links.Single(candidate => candidate.Slug == Slug);
+        var held = InstantPattern.ExtendedIso.Parse(Held).Value;
+
+        return writer.TryCreate(
+            link.Id,
+            Slug,
+            held,
+            Duration.FromMinutes(DurationMinutes),
+            new BookerDetails(BookerName, BookerEmail, BookerZone),
+            string.Empty,
+            SchedulingDefaults.MarginMinutes);
     }
 
     private static string Held => $"{Day}{HeldTime}";

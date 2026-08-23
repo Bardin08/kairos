@@ -64,6 +64,8 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     {
         var startUtc = start.ToUnixTimeSeconds();
         var endUtc = (start + duration).ToUnixTimeSeconds();
+        var openProposal = (int)ProposalState.Open;
+        var now = clock.GetCurrentInstant().ToUnixTimeSeconds();
 
         // Opening the connection here is not only about the pragmas: a connection EF opened for
         // itself is one EF closes after each command, and a closed connection is a rolled-back
@@ -97,17 +99,35 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
             started = true;
 
-            // Half-open on both sides, and MAX here is SQLite's two-argument scalar maximum, so
-            // the rule matches SlotGenerator exactly: pad by the larger of the two margins,
-            // never their sum, and let a slot start the moment the padding ends.
+            // Two terms, summed, because a slot is unavailable for two different reasons and both
+            // have to be inside the same BEGIN IMMEDIATE. Half-open on both sides, and MAX here is
+            // SQLite's two-argument scalar maximum, so the rule matches SlotGenerator exactly: pad
+            // by the larger of the two margins, never their sum, and let a slot start the moment
+            // the padding ends.
+            //
+            // The second term is the proposal hold. Its expiry is compared against the clock here
+            // rather than against a row the sweeper has marked, for the reason LocalBusySource
+            // gives: a hold that has lapsed must stop holding whether or not anything has run.
             var clashes = context.Database.SqlQuery<int>($"""
-                SELECT COUNT(*) AS Value
-                FROM Bookings b
-                JOIN Links l ON l.Id = b.LinkId
-                LEFT JOIN Settings s ON s.Id = {Settings.SingletonId}
-                WHERE b.Status = {ConfirmedStatus}
-                  AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
-                  AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc}
+                SELECT
+                  (SELECT COUNT(*)
+                   FROM Bookings b
+                   JOIN Links l ON l.Id = b.LinkId
+                   LEFT JOIN Settings s ON s.Id = {Settings.SingletonId}
+                   WHERE b.Status = {ConfirmedStatus}
+                     AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
+                     AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc})
+                  +
+                  (SELECT COUNT(*)
+                   FROM BookingProposals p
+                   JOIN Bookings pb ON pb.Id = p.BookingId
+                   JOIN Links pl ON pl.Id = pb.LinkId
+                   LEFT JOIN Settings ps ON ps.Id = {Settings.SingletonId}
+                   WHERE p.State = {openProposal}
+                     AND p.ExpiresAt > {now}
+                     AND p.StartUtc - (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
+                     AND p.EndUtc   + (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc})
+                  AS Value
                 """).AsEnumerable().Single();
 
             if (clashes > 0)
