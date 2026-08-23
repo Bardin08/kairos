@@ -230,9 +230,8 @@ public class SettingsAdminTests
     /// </summary>
     /// <remarks>
     /// Two claims in one test because they are one claim: the wall clock the availability rules
-    /// describe moves, and nothing already booked moves with it. Split apart, either half passes
-    /// while the other is broken — a zone that changed nothing at all satisfies the second, and a
-    /// zone change that rewrote every start satisfies the first.
+    /// describe moves, and nothing already booked moves with it. Split apart, a zone that changed
+    /// nothing satisfies the second and one that rewrote every start satisfies the first.
     /// </remarks>
     [Fact]
     public async Task SaveSettings_MovingTheZoneToWarsaw_MovesTheOfferedWindow_AndNoBooking()
@@ -335,12 +334,9 @@ public class SettingsAdminTests
 
     /// <summary>
     /// Two links on one Monday-only pattern, and one booking on a day neither test asks about.
+    /// The booking is deliberately elsewhere: it exists so the zone change has something to leave
+    /// alone, and inside the queried day it would be a busy block shaping every slot count.
     /// </summary>
-    /// <remarks>
-    /// The booking is deliberately elsewhere in the calendar: it exists so the zone change has
-    /// something to leave alone, and putting it inside the queried day would make it a busy block
-    /// silently shaping every slot count in the other test.
-    /// </remarks>
     private static void SeedBookable(KairosApp app)
     {
         app.Seed(context =>
@@ -396,10 +392,9 @@ public class SettingsAdminTests
     };
 
     /// <summary>
-    /// One link per <paramref name="limits"/> entry, each with one booking on it. The bookings are
-    /// seeded rather than made through the booking endpoint: what is asserted about them is that
-    /// nothing moves their instant, and a booking that arrived through availability would be
-    /// making that claim about the seeding path as well.
+    /// One link per <paramref name="limits"/> entry, each with one booking. The bookings are
+    /// seeded rather than made through the endpoint: what is asserted is that nothing moves their
+    /// instant, and one arriving through availability would claim that about the seeding path too.
     /// </summary>
     private static void Seed(KairosApp app, params Action<Link>[] limits)
     {

@@ -12,21 +12,14 @@ namespace Kairos.Api.Tests.Features;
 /// <summary>
 /// One seeded world for every suite about meetings: two links on the same pattern, so a booking
 /// made through one can be asserted against the other's offer. Shared rather than copied — two
-/// descriptions of the same world drift, and the cross-link margin rule is exactly the thing that
-/// stops being tested when they do.
+/// descriptions of one world drift, and the cross-link margin rule is what stops being tested.
 /// </summary>
 /// <remarks>
-/// <see cref="MeetingsAdminTests"/> keeps its own seed and is deliberately not folded into this
-/// one. Its world differs in four ways, and every one of them is load-bearing for what that suite
-/// asserts: meetings are 25 minutes rather than 30, the booker reads them in <c>Asia/Tokyo</c>
-/// rather than <c>Europe/Warsaw</c> — the point being a zone that is not the organizer's UTC —
-/// the pattern opens Monday alone rather than all seven days, and its bookings sit on three fixed
-/// consecutive days its range filter tests assert on both edges of. Merging the two would not
-/// remove a duplicate; it would change what those tests mean, which is worse than two fixtures.
-/// This world is instead the one <see cref="ProposalHoldTests"/> seeded, widened by a second link
-/// and lifted out of it — that suite now calls this one, and no assertion in it moved to make that
-/// true. The second link is inert there: availability is one calendar, and nothing in it books or
-/// proposes through the second slug.
+/// <see cref="MeetingsAdminTests"/> keeps its own seed deliberately: its meetings are 25 minutes
+/// not 30, its booker reads them in <c>Asia/Tokyo</c> rather than the organizer's UTC, its
+/// pattern opens Monday alone, and its bookings sit on three fixed consecutive days its range
+/// filter asserts both edges of. This world is <see cref="ProposalHoldTests"/>' own, widened by a
+/// second link and lifted out with no assertion moved; that suite uses only the first slug.
 /// </remarks>
 public static class MeetingsFixture
 {

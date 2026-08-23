@@ -46,11 +46,9 @@ public class ProposalEndpointsTests
     private const string BookedEnd = $"{MeetingsFixture.Day}T11:30:00Z";
 
     /// <summary>
-    /// The slot immediately after the meeting, and therefore inside the margin the meeting pads
-    /// its own slot with. Nothing may offer it while that meeting is confirmed — which is the
-    /// whole point of it being the one both release paths are asserted on. Spelled as the
-    /// booking's own end rather than repeated, so changing the fixture's duration cannot leave
-    /// this pointing at an hour that is no longer adjacent to anything.
+    /// The slot immediately after the meeting, inside the margin it pads its own slot with.
+    /// Nothing may offer it while that meeting is confirmed, which is why both release paths are
+    /// asserted on it. Spelled as the booking's own end, so the fixture's duration can change.
     /// </summary>
     private const string MovedNextTo = BookedEnd;
     private const string MovedToEnd = $"{MeetingsFixture.Day}T14:30:00Z";
@@ -132,11 +130,10 @@ public class ProposalEndpointsTests
     /// A proposal nobody can be told about is not a degraded proposal, it is a slot held hostage.
     /// </summary>
     /// <remarks>
-    /// The token exists only inside the call that mints it — the database keeps its SHA-256 — so a
-    /// hold committed without a mail going out is unanswerable for the whole window and nothing
-    /// anywhere can recover it. Rule 14 says a provider being down never fails a BOOKING; this is
-    /// not one, and the mailer's own tests call an unconfigured relay this deployment's ordinary
-    /// state, which is exactly why it has to be refused rather than swallowed.
+    /// The token exists only inside the call that mints it — the database keeps its SHA-256 — so
+    /// a hold committed without a mail going out is unanswerable and unrecoverable for the whole
+    /// window. Rule 14 says a provider being down never fails a BOOKING; this is not one, and an
+    /// unconfigured relay is this deployment's ordinary state, so it is refused not swallowed.
     /// </remarks>
     [Fact]
     public async Task Propose_NoRelayConfigured_IsRefusedAndOpensNoHold()
@@ -183,9 +180,8 @@ public class ProposalEndpointsTests
 
     /// <summary>
     /// Push the meeting back half an hour — the commonest reason to propose anything — and the
-    /// case the propose check refused outright until it released the booking first. A confirmed
-    /// meeting pads its own slot by the margin, so the hour directly after it is blocked by the
-    /// very meeting being moved.
+    /// case the propose check refused until it released the booking first. A confirmed meeting
+    /// pads its own slot, so the hour after it is blocked by the meeting being moved.
     /// </summary>
     [Fact]
     public async Task Propose_TheSlotDirectlyAfterTheMeeting_IsOfferedBecauseTheMeetingIsReleased()
@@ -315,11 +311,10 @@ public class ProposalEndpointsTests
     /// The invitee moves the meeting themselves while a suggestion is open.
     /// </summary>
     /// <remarks>
-    /// The suggestion is about a meeting that is no longer where it was, and leaving it Open costs
-    /// twice: the slot it names is blocked for the rest of the hold window, and its token still
-    /// resolves — so accepting it afterwards moves the meeting a second time, away from a current
-    /// time the invitee never agreed to and never saw. The cancel path has closed holds since it
-    /// was written; this path had not, because the two are separate copies of the same release.
+    /// Leaving it Open costs twice: the slot it names stays blocked for the rest of the hold
+    /// window, and its token still resolves, so accepting afterwards moves the meeting again away
+    /// from a time the invitee never saw. The cancel path has closed holds since it was written;
+    /// this one had not, the two being separate copies of the same release.
     /// </remarks>
     [Fact]
     public async Task RescheduleBooking_WhileAProposalIsOpen_ClosesTheHoldAndFreesItsSlot()
@@ -598,11 +593,10 @@ public class ProposalEndpointsTests
     /// A failure that is not a refusal must not answer for the invitee.
     /// </summary>
     /// <remarks>
-    /// The compensating close writes a decision onto the proposal, and only a refusal is a
-    /// decision. A provider falling over — or, the case that prompted this, an invitee closing the
-    /// tab and cancelling the request — is not the invitee having lost their slot, and burning the
-    /// row over it costs them a suggestion they never saw. The restore still runs, because that
-    /// half compensates a write this request already made and has to happen whatever went wrong.
+    /// The compensating close writes a decision onto the proposal, and only a refusal is one. A
+    /// provider falling over — or an invitee closing the tab, which prompted this — is not their
+    /// slot being lost, and burning the row costs them a suggestion they never saw. The restore
+    /// still runs: that half compensates a write this request already made.
     /// </remarks>
     [Fact]
     public async Task Accept_TheReCheckFailingForAReasonThatIsNotARefusal_LeavesTheProposalOpen()
@@ -631,9 +625,8 @@ public class ProposalEndpointsTests
 
     /// <summary>
     /// The hardest path out, and the one nothing else reaches: the slot went away while the
-    /// invitee was reading. Everything goes back — the meeting to the hour it was already at, and
-    /// the proposal to Withdrawn rather than to Open, because the slot it was holding is gone and
-    /// re-offering it would be offering something that is not there.
+    /// invitee was reading. Everything goes back — the meeting to its old hour, the proposal to
+    /// Withdrawn rather than Open, because re-offering a slot that is gone offers nothing.
     /// </summary>
     [Fact]
     public async Task Accept_AProposalWhoseSlotIsNoLongerOffered_PutsEverythingBack()
@@ -657,9 +650,8 @@ public class ProposalEndpointsTests
 
     /// <summary>
     /// Both times, in the order the page draws them. A run of same-typed ISO strings in one
-    /// positional record is exactly the shape where the current pair and the proposed pair swap
-    /// without a compiler anywhere, and the invitee is asked to agree to whichever one is printed
-    /// second.
+    /// positional record is where the current pair and the proposed pair swap without a compiler
+    /// noticing, and the invitee agrees to whichever is printed second.
     /// </summary>
     [Fact]
     public async Task GetProposal_AnOpenProposal_TellsTheInviteeBothTimesAndThatNothingIsDecided()
@@ -681,10 +673,9 @@ public class ProposalEndpointsTests
     }
 
     /// <summary>
-    /// A hold whose expiry has passed has stopped holding, whatever its row still says, and the
-    /// page has to be told that rather than shown Accept and Decline over a suggestion that will
-    /// answer 409 to either. Every other reader applies the expiry against the clock; this one
-    /// used to be the exception.
+    /// A hold whose expiry has passed has stopped holding whatever its row says, and the page has
+    /// to be told rather than shown Accept and Decline over a suggestion that 409s either way.
+    /// Every other reader applies the expiry against the clock; this one used to be the exception.
     /// </summary>
     [Fact]
     public async Task GetProposal_AProposalWhoseHoldHasLapsed_ReadsAsExpired()
@@ -780,10 +771,9 @@ public class ProposalEndpointsTests
     /// An operator's client on a deployment whose relay works.
     /// </summary>
     /// <remarks>
-    /// Every test here proposes, and a propose is refused outright where no relay is configured —
-    /// so a working one is this suite's world rather than a detail of any one case. Two things are
-    /// replaced and nothing else: the <c>Email</c> section, exactly as an operator sets it, and the
-    /// socket at the very bottom.
+    /// Every test here proposes, and a propose is refused where no relay is configured, so a
+    /// working one is this suite's world rather than any one case's detail. Two things are
+    /// replaced: the <c>Email</c> section as an operator sets it, and the socket at the bottom.
     /// </remarks>
     private static HttpClient OperatorWithRelay(KairosApp app, EmailSender? relay = null) =>
         WithRelayConfigured(app).CreateOperatorClient(services =>

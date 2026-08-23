@@ -20,10 +20,9 @@ public class SignInEndpointsTests
     private const string Route = $"{ApiVersions.V1}/sign-in";
 
     /// <summary>
-    /// Both halves of the contract in one call, because they only mean anything together: a
-    /// caller with no session must be answered, and answered with this application's own
-    /// challenge route. Gated, it would 401 at exactly the reader it exists for; defaulted to
-    /// anything else, an operator who configured nothing would be sent nowhere.
+    /// Both halves of the contract in one call, because they mean nothing apart: a caller with no
+    /// session must be answered, and answered with this application's own challenge route. Gated
+    /// it would 401 the reader it exists for; defaulted elsewhere it sends an operator nowhere.
     /// </summary>
     [Fact]
     public async Task GetSignIn_WithoutASession_AnswersTheApplicationsOwnLoginRoute()
@@ -40,9 +39,8 @@ public class SignInEndpointsTests
 
     /// <summary>
     /// The override exists so a deployment can send the operator through a portal, a VPN gate or
-    /// the provider's own account page first. It is the reason the URL is served rather than
-    /// compiled into the bundle, so a default that could not be overridden would make the whole
-    /// route pointless.
+    /// the provider's account page first. It is why the URL is served rather than compiled into
+    /// the bundle, so a default that could not be overridden would make the route pointless.
     /// </summary>
     [Fact]
     public async Task GetSignIn_WithASignInUrlConfigured_AnswersThatInstead()

@@ -22,10 +22,9 @@ public class HealthEndpointTests
 {
     /// <summary>
     /// SQLite's two sidecars, deleted with the database rather than instead of it. Clearing the
-    /// pool below closes the last connection, which checkpoints the write-ahead log and removes
-    /// both — measured here, and true only while nothing else holds a connection open. This
-    /// application ticks two hosted services on timers of their own, so the deletes cover all
-    /// three files and what the next request meets stops depending on that timing.
+    /// pool checkpoints the log and removes both — measured, and true only while nothing else
+    /// holds a connection. Two hosted services tick on timers here, so all three files are
+    /// deleted and the next request stops depending on that timing.
     /// </summary>
     private const string WriteAheadLogSuffix = "-wal";
 
@@ -35,9 +34,8 @@ public class HealthEndpointTests
 
     /// <summary>
     /// The one lock a reader cannot get past. An ordinary write does not block a read in WAL mode
-    /// — measured, and the reason readiness stays green through normal contention — so an
-    /// exclusive locking mode is what it takes to reach the path under test. The write is what
-    /// makes the connection take the lock; declaring the mode alone takes nothing.
+    /// — measured, and why readiness stays green through normal contention — so it takes an
+    /// exclusive locking mode. The write takes the lock; declaring the mode alone takes nothing.
     /// </summary>
     private const string LockAgainstReaders =
         "PRAGMA locking_mode = EXCLUSIVE; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS Blocker(Id);";
@@ -52,15 +50,14 @@ public class HealthEndpointTests
     private const int ProbeTimeoutHeadroom = 2;
 
     /// <summary>
-    /// Anonymous, because a kubelet holds no session and never will. Asserted on the shipped
-    /// pipeline rather than on the mapping, so an authorization convention added to the whole
-    /// application later fails here rather than in production at the first probe.
+    /// Anonymous, because a kubelet holds no session. Asserted on the shipped pipeline rather
+    /// than on the mapping, so a later blanket authorization convention fails here rather than
+    /// in production at the first probe.
     /// </summary>
     /// <remarks>
-    /// The body is read as well as the status, and that is not belt and braces. In a deployment
-    /// that has a built single page, <c>MapFallbackToFile</c> claims every path no route claims —
-    /// so an unmapped <c>/healthz</c> answers 200 with the whole application, and a probe checking
-    /// the status alone reports a process that is answering nothing as alive.
+    /// The body is read as well as the status: where a page has been built,
+    /// <c>MapFallbackToFile</c> answers 200 for an unmapped <c>/healthz</c> with the whole
+    /// application, and a status-only probe calls that alive.
     /// </remarks>
     [Fact]
     public async Task Liveness_WithoutASession_IsOk()
@@ -90,17 +87,15 @@ public class HealthEndpointTests
     }
 
     /// <summary>
-    /// The tag is what readiness selects on, and a registration without it is not part of the
-    /// answer. Both rows use the same failing check, so what is pinned is the tag deciding rather
-    /// than the check failing.
+    /// The tag is what readiness selects on. Both rows use the same failing check, so what is
+    /// pinned is the tag deciding rather than the check failing.
     /// </summary>
     /// <remarks>
-    /// Worth its own test because with one check registered a predicate matching the tag and a
-    /// predicate matching everything behave identically, so nothing else here can tell them apart
-    /// — and the difference is the whole guard against a check added elsewhere in the application
-    /// silently joining readiness. <see cref="Kairos.Api.Persistence.DatabaseHealthCheck"/> says
-    /// why that matters: a provider check joining this answer would take the pod out of service
-    /// over a revoked grant.
+    /// With one check registered a tag predicate and a match-everything predicate behave alike,
+    /// so nothing else can tell them apart — and that difference guards against a check added
+    /// elsewhere silently joining readiness. Per
+    /// <see cref="Kairos.Api.Persistence.DatabaseHealthCheck"/>, one would pull the pod from
+    /// service over a revoked grant.
     /// </remarks>
     [Theory]
     [InlineData(true, HealthStatus.Unhealthy, HttpStatusCode.ServiceUnavailable)]
@@ -125,16 +120,14 @@ public class HealthEndpointTests
     }
 
     /// <summary>
-    /// A contended database keeps the process in service. The lock here is held the one way that
-    /// blocks a reader as well as a writer — WAL lets readers past an ordinary write, which is why
-    /// the common case never reaches this path at all — and what is pinned is that the answer is
-    /// 200 <c>Degraded</c> rather than the 503 that would take the only replica out of rotation
-    /// over a database still able to serve a moment later.
+    /// A contended database keeps the process in service. The lock is held the one way that
+    /// blocks readers too — WAL lets them past an ordinary write — and the answer pinned is 200
+    /// <c>Degraded</c>, not the 503 that would pull the only replica over a database able to
+    /// serve a moment later.
     /// </summary>
     /// <remarks>
-    /// The elapsed bound is the second half of it, and the half that fails loudly if the query
-    /// timeout is dropped: unbounded, this answers after the provider's default 30 seconds, having
-    /// held a pooled connection for all of them while the probe that asked gave up at one.
+    /// The elapsed bound is the half that fails if the query timeout is dropped: unbounded, this
+    /// answers after the provider's default 30 seconds while the probe gave up at one.
     /// </remarks>
     [Fact]
     public async Task Readiness_WhileTheDatabaseIsLockedAgainstReaders_IsDegradedRatherThanUnready()
@@ -165,10 +158,9 @@ public class HealthEndpointTests
     }
 
     /// <summary>
-    /// Both halves of the verb restriction, because <c>MapHealthChecks</c> maps every verb unless
-    /// it is told not to — which left an anonymous <c>POST /readyz</c> running a database query for
-    /// anybody who sent one. HEAD is asserted beside it so that narrowing this to GET alone has to
-    /// be a decision rather than a side effect.
+    /// <c>MapHealthChecks</c> maps every verb unless told not to, which left an anonymous
+    /// <c>POST /readyz</c> running a database query for anybody. HEAD is asserted beside it so
+    /// narrowing to GET has to be a decision rather than a side effect.
     /// </summary>
     [Theory]
     [InlineData(HealthEndpoints.LivenessPath)]
@@ -190,12 +182,10 @@ public class HealthEndpointTests
     /// The pair, in one test because the value is in the difference between the two answers.
     /// </summary>
     /// <remarks>
-    /// Taking the file away is not enough on its own, twice over. The pool holds an open handle
-    /// and the inode outlives the unlink, so the connection reads the database it has always read
-    /// — hence the pool is cleared first, scoped to this database as the rest of this suite scopes
-    /// it. And SQLite CREATES the file it is pointed at, so a connection to the deleted database
-    /// opens and a check that only asks whether it opens answers healthy over an empty file. What
-    /// makes the 503 real is that the check queries a table.
+    /// Deleting the file is not enough, twice over. The pool holds an open handle and the inode
+    /// outlives the unlink, so the pool is cleared first — this database's only. And SQLite
+    /// CREATES the file it is pointed at, so the connection opens over an empty one; what makes
+    /// the 503 real is that the check queries a table.
     /// </remarks>
     [Fact]
     public async Task Readiness_WithTheDatabaseDeleted_IsUnavailable_WhileLivenessStillAnswers()

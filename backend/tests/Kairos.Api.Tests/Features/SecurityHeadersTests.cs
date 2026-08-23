@@ -12,15 +12,14 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// What every response says about itself. The admin surface and the public booking page are served
-/// from the same origin as the API, and the workbench deletes a link in one click — so the two
-/// questions here are whether the set reaches every kind of response, and whether the policy still
-/// describes the page that is actually on disk.
+/// What every response says about itself. The admin surface and the public booking page share an
+/// origin with the API, so the two questions are whether the set reaches every kind of response
+/// and whether the policy still describes the page on disk.
 /// </summary>
 /// <remarks>
-/// The policy is asserted WHOLE rather than by the directive that happens to be interesting. It is
-/// one string built in one place, and a containment check leaves every directive it does not name
-/// individually deletable with the suite green — which is the same as not pinning them at all.
+/// The policy is asserted WHOLE rather than by whichever directive is interesting. It is one
+/// string built in one place, and a containment check leaves every unnamed directive deletable
+/// with the suite green.
 /// </remarks>
 public class SecurityHeadersTests
 {
@@ -58,10 +57,9 @@ public class SecurityHeadersTests
         "try { document.documentElement.setAttribute('data-theme', 'dark') } catch (e) {}";
 
     /// <summary>
-    /// Modelled on the page this application ships: the executed text is wrapped in the newline
-    /// and indentation of the element it sits inside. That whitespace is the point. It is between
-    /// the tags, so a browser hashes it, and a policy built over a trimmed script produces a
-    /// well-formed hash that matches nothing and silently refuses the script.
+    /// Modelled on the page this application ships: the executed text carries the newline and
+    /// indentation of the element around it. That whitespace is between the tags, so a browser
+    /// hashes it, and a policy built over a trimmed script matches nothing and refuses silently.
     /// </summary>
     private const string InlineScript = $"\n{ScriptIndent}{ThemeScript}\n{ScriptIndent}";
 
@@ -71,9 +69,8 @@ public class SecurityHeadersTests
 
     /// <summary>
     /// An attribute whose name ENDS in src and is not src. A match on the bare letters skips this
-    /// element, and the script it carries then executes nowhere: the hyphen is a non-word
-    /// character, so a word boundary does not tell the two apart. Its failure is silent in the
-    /// worst direction — a valid policy that refuses a script.
+    /// element and its script executes nowhere — the hyphen is a non-word character, so a word
+    /// boundary cannot tell the two apart. A valid policy that refuses a script.
     /// </summary>
     private const string MarkedScriptOpen = "<script data-src=\"deferred\">";
 
@@ -113,10 +110,9 @@ public class SecurityHeadersTests
         });
 
     /// <summary>
-    /// The test that stops the header and the page drifting apart. Both hashes are recomputed from
-    /// the bytes the server actually returned, so a policy pinned to a stale constant fails the
-    /// moment somebody edits either script — which is the failure that is otherwise silent. The
-    /// second script is the <c>data-src</c> one, which a looser match on the attribute drops.
+    /// The test that stops the header and the page drifting apart. Both hashes are recomputed
+    /// from the bytes the server returned, so a policy pinned to a stale constant fails the
+    /// moment either script is edited. The second is the <c>data-src</c> one a looser match drops.
     /// </summary>
     [Fact]
     public async Task ContentSecurityPolicy_WithInlineScriptsOnThePage_HashesExactlyWhatIsServed() =>
@@ -208,9 +204,8 @@ public class SecurityHeadersTests
 
     /// <summary>
     /// The backend-only host: no page, so nothing inline may run. Given an empty web root of its
-    /// own rather than the default one, which is the project's own directory — the SPA build
-    /// writes a page into it, so a test that read it would assert one policy on a machine where
-    /// somebody had run the frontend build and another where nobody had.
+    /// own rather than the default, which is the project's directory — the SPA build writes a page
+    /// there, so a test reading it would assert a different policy per machine.
     /// </summary>
     [Fact]
     public async Task ContentSecurityPolicy_WithNoPageInTheWebRoot_AllowsNoInlineScript() =>
@@ -283,10 +278,9 @@ public class SecurityHeadersTests
         $"'sha256-{Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(script)))}'";
 
     /// <summary>
-    /// The application over a web root this test owns, cleaned up the way <see cref="KairosApp"/>
-    /// cleans its database. Always a temporary one, never the default: the default is the API
-    /// project's own directory, whose contents depend on whether anybody has run the SPA build in
-    /// this clone, and a policy assertion against it would be green or red by accident.
+    /// The application over a web root this test owns, cleaned up as <see cref="KairosApp"/>
+    /// cleans its database. Never the default, which is the API project's own directory: its
+    /// contents depend on whether anybody ran the SPA build in this clone.
     /// </summary>
     private static Task WithSinglePageAsync(Func<KairosApp, Task> assert) =>
         WithWebRootAsync(SinglePage, assert);

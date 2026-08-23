@@ -14,15 +14,13 @@ using Microsoft.Extensions.Options;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// A client that arrives with an operator's session, for the tests that are about what an admin
-/// route ANSWERS rather than about who may reach it.
+/// A client arriving with an operator's session, for tests about what an admin route ANSWERS
+/// rather than who may reach it.
 /// </summary>
 /// <remarks>
-/// The gate itself is never substituted — <see cref="AdminBoundaryTests"/> exercises the real one
-/// and would catch a route that fell outside it. What is replaced is only the identity provider,
-/// because the alternative is a test that talks OpenID Connect to a Pocket ID that does not
-/// exist. Everything else is the application as it ships: same routes, same authorization policy,
-/// same handlers.
+/// Only the identity provider is replaced, because the alternative is talking OpenID Connect to
+/// a Pocket ID that does not exist. The gate is the real one — <see cref="AdminBoundaryTests"/>
+/// exercises it — and so are the routes, the policy and the handlers.
 /// </remarks>
 public static class OperatorSession
 {
@@ -37,31 +35,20 @@ public static class OperatorSession
     public const string Subject = "kairos-test-operator";
 
     /// <summary>
-    /// A client on its own host, so <paramref name="substitutions"/> can replace a service the
-    /// composition root registered. Taken on the factory rather than on <see cref="KairosApp"/>
-    /// so that <c>WithWebHostBuilder(…).CreateOperatorClient()</c> composes — a test that varies
-    /// configuration needs no parameter here to do it. The database is the factory's, so anything
-    /// seeded through <see cref="KairosApp.Seed"/> is visible here.
+    /// A client on its own host, so <paramref name="substitutions"/> can replace a registered
+    /// service. Taken on the factory so <c>WithWebHostBuilder(…).CreateOperatorClient()</c>
+    /// composes; the database is the factory's, so <see cref="KairosApp.Seed"/> is visible.
     /// </summary>
     /// <param name="groups">
-    /// The groups the session carries, one claim each — a provider releases the claim once per
-    /// membership. Null means the one the application admits; empty is a principal the identity
-    /// provider authenticated and Kairos does not trust; anything else is memberships it holds
-    /// somewhere other than here. All three are cases <see cref="AdminBoundaryTests"/> pins.
+    /// One claim each. Null is the group the application admits, empty a principal Kairos does
+    /// not trust, anything else memberships held elsewhere; all three are pinned.
     /// </param>
-    /// <param name="groupClaimType">
-    /// How those groups are spelled. Varied for the one test that pins the read matching a claim
-    /// type case-insensitively, which is what admits a provider that sends <c>Groups</c>.
-    /// </param>
-    /// <param name="subject">
-    /// The subject the session carries, issued by default because a real provider always sends
-    /// one. It only decides anything where a deployment has written an allowlist.
-    /// </param>
+    /// <param name="groupClaimType">Varied for the test pinning case-insensitive matching.</param>
+    /// <param name="subject">Issued by default; it decides nothing without an allowlist.</param>
     /// <param name="subjectClaimType">
-    /// How that subject is spelled. The default is what a principal really carries: the OIDC
-    /// handler maps inbound claims unless told not to, so <c>sub</c> arrives rewritten to the
-    /// ClaimTypes URI. A provider with mapping turned off is the other spelling, and both are
-    /// live arms of <see cref="AdminAuthorization.IsOperator"/>.
+    /// The OIDC handler maps inbound claims unless told not to, so <c>sub</c> defaults to the
+    /// ClaimTypes URI. Mapping off is the other spelling; both are live arms of
+    /// <see cref="AdminAuthorization.IsOperator"/>.
     /// </param>
     public static HttpClient CreateOperatorClient(
         this WebApplicationFactory<KairosDbContext> app,

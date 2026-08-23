@@ -18,15 +18,11 @@ namespace Kairos.Api.Tests.Integrations;
 /// What the confirmation is made of, asserted on the bytes that go on the wire.
 /// </summary>
 /// <remarks>
-/// Every message under test is written out and parsed back before anything is read off it, so
-/// what is asserted is what a relay would hand a client rather than the object graph that
-/// produced it — transfer encodings included, which is where a folded .ics gets destroyed.
-///
-/// Nothing here mocks SMTP. <see cref="EmailSender"/> is real in every one of these, and the one
-/// test that reaches the network points it at a port nothing listens on: a mock would assert that
-/// MailKit was called the way this file already knows it is called, which is a test of the test.
-/// Whether a message lands in an inbox is not decidable here at all, and is verified by sending
-/// real mail to a Gmail and an Outlook account.
+/// Every message is written out and parsed back before anything is read off it, so what is
+/// asserted is what a relay would hand a client — transfer encodings included, which is where a
+/// folded .ics gets destroyed. Nothing mocks SMTP: <see cref="EmailSender"/> is real throughout,
+/// and the one test reaching the network points it at a port nothing listens on. Inbox placement
+/// is verified by sending real mail to a Gmail and an Outlook account.
 /// </remarks>
 public class BookingMailerTests
 {
@@ -105,15 +101,13 @@ public class BookingMailerTests
     }
 
     /// <summary>
-    /// Not a second .ics writer. The UID is the booking's own identifier and the SEQUENCE is the
-    /// booking's own, which is what makes a rescheduled meeting land as a change rather than as a
-    /// second invitation.
+    /// Not a second .ics writer. The UID and SEQUENCE are the booking's own, which is what makes
+    /// a rescheduled meeting land as a change rather than a second invitation.
     /// </summary>
     /// <remarks>
     /// REQUEST, not some third method: a move is the same invitation at a new time, and that is
-    /// the entire mechanism by which a client updates the event it is holding. Get the method or
-    /// the sequence wrong and nothing is reported — the update is dropped, and the invitee arrives
-    /// at the hour of the invitation they still have.
+    /// how a client updates the event it holds. Get the method or the sequence wrong and nothing
+    /// is reported — the update is dropped and the invitee arrives at the old hour.
     /// </remarks>
     [Fact]
     public void Compose_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
@@ -133,8 +127,7 @@ public class BookingMailerTests
     /// <summary>
     /// The cancellation, in the three lines that have to agree for a client to remove the event.
     /// METHOD:CANCEL alone is not enough — Outlook acts on STATUS:CANCELLED and leaves an event
-    /// marked CONFIRMED sitting in the calendar however the message was labelled — and a CANCEL
-    /// body inside a part labelled REQUEST is discarded without a word to either side.
+    /// marked CONFIRMED — and a CANCEL body in a part labelled REQUEST is discarded silently.
     /// </summary>
     [Fact]
     public void Compose_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
@@ -154,9 +147,8 @@ public class BookingMailerTests
 
     /// <summary>
     /// The mail an accepted proposal sends. It has no manage token either — the invitee arrived
-    /// holding the proposal's token, not theirs — and the block is dropped the same way. What must
-    /// survive that is the whole reason the message goes: a REQUEST at the advanced SEQUENCE is
-    /// what moves the event already sitting in their calendar.
+    /// holding the proposal's — and the block is dropped the same way. What must survive is the
+    /// REQUEST at the advanced SEQUENCE that moves the event in their calendar.
     /// </summary>
     [Fact]
     public void Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
@@ -173,15 +165,13 @@ public class BookingMailerTests
     }
 
     /// <summary>
-    /// An operator's cancellation has no manage token to put in the mail, and cannot get one:
-    /// only the SHA-256 is stored. The notice still has to go, so the link is omitted rather than
-    /// invented — and it is worth nothing on a cancelled booking anyway.
+    /// An operator's cancellation has no manage token and cannot get one — only the SHA-256 is
+    /// stored. The notice still has to go, so the link is omitted rather than invented.
     /// </summary>
     /// <remarks>
-    /// The heading is asserted alongside the URL, and that is the half that pins the behaviour
-    /// this was written for. A body that dropped the link and kept "This booking:" over the empty
-    /// space where it had been passes an assertion about the URL alone, and reads to the invitee
-    /// as a mail with something missing from it.
+    /// The heading is asserted alongside the URL, and that is the half that pins this: a body
+    /// dropping the link but keeping "This booking:" over the empty space passes an assertion
+    /// about the URL alone, and reads as a mail with something missing.
     /// </remarks>
     [Fact]
     public void Compose_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
@@ -219,10 +209,9 @@ public class BookingMailerTests
     }
 
     /// <summary>
-    /// The invitee's own cancel carries no reason — they know why — and the mail they get has to
-    /// be what it was before this column existed. A heading over nothing is the failure mode a
-    /// template with an optional block in it produces, and it is read by the person least able to
-    /// ask what was meant by it.
+    /// The invitee's own cancel carries no reason — they know why — and their mail has to be what
+    /// it was before this column existed. A heading over nothing is what a template with an
+    /// optional block produces, read by the person least able to ask what was meant.
     /// </summary>
     [Fact]
     public void Compose_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
@@ -260,9 +249,8 @@ public class BookingMailerTests
 
     /// <summary>
     /// The transfer encoding is the one thing between a correct .ics and a corrupt one. The
-    /// builder folds at 75 octets with a leading space marking each continuation, and an encoding
-    /// that normalises whitespace or line endings leaves a file no client will parse — which
-    /// looks, from the invitee's side, exactly like an email with no accept button.
+    /// builder folds at 75 octets with a leading space per continuation, and an encoding that
+    /// normalises whitespace or line endings leaves a file no client will parse.
     /// </summary>
     [Fact]
     public void Compose_Always_KeepsTheFoldedIcsIntactThroughTheTransferEncoding()

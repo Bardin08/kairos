@@ -93,21 +93,16 @@ public class OperatorCancelTests
     }
 
     /// <summary>
-    /// The same idempotence the invitee's cancel has, for the same reason: an operator who
-    /// double-clicks gets the answer they can already see rather than a 500 from the outbox's
-    /// unique index or a sequence advanced twice.
+    /// The same idempotence the invitee's cancel has: an operator who double-clicks gets the
+    /// answer they can already see, not a 500 from the outbox's unique index or a sequence
+    /// advanced twice.
     /// </summary>
     /// <remarks>
-    /// The sequence is not the whole claim, and on its own it is weakly held — the unique index
-    /// would keep it still even with nothing else in place. What the second press must also not do
-    /// is run the tail: withdraw an event from a calendar that let it go the first time, and mail
-    /// a second CANCEL to somebody who was told already.
-    ///
-    /// The withdrawal is counted and the mail is not, because the mail cannot be counted from
-    /// here without a relay — <see cref="Kairos.Api.Integrations.Email.EmailSender"/> says why it
-    /// has no seam to mock, and inventing one for this test would be the tail wagging the design.
-    /// It is pinned by proxy rather than left unsaid: the withdrawal and the send are two adjacent
-    /// statements with no branch between them, so a run that withdrew once sent once.
+    /// The sequence alone is weakly held — the unique index would keep it still. The second press
+    /// must also not run the tail: withdraw an event a calendar already released, mail a second
+    /// CANCEL. The withdrawal is counted and the mail is not, because
+    /// <see cref="Kairos.Api.Integrations.Email.EmailSender"/> has no seam to mock; it is pinned
+    /// by proxy, the withdrawal and the send being adjacent statements with no branch between.
     /// </remarks>
     [Fact]
     public async Task Cancel_AMeetingAlreadyCancelled_AnswersTheSameAndRunsTheTailOnlyOnce()
@@ -168,11 +163,9 @@ public class OperatorCancelTests
     }
 
     /// <summary>
-    /// A meeting that reached Cancelled without this endpoint having announced it — the case the
-    /// early return covers and the unique index cannot, because there is no outbox row to collide
-    /// with. Nothing may happen to it: not a second sequence, not a reason written over a
-    /// cancellation somebody else made, and not a CANCEL mailed to an invitee who was told months
-    /// ago.
+    /// A meeting that reached Cancelled without this endpoint announcing it — the case the early
+    /// return covers and the unique index cannot, there being no outbox row to collide with.
+    /// Nothing may happen: no second sequence, no reason written over somebody else's, no CANCEL.
     /// </summary>
     [Fact]
     public async Task Cancel_AMeetingCancelledWithNoAnnouncementBehindIt_ChangesNothing()
@@ -196,22 +189,16 @@ public class OperatorCancelTests
 
     /// <summary>
     /// Two cancels genuinely in flight at once — the path the early return above cannot reach,
-    /// because both callers read the booking as Confirmed before either has written anything.
+    /// because both callers read the booking as Confirmed before either writes.
     /// </summary>
     /// <remarks>
-    /// The overlap is forced rather than hoped for, and it is forced at the place the claim is
-    /// about. <see cref="BookingConcurrencyTests"/> puts a barrier across two threads against one
-    /// file-backed database; this needs two whole requests, so the barrier goes into an EF
-    /// interceptor and holds each caller inside <c>SaveChangesAsync</c>, after its changes are
-    /// tracked and before any SQL is issued. Both are therefore mid-save together, which is the
-    /// state the outbox's unique index on (BookingId, Type) exists to decide.
-    ///
-    /// Waiting on the save rather than on a clock read is what stops this going quietly vacuous.
-    /// A rendezvous keyed on "the first two reads of some collaborator" proves two reads met and
-    /// nothing else, and one new read anywhere upstream would leave it green while it stopped
-    /// measuring the overlap. The interceptor cannot be satisfied by anything but a save carrying
-    /// this booking's own transition to Cancelled, which only the cancellation produces — asserted
-    /// through <see cref="SaveRendezvous.BothArrived"/> rather than assumed.
+    /// <see cref="BookingConcurrencyTests"/> barriers two threads on one database; this needs two
+    /// whole requests, so the barrier goes into an EF interceptor holding each caller inside
+    /// <c>SaveChangesAsync</c>, after changes are tracked and before any SQL — both mid-save
+    /// together, the state the outbox's unique index on (BookingId, Type) decides. Waiting on the
+    /// save rather than a clock read is what stops this going vacuous: the interceptor takes
+    /// nothing but a save carrying this booking's transition to Cancelled, asserted through
+    /// <see cref="SaveRendezvous.BothArrived"/>.
     /// </remarks>
     [Fact]
     public async Task Cancel_TwoCancelsInFlightAtOnce_CancelsOnceAndAnnouncesOnce()
@@ -394,20 +381,15 @@ public class OperatorCancelTests
     }
 
     /// <summary>
-    /// Holds every caller that is saving <see cref="Booking"/> <see cref="Arm"/>'s subject into
-    /// <see cref="BookingStatus.Cancelled"/> until all of them have arrived, and is invisible to
-    /// every other save in the application.
+    /// Holds every caller saving <see cref="Arm"/>'s <see cref="Booking"/> into
+    /// <see cref="BookingStatus.Cancelled"/> until all have arrived; invisible to every other
+    /// save in the application.
     /// </summary>
     /// <remarks>
-    /// The seam is the save rather than the clock, a mocked context or a held write lock. A held
-    /// lock would surface as SQLITE_BUSY and a 503, which is a different path with a different
-    /// handler; a clock read is one statement earlier and one that anything else on the route
-    /// could also make. What is wanted is precisely "both writers are inside SaveChanges at the
-    /// same moment", and that is a sentence about this interception and nothing else.
-    ///
-    /// The predicate is deliberately narrow — this booking, modified, and now cancelled — so the
-    /// seeding, the create, the calendar entry write and any background save pass straight
-    /// through. Nothing else in the application can take a place at the barrier.
+    /// The seam is the save rather than the clock, a mocked context or a held write lock: a held
+    /// lock surfaces as SQLITE_BUSY and a 503, a different path, and a clock read is one anything
+    /// on the route could make. The predicate is deliberately narrow — this booking, modified,
+    /// now cancelled — so the seeding, the create and any background save pass straight through.
     /// </remarks>
     private sealed class SaveRendezvous(int participants, TimeSpan timeout) : SaveChangesInterceptor, IDisposable
     {

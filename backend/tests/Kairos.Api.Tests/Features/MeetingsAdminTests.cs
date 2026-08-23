@@ -25,11 +25,10 @@ namespace Kairos.Api.Tests.Features;
 /// link a booking came through, and whether it ever reached a calendar.
 /// </summary>
 /// <remarks>
-/// The sync assertions go through the real create path rather than through seeded
-/// <see cref="CalendarEntry"/> rows, because the claim being made is about the whole chain — a
-/// provider refuses, <see cref="CalendarSyncService"/> records it, the booking survives, and this
-/// endpoint reports it. A seeded row would pin the last link of that chain and pass just as
-/// happily with the first three broken.
+/// The sync assertions go through the real create path rather than seeded
+/// <see cref="CalendarEntry"/> rows, because the claim is about the whole chain — a provider
+/// refuses, <see cref="CalendarSyncService"/> records it, the booking survives, this endpoint
+/// reports it. A seeded row would pin the last link and pass with the first three broken.
 /// </remarks>
 public class MeetingsAdminTests
 {
@@ -159,12 +158,11 @@ public class MeetingsAdminTests
     }
 
     /// <summary>
-    /// The same guarantee at the line a revoked grant actually reaches. The refusal above throws
-    /// from the write; a withdrawn grant never gets that far, because the connectivity check
-    /// refreshes the access token and Google answers <c>invalid_grant</c> there. Both throws land
-    /// in the same catch today, which is exactly why this is pinned rather than left to reading: a
-    /// check that answered false instead would write no row at all, and the operator would be told
-    /// no calendar was ever connected for an account they connected themselves and then revoked.
+    /// The same guarantee at the line a revoked grant reaches. The refusal above throws from the
+    /// write; a withdrawn grant never gets that far, the connectivity check refreshing the token
+    /// and Google answering <c>invalid_grant</c> there. Both land in the same catch today, which
+    /// is why it is pinned: a check answering false instead would write no row, telling the
+    /// operator no calendar was ever connected for an account they connected and then revoked.
     /// </summary>
     [Fact]
     public async Task ListMeetings_TheGrantWasRevoked_ReadsNotSyncedWithTheReasonRatherThanAsNeverConnected()
@@ -199,9 +197,8 @@ public class MeetingsAdminTests
     }
 
     /// <summary>
-    /// The ordinary state of a fresh self-hosted Kairos: nothing connected, so nothing was tried
-    /// and there is no reason to give. It has to read as not synced all the same — the operator's
-    /// calendar does not hold this meeting — and it must not carry an error, because inventing one
+    /// The ordinary state of a fresh self-hosted Kairos: nothing connected, so nothing was tried.
+    /// It has to read as not synced all the same, and must not carry an error — inventing one
     /// would put a fault on every booking of a deployment that never asked to sync.
     /// </summary>
     [Fact]
@@ -556,10 +553,9 @@ public class MeetingsAdminTests
     }
 
     /// <summary>
-    /// A calendar whose grant has been withdrawn. Everything throws, including the connectivity
-    /// check: the credential is refreshed before any of these can answer, so the refusal arrives
-    /// one line earlier than <see cref="RefusingCalendar"/>'s — which is the only line a revoked
-    /// grant ever reaches.
+    /// A calendar whose grant has been withdrawn. Everything throws, the connectivity check
+    /// included: the credential is refreshed first, so the refusal arrives one line earlier than
+    /// <see cref="RefusingCalendar"/>'s — the only line a revoked grant ever reaches.
     /// </summary>
     private sealed class RevokedCalendar : ICalendarWriter
     {

@@ -15,15 +15,14 @@ using Shouldly;
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
-/// The poller against a real SQLite database, run as the host runs it. What is pinned here is
-/// which bookings it picks up — over and confirmed, and nothing else — and that a meeting it has
-/// already announced costs it nothing but a rejected insert.
+/// The poller against a real SQLite database, run as the host runs it. What is pinned is which
+/// bookings it picks up — over and confirmed, nothing else — and that an already-announced
+/// meeting costs it nothing but a rejected insert.
 /// </summary>
 /// <remarks>
-/// Nothing is substituted: the service resolves its own scope, its own context and its own
-/// writer out of a container built the way the application builds one. The delivery half is not
-/// tested here at all — an HTTP call standing in for an HTTP call proves nothing, so
-/// <see cref="OutboxDispatcher"/> is verified against a real listener instead.
+/// Nothing is substituted: the service resolves its own scope, context and writer from a
+/// container built the way the application builds one. Delivery is verified against a real
+/// listener in <see cref="OutboxDispatcher"/>'s tests, an HTTP stub proving nothing.
 /// </remarks>
 public class MeetingEndedPollerTests
 {
@@ -67,9 +66,8 @@ public class MeetingEndedPollerTests
 
     /// <summary>
     /// The second tick, and the reason the poller runs no "have I already announced this?" query.
-    /// The already-announced meeting is deliberately the older of the two, so its rejected insert
-    /// happens first: a sweep that let the rejection stop it, or left the rejected row in the
-    /// change tracker, would never reach the meeting that genuinely needs announcing.
+    /// The already-announced meeting is deliberately the older, so its rejected insert happens
+    /// first: a sweep stopped by the rejection would never reach the meeting that needs it.
     /// </summary>
     [Fact]
     public async Task Sweep_MeetingAlreadyAnnounced_SwallowsTheDuplicateAndAnnouncesTheRest()
@@ -111,9 +109,8 @@ public class MeetingEndedPollerTests
 
     /// <summary>
     /// The container the poller resolves through, built the way the application builds one:
-    /// options constructed by hand and registered as a singleton, so the process keeps exactly
-    /// one EF model. AddDbContext would attach this container's provider and mint a second,
-    /// which the compiled queries elsewhere in the suite bind to and then fail against.
+    /// options constructed by hand and registered as a singleton, so the process keeps one EF
+    /// model. AddDbContext would mint a second, which the suite's compiled queries fail against.
     /// </summary>
     private static ServiceProvider BuildContainer(TestDatabase database)
     {

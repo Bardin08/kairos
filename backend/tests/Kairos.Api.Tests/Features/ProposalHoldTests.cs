@@ -24,10 +24,9 @@ namespace Kairos.Api.Tests.Features;
 public class ProposalHoldTests
 {
     /// <summary>
-    /// The world is <see cref="MeetingsFixture"/>'s — same slug, same day, same duration, same
-    /// nine-to-five on every weekday — because it was copied from here in the first place and two
-    /// copies of one seeded world drift. The second link the fixture adds is inert to everything
-    /// below: availability is one calendar, and no test here books or proposes through it.
+    /// The world is <see cref="MeetingsFixture"/>'s — same slug, day, duration and nine-to-five
+    /// weekdays — because it was copied from here and two copies of one seeded world drift. The
+    /// second link the fixture adds is inert: no test here books or proposes through it.
     /// </summary>
     private const string Slug = MeetingsFixture.Slug;
     private const int DurationMinutes = MeetingsFixture.DurationMinutes;
@@ -76,9 +75,8 @@ public class ProposalHoldTests
 
     /// <summary>
     /// A hold is only as alive as the meeting under it. Nothing in this pull request closes a
-    /// proposal when its booking is cancelled, and correctness must not wait for the request that
-    /// will: an open, unexpired hold over a meeting that is off would otherwise keep its slot from
-    /// everyone for the rest of the hold window.
+    /// proposal when its booking is cancelled, and correctness must not wait: an open, unexpired
+    /// hold over a meeting that is off would keep its slot from everyone for the whole window.
     /// </summary>
     [Fact]
     public async Task GetSlots_AHoldOnACancelledMeeting_IsOfferedAgain()
@@ -96,10 +94,9 @@ public class ProposalHoldTests
     }
 
     /// <summary>
-    /// The invitee said no, and the slot they said no to goes back on offer at that moment rather
-    /// than at the end of the hold window. The ordinary outcome of a proposal, and the one the
-    /// State predicate exists for: Declined leaves the row in place with its expiry still in the
-    /// future, so nothing but that predicate can stop it holding.
+    /// The invitee said no, and the slot goes back on offer at that moment rather than at the end
+    /// of the hold window. The ordinary outcome, and what the State predicate exists for: Declined
+    /// leaves the row in place with its expiry in the future, so nothing else stops it holding.
     /// </summary>
     [Fact]
     public async Task GetSlots_AHoldOnADeclinedProposal_IsOfferedAgain()
@@ -207,11 +204,10 @@ public class ProposalHoldTests
 
     /// <summary>
     /// A booking elsewhere on the same day — 15:00 against the 11:00 it proposes — carrying one
-    /// proposal for <see cref="Held"/>. The booking sits away from the held slot on purpose: what
-    /// is being asserted is that the HOLD removes the slot, and a booking in the same place would
-    /// remove it whether the hold worked or not. The three parameters are the three things that
-    /// decide whether a hold still holds, one per predicate: how long until it lapses, whether the
-    /// meeting under it is still on, and whether the invitee has answered.
+    /// proposal for <see cref="Held"/>. It sits away from the held slot on purpose: a booking in
+    /// the same place would remove the slot whether the hold worked or not. The three parameters
+    /// are one per predicate — how long until it lapses, whether the meeting is still on, and
+    /// whether the invitee has answered.
     /// </summary>
     private static void SeedProposal(
         KairosApp app,

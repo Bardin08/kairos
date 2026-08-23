@@ -10,20 +10,14 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// Two tests, and they are the whole reason this file exists. Part A built the global-then-override
-/// design on null meaning inherit and zero meaning a deliberate zero; if the write side cannot keep
-/// those apart, that design collapses into a default-copying bug, and it collapses silently — a
-/// link showing 15 looks identical whether it inherited it or had it written in.
+/// Two tests, and the whole reason this file exists. Part A built the global-then-override design
+/// on null meaning inherit and zero meaning a deliberate zero; if the write side cannot keep them
+/// apart the design collapses silently into a default-copying bug.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Over HTTP rather than against the handler, because the distinction has to survive the wire and
-/// not only the assignment: a request body carrying <c>"marginMinutes": null</c> has to arrive as
-/// null, which is a fact about the binder as much as about the handler.
-/// </para>
-/// <para>
-/// There is deliberately no test asserting a link can be renamed. That would assert EF works.
-/// </para>
+/// Over HTTP rather than against the handler, because the distinction has to survive the wire: a
+/// body carrying <c>"marginMinutes": null</c> has to arrive as null, a fact about the binder as
+/// much as the handler. There is deliberately no test that a link can be renamed.
 /// </remarks>
 public class LimitWriteTests
 {

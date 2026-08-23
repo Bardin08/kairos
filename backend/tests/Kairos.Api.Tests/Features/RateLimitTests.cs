@@ -21,10 +21,9 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The anonymous write path, throttled. POST /bookings is the endpoint an unlimited caller turns
-/// into an open relay: every accepted request mails a caller-supplied address with
-/// caller-supplied prose in it, from the organizer's own relay and under their domain's
-/// reputation, and burns their calendar quota on the way.
+/// The anonymous write path, throttled. POST /bookings is what an unlimited caller turns into an
+/// open relay: every accepted request mails a caller-supplied address with caller-supplied prose,
+/// from the organizer's relay, under their domain's reputation, and burns their calendar quota.
 /// </summary>
 public class RateLimitTests
 {
@@ -142,19 +141,14 @@ public class RateLimitTests
 
     /// <summary>
     /// A refusal inside the window's last second still asks for a whole one. The metadata is the
-    /// remainder of the window, so truncating it answers <c>Retry-After: 0</c> to precisely the
-    /// caller the limiter has just decided is asking too often — an instruction to come straight
-    /// back, which is the storm the limit exists to stop. Against a one-second window every
-    /// refusal is that case, so this pins the rounding rather than hoping to catch it.
+    /// window's remainder, so truncating it answers <c>Retry-After: 0</c> to the caller just
+    /// judged to be asking too often. Against a one-second window every refusal is that case.
     /// </summary>
     /// <remarks>
-    /// If this ever flakes, the cause is the two requests below straddling a window boundary
-    /// rather than the rounding: past the boundary the permit is replenished and the second
-    /// request is admitted, so the failure looks like "expected 429". The warm-up covers host
-    /// startup, not that. Widen the window and keep the assertion — the exact
-    /// <c>Retry-After</c> equal to one whole window is the only thing here that dies when the
-    /// ceiling is turned back into a truncating cast, and loosening it removes the test's reason
-    /// to exist.
+    /// A flake here is the two requests straddling a window boundary, not the rounding: past it
+    /// the second is admitted and the failure reads "expected 429". Widen the window and keep the
+    /// assertion — the exact <c>Retry-After</c> of one whole window is what dies if the ceiling
+    /// becomes a truncating cast again.
     /// </remarks>
     [Fact]
     public async Task CreateBooking_RefusedInsideTheWindowsLastSecond_RoundsRetryAfterUpNotToZero()
@@ -188,21 +182,16 @@ public class RateLimitTests
     }
 
     /// <summary>
-    /// The read class, on the endpoint that is the cheap denial-of-service target on this API: one
-    /// call materializes a month of intervals, nothing is written, and nobody is billed for it.
-    /// Its budget is the larger one — a booking page really does load a link and then a month of
-    /// slots — so this also pins that the two classes are two numbers and not one.
+    /// The read class, on this API's cheap denial-of-service target: one call materializes a
+    /// month of intervals and nothing is written. Its budget is the larger one, so this also pins
+    /// that the two classes are two numbers.
     /// </summary>
     /// <remarks>
-    /// This test was once seen red under parallel load and the limiter was the wrong suspect. The
-    /// cause was <c>SqliteConnection.ClearAllPools()</c> in the harness teardown, which is
-    /// process-global: a sibling test finishing disposed this one's pooled connections mid-loop
-    /// and a request came back 500, failing the <c>NotFound</c> assertion inside the loop rather
-    /// than the refusal at the end. Both teardowns now clear only their own database's pool. The
-    /// tell is which assertion fails — inside the loop is infrastructure, the last one is the
-    /// limiter. The window is pinned by <see cref="ShippingLimitHost"/> for the same reason: these
-    /// sixty-one requests must all land inside one window, and that should not depend on a
-    /// default.
+    /// Seen red once under parallel load with the limiter the wrong suspect: the cause was the
+    /// process-global <c>SqliteConnection.ClearAllPools()</c> in the harness teardown disposing
+    /// this test's pooled connections mid-loop. The tell is which assertion fails — inside the
+    /// loop is infrastructure, the last one is the limiter. <see cref="ShippingLimitHost"/> pins
+    /// the window so all sixty-one requests land inside one.
     /// </remarks>
     [Fact]
     public async Task GetSlots_PastTheWindowsPermits_IsRefusedWith429()
@@ -255,11 +244,10 @@ public class RateLimitTests
     }
 
     /// <summary>
-    /// A limit that cannot work stops the process instead of being discovered later. Zero permits
-    /// or a zero window throw from the limiter's own constructor, which without this is a 500 on
-    /// every anonymous request for as long as the deployment lasts; zero remembered partitions
-    /// throws nothing at all and merely turns every <c>RateLimit-*</c> header off in silence. The
-    /// third is why this is validated rather than left to fail loudly on its own.
+    /// A limit that cannot work stops the process rather than being discovered later. Zero
+    /// permits or a zero window throw from the limiter's constructor — a 500 on every anonymous
+    /// request for the life of the deployment — while zero remembered partitions throws nothing
+    /// and silently turns every <c>RateLimit-*</c> header off. The third is why this is validated.
     /// </summary>
     [Theory]
     [InlineData(WritePermitsKey)]
@@ -276,14 +264,13 @@ public class RateLimitTests
 
     /// <summary>
     /// A listener with no peer collapses every caller into one partition and makes
-    /// <c>X-Forwarded-For</c> untrustworthy at the same time, so the whole site shares one budget.
-    /// Nothing in any response says so — which is why it is said in the log, and said once: a line
-    /// per request would be a second denial of service on a host already being flooded.
+    /// <c>X-Forwarded-For</c> untrustworthy, so the whole site shares one budget. No response
+    /// says so, hence the log — said once, because a line per request is a second denial of
+    /// service on a host already being flooded.
     /// </summary>
     /// <remarks>
-    /// The bare harness host is the one shape that reproduces this, because TestServer opens no
-    /// socket — so this test deliberately does not go through
-    /// <see cref="ShippingLimitHost"/>, whose whole job is to lend the connection a peer.
+    /// The bare harness host is the one shape that reproduces this, TestServer opening no socket,
+    /// so this test deliberately skips <see cref="ShippingLimitHost"/> and its lent peer.
     /// </remarks>
     [Fact]
     public async Task CreateBooking_FromAConnectionWithNoPeer_WarnsOnceAndNotOnEveryRequest()
@@ -313,11 +300,9 @@ public class RateLimitTests
             builder.UseSetting(WritePermitsKey, Text(WritePermits));
             builder.UseSetting(ReadPermitsKey, Text(ReadPermits));
 
-            // Pinned rather than inherited. It happens to equal the shipping default, but the read
-            // test spends sixty permits one request at a time and every one of them has to land
-            // inside a window anchored at the limiter's construction — so the length that decides
-            // whether that test is sound belongs in the test's own configuration, where changing
-            // the default cannot silently shorten it.
+            // Pinned rather than inherited. It equals the shipping default, but the read test
+            // spends sixty permits one at a time inside a window anchored at the limiter's
+            // construction, so changing that default must not silently shorten it.
             builder.UseSetting(WindowKey, Window.ToString());
 
             builder.ConfigureServices(
@@ -405,16 +390,13 @@ public class RateLimitTests
 
     /// <summary>
     /// The peer the in-memory host does not have. TestServer opens no socket, so
-    /// <c>Connection.RemoteIpAddress</c> is null, and <c>UseForwardedHeaders</c> will not take a
-    /// header's word for who is calling unless the connection itself came from an address it
-    /// trusts — with nothing to check, it does nothing, and every client shares one partition.
-    /// Loopback is what the framework trusts by default, so lending the connection that address is
-    /// the whole substitution: the shipping middleware then resolves the caller for real.
+    /// <c>Connection.RemoteIpAddress</c> is null and <c>UseForwardedHeaders</c> takes no header's
+    /// word for who is calling, leaving every client in one partition. Loopback is what the
+    /// framework trusts by default, so lending that address is the substitution.
     /// </summary>
     /// <remarks>
-    /// An <see cref="IStartupFilter"/> rather than test middleware, because this has to run before
-    /// <c>UseForwardedHeaders</c> — which is the first line of the application's own pipeline, and
-    /// nothing registered through <c>Configure</c> can get in front of it.
+    /// An <see cref="IStartupFilter"/> rather than test middleware: nothing registered through
+    /// <c>Configure</c> gets in front of <c>UseForwardedHeaders</c>.
     /// </remarks>
     private sealed class LoopbackPeer : IStartupFilter
     {

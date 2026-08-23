@@ -23,10 +23,9 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The HTTP surface over the real pipeline. What is pinned here is the wiring — which route
-/// answers, which failure becomes which status, and the two rules that live at this layer and
-/// nowhere below it: a booking is re-checked against generated slots before it is written, and a
-/// reschedule moves the meeting rather than replacing it.
+/// The HTTP surface over the real pipeline. What is pinned is the wiring — which route answers,
+/// which failure becomes which status — and the two rules living only at this layer: a booking is
+/// re-checked against generated slots before it is written, and a reschedule moves the meeting.
 /// </summary>
 public class EndpointTests
 {
@@ -171,14 +170,13 @@ public class EndpointTests
 
     /// <summary>
     /// A booking does not block its own move. A confirmed meeting pads its slot by the margin, so
-    /// the slot directly after it is covered by the meeting being moved — which is precisely what
-    /// the release before the re-check exists to get out of the way.
+    /// the slot directly after it is covered by the meeting being moved — which is what the
+    /// release before the re-check exists to clear.
     /// </summary>
     /// <remarks>
-    /// Asserted nowhere until now, and the gap was invisible: every other reschedule in this file
-    /// moves to an hour the booking's own padded block never reached, so deleting the release
-    /// left the whole suite green. Found by mutating it while building the operator's propose,
-    /// which releases for the same reason and had the same hole.
+    /// The gap was invisible: every other reschedule here moves to an hour the padded block never
+    /// reached, so deleting the release left the suite green. Found by mutating it while building
+    /// the operator's propose, which had the same hole.
     /// </remarks>
     [Fact]
     public async Task RescheduleBooking_TheSlotDirectlyAfterIt_IsNotBlockedByTheMeetingBeingMoved()
@@ -213,10 +211,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// The branch the release-then-re-check design exists to justify. A reschedule that fails
-    /// must undo the release it made to run the check — if it does not, the caller sees an error
-    /// and believes their meeting stands while the row sits cancelled in the database. Silent,
-    /// destructive, and invisible to a test that only reads the status code.
+    /// The branch the release-then-re-check design exists to justify. A reschedule that fails must
+    /// undo the release it made to run the check; otherwise the caller sees an error and believes
+    /// their meeting stands while the row sits cancelled. Invisible to a status-code assertion.
     /// </summary>
     [Fact]
     public async Task RescheduleBooking_InstantTheLinkNeverOffered_LeavesTheRowConfirmedWhereItWas()
@@ -245,18 +242,14 @@ public class EndpointTests
 
     /// <summary>
     /// One window and no other: the invitee's connection dropping between the release the
-    /// reschedule commits and the restore that puts the row back. This is not a general test of
-    /// what an aborted request answers — the request here fails, and it is supposed to. What it
-    /// pins is that the compensating write outlives the request that triggered it, because
-    /// everything that would withdraw the calendar event and announce the cancellation lives in
-    /// the cancel endpoint and never runs on this path: a row left cancelled here is a meeting
-    /// still sitting in the organizer's calendar on a slot that is now free for somebody else.
+    /// reschedule commits and the restore that puts the row back. What it pins is that the
+    /// compensating write outlives the request — everything that would withdraw the calendar
+    /// event and announce the cancellation lives in the cancel endpoint and never runs here.
     /// </summary>
     /// <remarks>
-    /// The abort is fired from a busy source, which is the last thing the re-check touches before
-    /// it reads the database again. That puts the dead token exactly at the restore and nowhere
-    /// earlier — an abort raised from the client's side on a timer would land wherever the machine
-    /// happened to be, which is a different test on every run.
+    /// The abort fires from a busy source, the last thing the re-check touches before it reads
+    /// the database again, which puts the dead token exactly at the restore. A client-side timer
+    /// would land wherever the machine happened to be.
     /// </remarks>
     [Fact]
     public async Task RescheduleBooking_ConnectionDropsDuringTheReCheck_StillPutsTheRowBackConfirmed()
@@ -383,10 +376,8 @@ public class EndpointTests
 
     /// <summary>
     /// One condition, one body. A slug nothing answers to is the same fact on both routes, so the
-    /// sentence a client renders from it has to be the same sentence — and it may not be built out
-    /// of what the caller sent. The slots read reflected it and the link read did not, which made
-    /// an anonymous caller's arbitrary string a round trip into whatever a page does with a
-    /// ProblemDetails title.
+    /// sentence a client renders has to be the same one — and may not be built from what the
+    /// caller sent. The slots read reflected it; the link read did not.
     /// </summary>
     [Fact]
     public async Task UnknownSlug_IsNotFoundOnBothLinkRoutes_WithOneTitleAndNoEchoOfTheSlug()
@@ -411,10 +402,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// The wiring the unit tests cannot see: that the contention handler is registered at all,
-    /// and that a write which loses the lock for the whole busy timeout reaches it instead of
-    /// answering 500. Costs the busy timeout in wall clock, once, because there is no way to
-    /// hold a real SQLite write lock for less time than a real writer waits for it.
+    /// The wiring the unit tests cannot see: that the contention handler is registered, and that
+    /// a write losing the lock for the whole busy timeout reaches it rather than answering 500.
+    /// Costs the busy timeout in wall clock, there being no way to hold the lock for less.
     /// </summary>
     [Fact]
     public async Task CreateBooking_AnotherWriterHoldsTheLock_IsServiceUnavailableRatherThanAFault()
@@ -438,11 +428,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// The state every fresh Kairos is in, and the one a booking page must survive: no Google
-    /// client configured, nothing connected, nobody having pressed Connect. The booking is written
-    /// and nothing is recorded about a calendar — not a failure row, because nothing was tried.
-    /// The announcement is there regardless, because a subscriber's interest in a booking has
-    /// nothing to do with whether the organizer wired up a calendar.
+    /// The state every fresh Kairos is in: no Google client, nothing connected. The booking is
+    /// written and nothing is recorded about a calendar — not even a failure row, nothing having
+    /// been tried. The announcement goes regardless; a subscriber's interest is unrelated.
     /// </summary>
     [Fact]
     public async Task CreateBooking_NoCalendarProviderConnected_StillSucceedsAndRecordsNoSyncFailure()
@@ -466,11 +454,10 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// Gap 3's contract, in the shape Part C's Meetings tab consumes: the sync state as a word and
-    /// the join URL beside it, so a page can say "this meeting is not in your calendar" and offer
-    /// the second channel without a second request. The provider's own error text is deliberately
-    /// not here — it is unfiltered third-party prose on a response an invitee's manage token can
-    /// read, and the state alone answers the only question a UI asks.
+    /// Gap 3's contract, in the shape Part C's Meetings tab consumes: the sync state as a word
+    /// and the join URL beside it, so a page can say "this meeting is not in your calendar" and
+    /// offer the second channel without a second request. The provider's own error text is
+    /// deliberately absent — unfiltered third-party prose on a response a manage token can read.
     /// </summary>
     [Fact]
     public async Task GetBooking_SyncedWithAConference_ReportsBothOnTheRead()
@@ -489,11 +476,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// Gap 1 at the layer that had it. Both call sites for the calendar were in create, so a
-    /// meeting that moved left its event exactly where it was and the invitee held two plausible
-    /// times. The harness connects no Google, so reaching the calendar from here looks like the
-    /// entry going <c>failed</c> — an attempt that could not complete — where an endpoint that
-    /// never called at all leaves it <c>synced</c> and untouched.
+    /// Gap 1 at the layer that had it. Both calendar call sites were in create, so a meeting that
+    /// moved left its event where it was. The harness connects no Google, so reaching the calendar
+    /// shows as the entry going <c>failed</c>, where never calling leaves it <c>synced</c>.
     /// </summary>
     [Fact]
     public async Task RescheduleBooking_MeetingAlreadyInACalendar_ReachesTheCalendarToMoveIt()
@@ -539,11 +524,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// The same state, one integration over: no relay configured. The mailer runs on this request
-    /// after the write has committed, so an unconfigured or unreachable relay that threw would
-    /// turn every booking into a 500 for a reason no booker could act on — exactly the regression
-    /// an unconnected calendar would be, and the test above is its twin. The harness sets no Email
-    /// keys, which is the case being pinned; the wiring is what is under test, not the composition.
+    /// The same state one integration over: no relay configured. The mailer runs after the write
+    /// has committed, so a relay that threw would turn every booking into a 500 for a reason no
+    /// booker could act on. The harness sets no Email keys, which is the case pinned.
     /// </summary>
     [Fact]
     public async Task CreateBooking_NoRelayConfigured_StillWritesTheBookingAndAnswers201()
@@ -579,11 +562,9 @@ public class EndpointTests
     }
 
     /// <summary>
-    /// The trap in wiring <c>booking.cancelled</c> at all. A reschedule is release, re-check,
-    /// re-place: it sets the booking cancelled and back to confirmed on the way through, so an
-    /// announcement hung off the status change would tell every subscriber that a meeting which
-    /// merely moved had been called off — and the unique index would then make the real
-    /// cancellation, later, silently unannounceable.
+    /// The trap in wiring <c>booking.cancelled</c> at all. A reschedule sets the booking cancelled
+    /// and back to confirmed on its way through, so an announcement hung off the status change
+    /// would call a moved meeting off — and leave the real cancellation unannounceable.
     /// </summary>
     [Fact]
     public async Task RescheduleBooking_ReleasesTheSlotToRePlaceIt_AnnouncesNoCancellation()
@@ -628,10 +609,9 @@ public class EndpointTests
     /// <summary>
     /// The invariant the whole .ics side rests on: <c>Booking.Sequence</c> is the SEQUENCE of the
     /// last iCalendar message composed for this booking, so it only ever goes up. A client keeps
-    /// the highest sequence it has seen and drops anything that does not outrank it, without
-    /// telling anybody — so a cancellation that reused the reschedule's number would leave the
-    /// meeting sitting in the invitee's calendar for a booking that is off, and RFC 5546 requires
-    /// the CANCEL to outrank the REQUEST it withdraws for exactly that reason.
+    /// the highest it has seen and silently drops anything that does not outrank it, so a
+    /// cancellation reusing the reschedule's number leaves the meeting in the invitee's calendar
+    /// — which is why RFC 5546 requires the CANCEL to outrank the REQUEST it withdraws.
     /// </summary>
     [Fact]
     public async Task Booking_CreatedThenMovedThenCancelled_AdvancesTheSequenceEveryTime()
