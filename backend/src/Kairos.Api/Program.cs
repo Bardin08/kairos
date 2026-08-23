@@ -188,6 +188,11 @@ builder.Services.AddSingleton<IIntegrationConnector>(
 // Scoped: it reads and writes through the request's DbContext.
 builder.Services.AddScoped<IntegrationCredentialStore>();
 
+// The alert channel's first publisher. A second source is one more line here and no change to the
+// route, the response or the panel — which is the whole reason the channel is an interface rather
+// than a query the endpoint runs itself.
+builder.Services.AddScoped<IOperatorAlertSource, IntegrationAlertSource>();
+
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 
 // All three are stateless and hold no per-request state: the builder renders text, the sender
@@ -407,7 +412,8 @@ app.MapAdmin()
     .MapMeetingsAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()
-    .MapIntegrationsAdmin();
+    .MapIntegrationsAdmin()
+    .MapAlertsAdmin();
 
 // Said out loud, once, because the middleware cannot say it. A RequireAssertion has no logger and
 // AuthorizationMiddleware reports only "requirements were not met: AssertionRequirement", so the
