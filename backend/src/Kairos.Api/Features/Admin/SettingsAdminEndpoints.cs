@@ -51,6 +51,7 @@ public sealed record SettingsResponse(
     int MinNoticeMinutes,
     int DailyCap,
     int StartIncrementMinutes,
+    int ProposalHoldHours,
     OverrideCountsResponse Overrides);
 
 /// <summary>
@@ -65,12 +66,13 @@ public sealed record SettingsResponse(
 public sealed record TimeZoneOptionResponse(string Id, string Offset);
 
 /// <summary>
-/// The five values the operator sets, all of them, every time.
+/// The six values the operator sets, all of them, every time.
 /// </summary>
 /// <remarks>
-/// The floors are the same ones a link's overrides answer to, and for the same reasons: a negative
-/// margin inverts the padded busy interval and starts creating overlaps that look like
-/// availability, and a zero start increment makes the generator's minute step never advance.
+/// The four limits' floors are the same ones a link's overrides answer to, and for the same
+/// reasons: a negative margin inverts the padded busy interval and starts creating overlaps that
+/// look like availability, and a zero start increment makes the generator's minute step never
+/// advance.
 /// </remarks>
 public sealed record SaveSettingsRequest
 {
@@ -92,13 +94,23 @@ public sealed record SaveSettingsRequest
     [Range(MinIncrementMinutes, int.MaxValue)]
     public required int StartIncrementMinutes { get; init; }
 
+    /// <summary>
+    /// How long a proposed move holds its slot. The second of the values with a floor above zero,
+    /// and for the same shape of reason the start increment has one: a zero-hour hold has lapsed
+    /// before the invitee's mail is composed, so the proposal mechanism would hold nothing.
+    /// </summary>
+    [Range(MinProposalHoldHours, int.MaxValue)]
+    public required int ProposalHoldHours { get; init; }
+
     private const int MinLimit = 0;
     private const int MinIncrementMinutes = 1;
+    private const int MinProposalHoldHours = 1;
     private const int MaxTimeZoneIdLength = 100;
 }
 
 /// <summary>
-/// The organizer's zone and the four global limits every link's overrides resolve against.
+/// The organizer's zone, the four global limits every link's overrides resolve against, and how
+/// long a proposed move holds its slot.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -168,6 +180,7 @@ public static class SettingsAdminEndpoints
         settings.MinNoticeMinutes = request.MinNoticeMinutes;
         settings.DailyCap = request.DailyCap;
         settings.StartIncrementMinutes = request.StartIncrementMinutes;
+        settings.ProposalHoldHours = request.ProposalHoldHours;
 
         await context.SaveChangesAsync(cancellationToken);
 
@@ -203,6 +216,7 @@ public static class SettingsAdminEndpoints
             settings.MinNoticeMinutes,
             settings.DailyCap,
             settings.StartIncrementMinutes,
+            settings.ProposalHoldHours,
             await CountOverridesAsync(context, cancellationToken));
     }
 

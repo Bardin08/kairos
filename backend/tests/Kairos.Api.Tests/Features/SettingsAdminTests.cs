@@ -32,6 +32,10 @@ public class SettingsAdminTests
     private const int NewMinNotice = 90;
     private const int NewDailyCap = 6;
     private const int NewStartIncrement = 10;
+    private const int NewProposalHold = 12;
+
+    /// <summary>Not a shorter hold. A proposal that lapsed before it was sent holds nothing.</summary>
+    private const int NoHold = 0;
 
     /// <summary>2030-09-09T11:00:00Z, so no real clock decides anything here.</summary>
     private const long SeededStartUtc = 1_915_614_000;
@@ -142,6 +146,44 @@ public class SettingsAdminTests
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await ReadAsync(client)).StartIncrementMinutes
             .ShouldBe(SchedulingDefaults.StartIncrementMinutes);
+    }
+
+    /// <summary>
+    /// The fifth value, saved and read back. It is not one of the four a link may override — a
+    /// hold belongs to the proposal mechanism rather than to a link's own limits — so it rides on
+    /// this response with no entry in the override counts.
+    /// </summary>
+    [Fact]
+    public async Task SaveSettings_AProposalHold_IsStoredAndReadBack()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var saved = await client.PutAsJsonAsync(
+            SettingsPath, Body(Utc), TestContext.Current.CancellationToken);
+
+        saved.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await ReadAsync(client)).ProposalHoldHours.ShouldBe(NewProposalHold);
+    }
+
+    /// <summary>
+    /// Zero is not a shorter hold, it is a proposal that lapses before the mail carrying it is
+    /// composed. Refused at the endpoint, and the database's check constraint refuses it again for
+    /// anything that gets past here.
+    /// </summary>
+    [Fact]
+    public async Task SaveSettings_AZeroProposalHold_IsRefused()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var saved = await client.PutAsJsonAsync(
+            SettingsPath,
+            Body(Utc) with { ProposalHoldHours = NoHold },
+            TestContext.Current.CancellationToken);
+
+        saved.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await ReadAsync(client)).ProposalHoldHours.ShouldBe(SchedulingDefaults.ProposalHoldHours);
     }
 
     [Fact]
@@ -295,6 +337,7 @@ public class SettingsAdminTests
         MinNoticeMinutes = SchedulingDefaults.MinNoticeMinutes,
         DailyCap = SchedulingDefaults.DailyCap,
         StartIncrementMinutes = startIncrementMinutes,
+        ProposalHoldHours = SchedulingDefaults.ProposalHoldHours,
     };
 
     /// <summary>
@@ -356,6 +399,7 @@ public class SettingsAdminTests
         MinNoticeMinutes = NewMinNotice,
         DailyCap = NewDailyCap,
         StartIncrementMinutes = NewStartIncrement,
+        ProposalHoldHours = NewProposalHold,
     };
 
     /// <summary>
