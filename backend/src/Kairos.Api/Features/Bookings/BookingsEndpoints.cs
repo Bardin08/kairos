@@ -76,12 +76,11 @@ public sealed record RescheduleBookingRequest
 /// </summary>
 /// <param name="CalendarSync">
 /// Where this booking is in the organizer's calendar, lower-cased from
-/// <see cref="CalendarSyncState"/>: <c>synced</c>, <c>failed</c>, <c>pending</c> or
-/// <c>cancelled</c>. Null means nothing was ever attempted — the ordinary state of a deployment
-/// with no calendar connected, and not a fault. Everything a UI needs to say "this meeting is not
-/// in your calendar", and nothing more: the provider's own error text stays out of a response an
-/// invitee's manage token can read, because it is unfiltered third-party prose that routinely
-/// carries the organizer's account address inside it.
+/// <see cref="CalendarSyncState"/>. Null means nothing was ever attempted — the ordinary state of
+/// a deployment with no calendar connected, not a fault. Enough for a UI to say "this meeting is
+/// not in your calendar" and nothing more: the provider's own error text stays out of a response
+/// an invitee's manage token can read, being unfiltered third-party prose that routinely carries
+/// the organizer's account address inside it.
 /// </param>
 /// <param name="ConferenceUrl">
 /// Where to join, or null if this meeting has no second channel. The invitee already has this URL
@@ -222,11 +221,10 @@ public static class BookingsEndpoints
         await calendars.SyncAsync(booking, cancellationToken);
 
         // After the sync, so the confirmation describes a meeting the organizer's calendar already
-        // knows about, and never before the write committed. The plaintext manage token exists
-        // only here, in memory, for the length of this call — it is what the confirmation is for,
-        // and it is why the send happens on this thread instead of from a queue that would have to
-        // store it. The mailer swallows its own failures, so nothing here can turn a relay being
-        // down into a booking the organizer never gets.
+        // knows about, and never before the write committed. Sent on this thread rather than from a
+        // queue because the plaintext manage token the confirmation carries exists only here, in
+        // memory, and a queue would have to store it. The mailer swallows its own failures, so a
+        // relay being down cannot become a booking the organizer never gets.
         await mailer.SendConfirmationAsync(booking, result.ManageToken!, cancellationToken);
 
         return TypedResults.Created(
@@ -245,11 +243,9 @@ public static class BookingsEndpoints
     /// The invitee calls their own meeting off, with the token they arrived holding.
     /// </summary>
     /// <remarks>
-    /// Everything that happens to the booking is <see cref="BookingCanceller"/>'s, and this is
-    /// half of why it exists: the operator's cancel in <see cref="Admin.MeetingsAdminEndpoints"/>
-    /// is the same cancellation asked for by somebody else, and two copies of the status write,
-    /// the sequence, the announcement, the contention rule and the rule-14 tail had already begun
-    /// to differ from one another.
+    /// Everything that happens to the booking is <see cref="BookingCanceller"/>'s, shared with the
+    /// operator's cancel in <see cref="Admin.MeetingsAdminEndpoints"/> — the same cancellation
+    /// asked for by somebody else.
     ///
     /// No reason: the invitee knows why, and the null column is what records that this was their
     /// cancellation rather than the operator's.
@@ -294,19 +290,16 @@ public static class BookingsEndpoints
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
         await mover.MoveToAsync(booking, start);
 
-        // Here, at the end, and never in the release phase above. That release is bookkeeping —
-        // the booking is set cancelled and put back confirmed on every path out of this method,
-        // the failing ones included — so a calendar hook hung on the status change would withdraw
-        // the event for every meeting that merely moved, and an attendee who had already accepted
-        // would watch it vanish. Exactly the trap the booking.cancelled announcement is kept out
-        // of, and pinned by the same pair of tests.
+        // Here, at the end, and never in the release phase above: that release is bookkeeping the
+        // failing paths undo, so a calendar hook hung on the status change would withdraw the event
+        // for every meeting that merely moved and an attendee who had already accepted would watch
+        // it vanish. The trap the booking.cancelled announcement is kept out of, same pair of tests.
         await calendars.RescheduleAsync(booking, cancellationToken);
 
         // Then the invitee, so the mail describes a calendar the organizer's side already agrees
-        // with. Same token, same reasoning as the cancellation: it arrived in the URL, it stays in
-        // memory for this request, and nothing persists it. Sequence was advanced above and the
-        // UID is the booking id, which together are what make this land as a change rather than as
-        // a second meeting.
+        // with. The token arrived in the URL, stays in memory for this request and is never
+        // persisted. Sequence was advanced above and the UID is the booking id, which together are
+        // what make this land as a change rather than as a second meeting.
         await mailer.SendRescheduleAsync(booking, token, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
@@ -329,19 +322,18 @@ public static class BookingsEndpoints
     /// reason: a confirmed booking blocks its own calendar, so it is released before the re-check
     /// or a move an hour later is refused by the meeting being moved.
     ///
-    /// The proposal is closed in that same save, and there is no exclusion parameter anywhere: a
-    /// row that is no longer Open is a row neither conflict reader can see. That is not what
-    /// carries the re-check, though, and it is worth being exact about which line does. Both
-    /// readers also require the booking under a hold to be Confirmed, so the release alone already
-    /// makes this proposal's own hold invisible for the length of the re-check. What closing it
-    /// here buys is everything after: the re-place puts the booking back Confirmed, and a hold
-    /// still Open at that moment would block the slot the meeting now occupies, refuse every later
-    /// proposal through the filtered unique index, and reach the sweeper as a suggestion nobody
-    /// answered. Same save, so no window exists in which one is true without the other.
+    /// The proposal is closed in that same save, and no exclusion parameter exists anywhere: a row
+    /// that is no longer Open is a row neither conflict reader can see. That is not what carries
+    /// the re-check, though. Both readers also require the booking under a hold to be Confirmed, so
+    /// the release alone already hides this proposal's hold for the length of the re-check. What
+    /// closing it here buys is everything after: the re-place puts the booking back Confirmed, and
+    /// a hold still Open at that moment would block the slot the meeting now occupies, refuse every
+    /// later proposal through the filtered unique index, and reach the sweeper as a suggestion
+    /// nobody answered. Same save, so no window exists in which one is true without the other.
     ///
-    /// Every path out puts the booking back confirmed, the failing ones included. A proposal
-    /// closed by a re-check that failed goes to Withdrawn rather than back to Open: the slot it
-    /// was holding is gone, so re-offering it would be offering something that is not there.
+    /// Every path out puts the booking back confirmed, the failing ones included. A proposal closed
+    /// by a re-check that failed goes to Withdrawn rather than back to Open: the slot it was
+    /// holding is gone, so re-offering it would be offering something that is not there.
     /// </remarks>
     private static async Task<BookingResponse> AcceptProposalAsync(
         string token,
@@ -444,15 +436,15 @@ public static class BookingsEndpoints
     /// </summary>
     /// <remarks>
     /// The predicate is on the UPDATE rather than on a row read a moment before it, which is the
-    /// whole point. Accept and decline are check-then-write: two of them in flight together both
-    /// read the row as Open and both go on, which is a meeting moved under a proposal recorded
-    /// Declined, or one meeting moved twice with two mails behind it and the calendar synced
-    /// twice. Zero rows affected means somebody answered it between the read and here.
+    /// whole point. Accept and decline are check-then-write: two in flight together both read the
+    /// row as Open and both go on, which is a meeting moved under a proposal recorded Declined, or
+    /// one meeting moved twice with two mails behind it and the calendar synced twice. Zero rows
+    /// affected means somebody answered it between the read and here.
     ///
     /// The backstop rather than the mechanism, in the sense <see cref="BookingWriter"/>'s partial
     /// unique index is: <see cref="RequireOpen"/> refuses the ordinary case a moment earlier and
-    /// says WHICH of the two refusals it is, which this cannot. What this covers is the overlap
-    /// that no sequential check can see.
+    /// says WHICH of the two refusals it is, which this cannot. This covers only the overlap no
+    /// sequential check can see.
     /// </remarks>
     private static async Task ClaimAsync(
         KairosDbContext context,

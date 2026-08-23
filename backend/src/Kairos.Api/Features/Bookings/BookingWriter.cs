@@ -179,12 +179,11 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
 
             context.Bookings.Add(pending);
 
-            // Inside the transaction this method already owns, and before the one SaveChanges
-            // that carries the booking. That is the entire point of the outbox: the booking and
-            // the announcement of it are the same INSERT batch inside the same BEGIN IMMEDIATE,
-            // so there is no window in which one exists without the other — not a small window,
-            // none. Enqueued here rather than by the endpoint because the endpoint could only do
-            // it after the COMMIT, which is the dual write the pattern exists to delete.
+            // Inside the transaction this method already owns, and before the one SaveChanges that
+            // carries the booking, so the booking and its announcement are the same INSERT batch
+            // inside the same BEGIN IMMEDIATE and no window exists in which one is there without
+            // the other. Enqueued here rather than by the endpoint because the endpoint could only
+            // do it after the COMMIT, which is the dual write the outbox exists to delete.
             announcement = outbox.Enqueue(
                 bookingId,
                 OutboxMessageType.BookingCreated,
