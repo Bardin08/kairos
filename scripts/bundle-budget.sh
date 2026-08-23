@@ -64,10 +64,11 @@ readonly BUDGET_GZIP_BYTES=76800
 #
 # What is charged: only the fonts index.html PRELOADS, because those are what
 # the invitee blocks on. That list is read out of the built index.html rather
-# than kept here, for the same reason the chunk list is read out of the
-# manifest. Everything else in fonts/ is weighed and printed as information: the
-# latin-ext and cyrillic subsets arrive only when a Polish or Ukrainian name is
-# actually on the page, and Source Serif is one heading loading after first paint.
+# than kept here: a copy would drift silently, and the failure would read as a
+# regression rather than a stale list. Everything else in fonts/ is weighed and
+# printed as information: the latin-ext and cyrillic subsets arrive only when a
+# Polish or Ukrainian name is actually on the page, and Source Serif is one
+# heading loading after first paint.
 #
 # Measured at 31,000 bytes when the type system landed — Source Sans 3 latin at
 # 28,740 plus the digits-only IBM Plex Mono subset at 2,260. The 1,768 bytes of
