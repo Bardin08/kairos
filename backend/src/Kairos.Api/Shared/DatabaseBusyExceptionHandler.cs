@@ -15,11 +15,11 @@ namespace Kairos.Api.Shared;
 /// </summary>
 /// <remarks>
 /// A separate handler, registered ahead of <see cref="DomainExceptionHandler"/>, rather than a
-/// second branch inside it or a catch at the call site. Inside it would mean that handler
-/// answering for something that is not a domain concept, and its refusal to touch anything but a
-/// <see cref="DomainException"/> is the property that keeps a bug a 500. At the call site it
-/// would mean a failure branch in an endpoint written to have none — three of them, since every
-/// write can contend, not just the create.
+/// second branch inside it or a catch at the call site. Inside it, that handler would answer for
+/// something that is not a domain concept, and its refusal to touch anything but a
+/// <see cref="DomainException"/> is what keeps a bug a 500. At the call site it would mean a
+/// failure branch in an endpoint written to have none — three of them, since every write can
+/// contend, not just the create.
 /// <para>
 /// Recognising the code lives in <see cref="SqliteErrors"/> rather than here, because readiness
 /// has to recognise the same condition and answer it the other way round —

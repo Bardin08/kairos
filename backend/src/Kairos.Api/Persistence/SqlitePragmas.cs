@@ -17,8 +17,8 @@ public static class SqlitePragmas
     public const int BusyTimeoutMilliseconds = 5000;
 
     /// <summary>
-    /// Applies the pragmas to one connection, opening it first if it is closed. Must run on every
-    /// open: foreign_keys is a per-connection setting, not a property of the database file.
+    /// Must run on every open: foreign_keys is a per-connection setting, not a property of the
+    /// database file. Opens the connection first if it is closed.
     /// </summary>
     public static void Apply(SqliteConnection connection)
     {

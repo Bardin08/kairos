@@ -11,8 +11,6 @@ public sealed class ConferenceLinkConfiguration : IEntityTypeConfiguration<Confe
     {
         builder.HasKey(link => link.Id);
 
-        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
-        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
         builder.Property(link => link.Id)
             .HasValueGenerator<Uuid7ValueGenerator>();
 

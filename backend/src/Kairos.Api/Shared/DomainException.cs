@@ -17,8 +17,8 @@ public sealed class DomainException(
     public string Code { get; } = code;
 
     /// <summary>
-    /// The one code with no constant of its own until now, because it is minted here rather than
-    /// by a caller. Named so nothing has to retype it — the clients key on these strings.
+    /// Minted here rather than by a caller, and named so nothing has to retype it — clients key on
+    /// these strings.
     /// </summary>
     public const string NotFoundCode = "not_found";
 

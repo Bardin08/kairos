@@ -16,16 +16,12 @@ namespace Kairos.Api.Shared;
 /// </remarks>
 public static class HealthEndpoints
 {
-    /// <summary>Is the process alive.</summary>
     public const string LivenessPath = "/healthz";
 
-    /// <summary>Can the process serve.</summary>
     public const string ReadinessPath = "/readyz";
 
-    /// <summary>What a check has to be tagged with to be part of the readiness answer.</summary>
     public const string ReadinessTag = "ready";
 
-    /// <summary>The name the database check reports under.</summary>
     public const string DatabaseCheckName = "database";
 
     /// <summary>
@@ -47,10 +43,10 @@ public static class HealthEndpoints
     public static void MapHealth(this IEndpointRouteBuilder app)
     {
         // The predicate is the whole of liveness: it selects no check, so this route runs nothing
-        // and answers 200 because the process answered at all. That is the question a kubelet is
-        // asking, and the only one a restart can fix. A liveness probe that consulted the database
-        // would restart a healthy pod over a lock held for a second, turning a stall into an
-        // outage — and it would do it hardest under exactly the load that caused the lock.
+        // and answers 200 because the process answered at all. That is the only question a restart
+        // can fix. A liveness probe that consulted the database would restart a healthy pod over a
+        // lock held for a second, turning a stall into an outage — hardest under exactly the load
+        // that caused the lock.
         app.MapHealthChecks(LivenessPath, new HealthCheckOptions { Predicate = _ => false })
             .WithMetadata(new HttpMethodMetadata(ProbeMethods));
 

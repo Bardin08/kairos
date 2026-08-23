@@ -11,8 +11,6 @@ public sealed class BookingConfiguration : IEntityTypeConfiguration<Booking>
     {
         builder.HasKey(booking => booking.Id);
 
-        // Without this EF falls back to its own generator, which is v4 — plausible-looking and
-        // wrong in the one way that never raises an error. An explicitly assigned id still wins.
         builder.Property(booking => booking.Id)
             .HasValueGenerator<Uuid7ValueGenerator>();
 
