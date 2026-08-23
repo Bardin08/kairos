@@ -3,7 +3,9 @@ import { Link, Redirect, Route, Switch, useLocation } from 'wouter'
 
 import { getAlerts, type Alert } from './adminAlerts'
 import { getSettings } from './adminSettings'
-import AlertPanel from './AlertPanel'
+import { dismissedFor, forget, remember } from './conditionDismissal'
+import ConditionBanner from './ConditionBanner'
+import ConditionRow from './ConditionRow'
 import Availability from './Availability'
 import Links from './Links'
 import Locked from './Locked'
@@ -119,6 +121,9 @@ const SETTINGS: Destination = {
 
 const HOME = DESTINATIONS[0].path
 
+/** Ties the collapsed marker to the banner region it restores, for `aria-controls`. */
+const CONDITIONS = 'conditions'
+
 /** Two letters at most, and never more than the name actually has. */
 const INITIALS = 2
 
@@ -190,11 +195,24 @@ export default function AdminShell() {
   // operator cannot reach a screen without this having been asked for it.
   const [alerts, setAlerts] = useState<Alert[]>([])
 
+  // Loud or quiet. Re-derived from storage for every arriving set rather than
+  // carried across them, because a set that gained an alert has to reopen — see
+  // conditionDismissal.
+  const [dismissed, setDismissed] = useState(false)
+
   useEffect(() => {
     const controller = new AbortController()
 
     getAlerts(controller.signal)
-      .then(setAlerts)
+      .then((arrived) => {
+        setAlerts(arrived)
+
+        // A condition that clears and later returns must be loud again, so a
+        // stored signature is never allowed to outlive the conditions it named.
+        if (arrived.length === 0) forget()
+
+        setDismissed(dismissedFor(arrived))
+      })
       // Silent, exactly like the settings read below. The rail is navigation, and
       // nothing about it should turn red because a fetch did — least of all the
       // control whose whole job is to be believed when it does.
@@ -202,6 +220,16 @@ export default function AdminShell() {
 
     return () => controller.abort()
   }, [current])
+
+  const collapse = () => {
+    remember(alerts)
+    setDismissed(true)
+  }
+
+  const expand = () => {
+    forget()
+    setDismissed(false)
+  }
 
   useEffect(() => {
     const controller = new AbortController()
@@ -261,7 +289,11 @@ export default function AdminShell() {
               line without one of them being cut. */}
           <div className="rail-foot">
             <div className="grow">
-              <AlertPanel alerts={alerts} />
+              <ConditionRow
+                count={dismissed ? alerts.length : 0}
+                controls={CONDITIONS}
+                onExpand={expand}
+              />
               {operator !== null && (
                 <div className="row gap-2 mb-3">
                   <span className="avatar avatar-sm" aria-hidden="true">
@@ -276,6 +308,11 @@ export default function AdminShell() {
         </aside>
 
         <div className="admin-main">
+          {/* The wrapper carries the id rather than the banner: there may be two
+              banners or none, and `aria-controls` needs one stable target. */}
+          <div id={CONDITIONS}>
+            <ConditionBanner alerts={dismissed ? [] : alerts} onDismiss={collapse} />
+          </div>
           <Switch>
             <Route path="/links" component={Links} />
             {/* Ahead of the list route: `<Switch>` renders the first match, so
@@ -300,7 +337,11 @@ export default function AdminShell() {
           destination reads as a row of its own and the three primaries keep the
           bottom edge, where the thumb is. */}
       <nav className="tabbar" aria-label="Sections">
-        <AlertPanel alerts={alerts} />
+        <ConditionRow
+          count={dismissed ? alerts.length : 0}
+          controls={CONDITIONS}
+          onExpand={expand}
+        />
         {destinationLink(SETTINGS, current)}
         <div className="tabbar-inner">
           {DESTINATIONS.map((destination) => destinationLink(destination, current))}
