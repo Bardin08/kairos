@@ -3,20 +3,20 @@
 // sets data-theme and wins in both directions.
 //
 // index.html repeats the read half of this file as an inline script in <head>,
-// on purpose and permanently. It has to run before first paint or a stored
+// on purpose and permanently: it has to run before first paint or a stored
 // choice flashes the wrong theme for a frame, and importing this module would
-// cost a network round trip to avoid a repaint. Six duplicated lines is the
-// cheaper trade. Change the storage key or the attribute here and that script
-// changes too — nothing enforces it but this comment.
+// cost a network round trip to avoid a repaint. Change the storage key or the
+// attribute here and that script changes too — nothing enforces it but this
+// comment.
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
 const STORAGE_KEY = 'theme'
 
-// Every localStorage touch is wrapped, because the property access itself
-// throws in Safari with "Block All Cookies", in some in-app webviews and in a
+// Every localStorage touch is wrapped, because the property access itself throws
+// in Safari with "Block All Cookies", in some in-app webviews and in a
 // cross-origin iframe — and an in-app webview is exactly where a stranger opens
 // a pasted booking link. An uncaught throw here is a white page instead of a
-// booking form. The theme is the part that degrades; the page is not.
+// booking form.
 
 export function readChoice(): ThemeChoice {
   try {

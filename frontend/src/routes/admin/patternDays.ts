@@ -2,12 +2,11 @@
 // — and the hours a date would open on if it were given its own.
 //
 // It knows nothing about margin, minimum notice, daily cap or start increment,
-// and that is the design rather than an omission. Those four differ per link
-// while a pattern is shared, so a month drawn through them would be true of one
-// link and a lie about every other; and they are the expensive half of the
-// booking engine, so a second implementation here is the copy that goes stale.
-// When the preview needs real bookable times it asks the slots endpoint for
-// them. What is left is small enough to be obviously right.
+// and that is the design. Those four differ per link while a pattern is shared,
+// so a month drawn through them would be true of one link and a lie about every
+// other; and they are the expensive half of the booking engine, so a second
+// implementation here is the copy that goes stale. When the preview needs real
+// bookable times it asks the slots endpoint.
 
 import type { DayState } from '../../components/MonthGrid'
 import { monthCells } from '../../lib/time'
@@ -30,21 +29,18 @@ function isoDayOfWeek(day: string): number {
 
 /**
  * What each day of `month` is, keyed on the ORGANIZER's date — the same key the
- * slots endpoint's `from` and `to` speak, and therefore the same key a square
- * can be said to contain.
+ * slots endpoint's `from` and `to` speak.
  *
  * Every day of the month is in the map, closed ones included. `MonthGrid`
  * renders no attribute for a day it was given no state for, which is byte for
- * byte what it renders when no states are passed at all, so a day left out does
- * not draw as wrong — it draws as the booking page's default.
+ * byte what it renders when no states are passed at all, so a day left out draws
+ * as the booking page's default rather than as wrong.
  *
  * `today` is the ORGANIZER's date too, because the pattern's hours are their
  * wall clock. Every day before it is `past` whatever the week or an override
  * says, and that outranks the rest: blocking a day that has already happened
- * changes nothing an invitee can be offered, so the one thing left worth
- * reporting about the square is that it is not a control. What an override on
- * such a date said stays legible in the exceptions list, which is where a date
- * with its own hours has always been read.
+ * changes nothing an invitee can be offered. What an override on such a date
+ * said stays legible in the exceptions list.
  */
 export function patternDays({
   month,
@@ -62,8 +58,7 @@ export function patternDays({
   const states = new Map<string, DayState>()
 
   for (const day of monthCells(month)) {
-    // The squares before the first of the month, which belong to the month
-    // before it.
+    // The leading squares, which belong to the month before this one.
     if (day === null) continue
 
     // Date keys sort lexicographically, so a string compare is the whole
@@ -77,9 +72,8 @@ export function patternDays({
 
     const exception = exceptions.get(day)
     if (exception !== undefined) {
-      // A date states its own hours or states that it has none, and either way
-      // it replaces the week rather than narrowing it: an override with hours
-      // opens a day the rules never open.
+      // A date replaces the week rather than narrowing it: an override with
+      // hours opens a day the rules never open.
       states.set(day, exception.windows.length === 0 ? 'blocked' : 'open')
       continue
     }
@@ -93,17 +87,16 @@ export function patternDays({
 /**
  * The windows a date's own editor should open on, earliest first.
  *
- * What the date would otherwise offer, so that moving one end leaves the rest
- * already sensible: its own windows where it has them, and otherwise every
- * window its weekday opens with. All of them, not the first — a date holds a
- * morning and an afternoon exactly as a weekday does, so seeding one of two
- * would propose closing the afternoon of a date nobody asked to change.
+ * What the date would otherwise offer, so moving one end leaves the rest already
+ * sensible: its own windows where it has them, otherwise every window its
+ * weekday opens with. All of them, not the first — a date holds a morning and an
+ * afternoon exactly as a weekday does, so seeding one of two would propose
+ * closing the afternoon of a date nobody asked to change.
  *
- * One blank window on a weekday the pattern never opens, which is the one case
- * with nothing to borrow. Blank rather than an invented nine-to-five, for the
- * reason BLANK exists; one rather than none, because a panel that opened with
- * no windows in it would be proposing to block the date it was opened to give
- * hours to.
+ * One blank window on a weekday the pattern never opens, the one case with
+ * nothing to borrow. Blank rather than an invented nine-to-five, for the reason
+ * BLANK exists; one rather than none, because a panel that opened with no
+ * windows would be proposing to block the date it was opened to give hours to.
  */
 export function windowsOn(
   day: string,
@@ -117,8 +110,7 @@ export function windowsOn(
     }))
   }
 
-  // Filtered first, so the sort is on a copy and the caller's rules keep their
-  // order.
+  // Filtered first, so the sort is on a copy and the caller's rules keep order.
   const opening = rules
     .filter((rule) => rule.isoDayOfWeek === isoDayOfWeek(day))
     .sort((left, right) => left.startMinute - right.startMinute)
