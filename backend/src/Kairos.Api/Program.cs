@@ -35,8 +35,8 @@ using IPNetwork = System.Net.IPNetwork;
 using SystemClock = NodaTime.SystemClock;
 
 // CreateSlimBuilder rather than CreateBuilder: it leaves out the configuration providers and
-// logging this app never reads, which is startup time and a few Mi of a Raspberry Pi's memory
-// that a self-hosted single-organizer scheduler has better uses for.
+// logging this app never reads, which is startup time and a few Mi of a Raspberry Pi's memory a
+// self-hosted single-organizer scheduler has better uses for.
 var builder = WebApplication.CreateSlimBuilder(args);
 
 // AddDbContext, not AddDbContextPool: KairosDbContext registers its pragma interceptor from
@@ -67,18 +67,18 @@ builder.Services.AddSingleton(new SecretProtector(
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
 
-// The identity provider, and with it the whole of the operator's authentication. Read here rather
-// than bound to an options class because all three values are needed while the handlers are being
-// configured, and read with a throw for the same reason the secret key above has one: an absent
-// authority does not announce itself, it surfaces later as a redirect to nowhere.
+// Read here rather than bound to an options class because all three values are needed while the
+// handlers are being configured, and read with a throw for the same reason the secret key above
+// has one: an absent authority does not announce itself, it surfaces later as a redirect to
+// nowhere.
 var authority = RequiredForSignIn("Authority");
 var clientId = RequiredForSignIn("ClientId");
 var clientSecret = RequiredForSignIn("ClientSecret");
 
-// Where the locked admin screen sends the operator, and the one Authentication value that is
-// optional: it defaults to this application's own challenge route, which needs no provider name
-// because the handler discovers everything from the authority above. Overridden only by a
-// deployment that wants the operator to pass through something else first.
+// Where the locked admin screen sends the operator, and the one optional Authentication value: it
+// defaults to this application's own challenge route, which needs no provider name because the
+// handler discovers everything from the authority above. Overridden only by a deployment that
+// wants the operator to pass through something else first.
 var signInUrl = builder.Configuration[SignInEndpoints.ConfigurationKey] ?? SignInEndpoints.DefaultUrl;
 
 string RequiredForSignIn(string key) =>
@@ -102,11 +102,11 @@ builder.Services
         // sign-in loop that reads as a broken provider rather than as a cookie policy.
         options.Cookie.SameSite = SameSiteMode.Lax;
 
-        // Everything behind the gate is an API route the admin surface fetches, and a fetch
-        // cannot follow a redirect to another origin — it fails as an opaque CORS error that says
-        // nothing about the session having expired. So the cookie handler answers with the status
-        // codes a client can act on, and the one redirect worth making is the login route below,
-        // which a browser navigates to rather than fetches.
+        // Everything behind the gate is an API route the admin surface fetches, and a fetch cannot
+        // follow a redirect to another origin — it fails as an opaque CORS error saying nothing
+        // about the session having expired. So the handler answers with status codes a client can
+        // act on; the one redirect worth making is the login route below, which a browser navigates
+        // to rather than fetches.
         options.Events.OnRedirectToLogin = context =>
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -152,13 +152,13 @@ builder.Services
         // account fails the policy below with nothing in the logs to say why.
         options.Scope.Add(AdminAuthorization.GroupScope);
 
-        // Development only, and gated so that production cannot reach it however the
-        // configuration is written. The local provider in compose.dev.yaml serves discovery and
-        // its JWKS over plain HTTP on loopback, and the handler refuses to fetch either without
-        // this. It relaxes the TRANSPORT the metadata is fetched over and nothing else: the
-        // signature on every token is still verified against that JWKS, the issuer and audience
-        // are still checked, and no request skips authentication because of this line. It is not
-        // an authentication bypass and must never be widened into one.
+        // Development only, gated so production cannot reach it however the configuration is
+        // written. The local provider in compose.dev.yaml serves discovery and its JWKS over plain
+        // HTTP on loopback, and the handler refuses to fetch either without this. It relaxes the
+        // TRANSPORT the metadata is fetched over and nothing else: every token's signature is still
+        // verified against that JWKS, the issuer and audience are still checked, and no request
+        // skips authentication. It is not an authentication bypass and must never be widened into
+        // one.
         if (builder.Environment.IsDevelopment())
         {
             options.RequireHttpsMetadata = false;
@@ -216,12 +216,11 @@ builder.Services.AddScoped<BookingCanceller>();
 builder.Services.AddScoped<BookingMover>();
 builder.Services.AddScoped<ProposalWriter>();
 
-// One adapter resolved through three interfaces, and one instance per request rather than three:
-// registering the class separately and handing the same instance to each role is what keeps a
-// single Google client per scope. Busy sources are a collection because every source has a say;
-// the writer and the conference creator are single because a meeting goes into one calendar. A
-// second provider is therefore a second IBusySource line beside this one and a replacement of the
-// other two — the shape of the decision, not an oversight.
+// One adapter resolved through three interfaces, one instance per request rather than three:
+// registering the class separately and handing the same instance to each role keeps a single Google
+// client per scope. Busy sources are a collection because every source has a say; the writer and
+// the conference creator are single because a meeting goes into one calendar. A second provider is
+// therefore a second IBusySource line beside this one and a replacement of the other two.
 builder.Services.AddScoped<GoogleCalendarAdapter>();
 builder.Services.AddScoped<IBusySource>(
     services => services.GetRequiredService<GoogleCalendarAdapter>());
@@ -238,12 +237,12 @@ builder.Services.AddScoped<OutboxWriter>();
 
 builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(WebhookOptions.SectionName));
 
-// The two halves of the outbox, and two hosted services rather than one. Noticing that a meeting
-// ended and delivering what is queued are different jobs on different clocks: mixed into one
-// service, a receiver that refuses would drag the noticing into its retry loop and every retry
-// storm would become a duplicate storm. Singletons, as every hosted service is, so both reach
-// the database through IServiceScopeFactory — a scope per tick, because DbContext is scoped, is
-// not thread-safe, and these two tick independently of each other and of every request.
+// Two hosted services rather than one. Noticing that a meeting ended and delivering what is queued
+// are different jobs on different clocks: mixed into one service, a receiver that refuses would
+// drag the noticing into its retry loop and every retry storm would become a duplicate storm.
+// Singletons, as every hosted service is, so both reach the database through IServiceScopeFactory —
+// a scope per tick, because DbContext is scoped, is not thread-safe, and these two tick
+// independently of each other and of every request.
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 
@@ -259,11 +258,10 @@ builder.Services.AddRateLimitPolicies();
 
 builder.Services.AddHealthEndpoints();
 
-// Which addresses may speak for a caller, and which scheme the request really arrived on. Both
-// matter today: the address is what the rate limiter partitions on, and without the scheme a
-// TLS-terminating proxy leaves this application believing every request is plain HTTP — the OIDC
-// handler then builds an http:// redirect_uri the provider refuses. The session cookie no longer
-// depends on it, because its Secure policy above is unconditional rather than the scheme's.
+// Which addresses may speak for a caller, and which scheme the request really arrived on. The
+// address is what the rate limiter partitions on; without the scheme a TLS-terminating proxy leaves
+// this application believing every request is plain HTTP, and the OIDC handler then builds an
+// http:// redirect_uri the provider refuses.
 //
 // Left at the framework's default — loopback only — so a deployment that is NOT behind a proxy
 // cannot be told a false client address by a header. A deployment that is behind one names it, and
@@ -299,11 +297,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     }
 });
 
-// The framework's own message for a bad address is "An invalid IP address was specified", which
-// names neither the setting it came from nor the value that broke it — and this runs while the
-// pipeline is built, so it is read by somebody watching a container refuse to start. Both parsers
-// answer every malformed value with FormatException, an out-of-range prefix included; the argument
-// shapes are caught as well, so a null is named the same way rather than escaping bare.
+// The framework's own message for a bad address is "An invalid IP address was specified", naming
+// neither the setting it came from nor the value that broke it — and this runs while the pipeline
+// is built, so it is read by somebody watching a container refuse to start. Both parsers answer
+// every malformed value with FormatException, an out-of-range prefix included; the argument shapes
+// are caught as well, so a null is named the same way rather than escaping bare.
 static T Parsed<T>(string value, string path, Func<string, T> parse)
 {
     try
@@ -353,11 +351,11 @@ using (var scope = app.Services.CreateScope())
 // limiter's partition, and the redirect_uri a challenge builds — reads the wrong one otherwise.
 app.UseForwardedHeaders();
 
-// Ahead of everything that writes a response, so nothing can answer without them — the static
-// files middleware's short circuit and the exception handler's cleared response both included.
-// HSTS is one of the headers it writes, and there is deliberately no UseHsts beside this line:
-// that middleware writes eagerly and loses its header on the exception path, which the docstring
-// on SecurityHeaders.IsSecure records with the measurement behind it.
+// Ahead of everything that writes a response, so nothing can answer without them — the static files
+// middleware's short circuit and the exception handler's cleared response included. HSTS is one of
+// the headers it writes, and there is deliberately no UseHsts beside this line: that middleware
+// writes eagerly and loses its header on the exception path, which SecurityHeaders.IsSecure records
+// with the measurement behind it.
 //
 // There is deliberately no UseHttpsRedirection either. In the deployment this targets the proxy
 // terminates TLS and every request reaches this process over plaintext, so the middleware would
@@ -378,11 +376,10 @@ app.UseAuthorization();
 // After routing, because the endpoint's own metadata is what says whether it carries a budget.
 app.UseRateLimiting();
 
-// The two routes that make a session and end one, anonymous by necessity: a challenge is a
-// browser navigation to another origin, so nothing behind the gate could ever start one. They are
-// two of the six routes outside the admin prefix, and AdminGroup names all six and why. The admin
-// surface sends the window here after a 401 and there is no login form anywhere in this
-// application.
+// Anonymous by necessity: a challenge is a browser navigation to another origin, so nothing behind
+// the gate could ever start one. Two of the six routes outside the admin prefix, which AdminGroup
+// enumerates. The admin surface sends the window here after a 401; there is no login form anywhere
+// in this application.
 app.MapGet("/admin/login", () => Results.Challenge(
     new AuthenticationProperties { RedirectUri = "/admin" },
     [OpenIdConnectDefaults.AuthenticationScheme]));
@@ -399,8 +396,6 @@ app.MapGet("/admin/logout", () => Results.SignOut(
 // version bump must not be able to move it out from under a running cluster.
 app.MapHealth();
 
-// Versioned from day zero. The first breaking change is a second group mapped beside this one,
-// not a migration every client has to make on the same afternoon.
 var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
@@ -415,10 +410,9 @@ v1.MapSignIn(signInUrl);
 // the admin prefix. The other two moved under it.
 v1.MapIntegrationCallback();
 
-// The operator's workbench. Mapped through MapAdmin and never through v1, because that call is
-// the only thing standing between an anonymous caller and every one of these routes. One group,
-// chained: a second MapAdmin() beside this one would be a second place to read when asking what
-// is public, which is the question this shape exists to keep answerable in one line.
+// Mapped through MapAdmin and never through v1, because that call is the only thing standing
+// between an anonymous caller and every one of these routes. One group, chained: a second
+// MapAdmin() would be a second place to read when asking what is public.
 app.MapAdmin()
     .MapLinksAdmin()
     .MapMeetingsAdmin()
@@ -427,10 +421,10 @@ app.MapAdmin()
     .MapIntegrationsAdmin()
     .MapAlertsAdmin();
 
-// Said out loud, once, because the middleware cannot say it. A RequireAssertion has no logger and
+// Said out loud because the middleware cannot say it. A RequireAssertion has no logger and
 // AuthorizationMiddleware reports only "requirements were not met: AssertionRequirement", so the
-// likeliest way this boundary goes wrong in production — a provider that releases no groups claim
-// — reaches an operator as a 403 with nothing anywhere to read. This is what was expected.
+// likeliest way this boundary goes wrong in production — a provider that releases no groups claim —
+// reaches an operator as a 403 with nothing anywhere to read. This is what was expected.
 app.Logger.LogInformation(
     "The admin surface admits accounts whose {ClaimType} claim carries {Group}, narrowed to "
     + "{SubjectCount} allowed subjects — zero meaning the group alone decides.",
@@ -438,12 +432,11 @@ app.Logger.LogInformation(
     adminGroup,
     adminSubjects.Count);
 
-// Said out loud for the same reason, and about a boundary that fails even more quietly. A depth
-// too small for the topology is not an error anywhere: the middleware simply stops at the nearest
-// proxy, every caller on earth resolves to that one address, and they share a single rate-limit
-// partition. Nothing in a response says so and RateLimitBudget's warning cannot see it — that one
-// fires on a connection with no peer at all. So the numbers are stated at boot, where an operator
-// can hold them against their own topology.
+// The same, about a boundary that fails even more quietly. A depth too small for the topology is
+// not an error anywhere: the middleware stops at the nearest proxy, every caller on earth resolves
+// to that one address, and they share a single rate-limit partition. Nothing in a response says so,
+// and RateLimitBudget's warning cannot see it — that one fires on a connection with no peer at all.
+// So the numbers are stated at boot, where an operator can hold them against their own topology.
 var forwarding = app.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value;
 app.Logger.LogInformation(
     "Forwarded headers are resolved {ForwardLimit} hop(s) deep, trusting {ProxyCount} addresses "
@@ -454,9 +447,9 @@ app.Logger.LogInformation(
     forwarding.KnownProxies.Count,
     forwarding.KnownIPNetworks.Count);
 
-// Also said out loud, once. An unconfigured relay is a working Kairos — bookings succeed and
-// nothing throws — but it is indistinguishable from a broken one from the outside, because the
-// symptom of both is mail that never arrives. This is the line that tells the two apart.
+// An unconfigured relay is a working Kairos — bookings succeed and nothing throws — but from the
+// outside it is indistinguishable from a broken one, because the symptom of both is mail that never
+// arrives. This line tells the two apart.
 if (!app.Services.GetRequiredService<IOptions<EmailOptions>>().Value.IsConfigured)
 {
     app.Logger.LogWarning(
@@ -467,9 +460,9 @@ if (!app.Services.GetRequiredService<IOptions<EmailOptions>>().Value.IsConfigure
 }
 
 // The API prefix ends here. Without this line the fallback below claims every extensionless path,
-// /api included, so an unmapped API route answered 200 with the single page — a mistyped admin
-// path looked authorized and reached a fetch as HTML that failed on a JSON parse error rather than
-// as the 404 it was. Precedence is deterministic rather than lucky: a literal segment beats a
+// /api included, so an unmapped API route answered 200 with the single page — a mistyped admin path
+// looked authorized and reached a fetch as HTML that failed on a JSON parse error rather than as
+// the 404 it was. Precedence is deterministic rather than lucky: a literal segment beats a
 // wildcard, so every route mapped above still wins this one.
 app.Map("/api/{**rest}", () => Results.NotFound());
 
