@@ -9,9 +9,9 @@
 // A date library would be the obvious reach and it is the one thing the budget
 // forbids: the shell already spends 61,641 of 76,800 gzipped bytes, and the
 // smallest useful date library is larger than everything Kairos writes. `Intl`
-// costs nothing, ships in every browser, and carries the whole tzdb — which is
-// what actually matters here, because the organizer's zone and the invitee's
-// zone are different zones and neither is the machine's offset.
+// costs nothing and carries the whole tzdb — which is what matters here, because
+// the organizer's zone and the invitee's zone are different zones and neither is
+// the machine's offset.
 //
 // Two vocabularies, and confusing them is the bug this file exists to prevent:
 //
@@ -103,12 +103,11 @@ export function zonedTime(instant: string, zone: string): string {
 /**
  * The zone's short offset at an instant — `GMT+2`, `GMT-4`.
  *
- * It exists for one hour a year. When a zone falls back, two different instants
- * an hour apart render the same clock time: in Warsaw on 2026-10-25 both
- * 00:30Z and 01:30Z are "02:30". The booking stays correct either way, because
- * the instant is echoed to the server verbatim and the selection keys on it —
- * but the invitee is shown two identical buttons and cannot tell which hour
- * they are choosing. The offset is what separates them.
+ * It exists for one hour a year. When a zone falls back, two instants an hour
+ * apart render the same clock time: in Warsaw on 2026-10-25 both 00:30Z and
+ * 01:30Z are "02:30". The booking stays correct either way — the instant is
+ * echoed to the server verbatim — but the invitee is shown two identical buttons
+ * and cannot tell which hour they are choosing. The offset separates them.
  */
 export function zonedOffset(instant: string, zone: string): string {
   const parts = formatter('offset', zone, {
@@ -179,21 +178,17 @@ export function shiftMonth(day: string, delta: number): string {
 }
 
 /**
- * A month as the grid draws it: leading nulls for the squares before the
- * first, then a date key per day, then trailing nulls out to a fixed six
- * rows. The nulls are rendered rather than skipped, because the day columns
- * have to line up under their weekday headings — and, since the trailing
- * padding, because the calendar has to line up with itself from one month to
- * the next. A five-row February beside a six-row August is a booking card
- * that changes height when the invitee changes month and nothing else; padded
- * to the same cell count, every month draws the same number of rows and the
- * card stops moving.
+ * A month as the grid draws it: leading nulls for the squares before the first,
+ * then a date key per day, then trailing nulls out to a fixed six rows. The
+ * nulls are rendered rather than skipped so the day columns line up under their
+ * weekday headings, and so the calendar lines up with itself month to month — a
+ * five-row February beside a six-row August is a booking card that changes
+ * height when the invitee changes month.
  *
  * The first and last real-day keys are also the `from` and `to` of the slots
- * request. A 31-day month is exactly the 31 days that endpoint answers for,
- * so a month is the largest window it will ever be asked for and never a
- * wider one — the trailing nulls are not part of that window, only of the
- * grid drawn around it.
+ * request. A 31-day month is exactly the 31 days that endpoint answers for, so a
+ * month is the largest window it will ever be asked for; the trailing nulls are
+ * not part of that window, only of the grid drawn around it.
  */
 export function monthCells(month: string): (string | null)[] {
   const first = new Date(startOfMonth(month) + START_OF_DAY)
