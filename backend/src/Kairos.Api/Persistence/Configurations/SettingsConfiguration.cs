@@ -34,6 +34,10 @@ public sealed class SettingsConfiguration : IEntityTypeConfiguration<Settings>
             table.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
             table.HasCheckConstraint("CK_Settings_DailyCap_NonNegative", "DailyCap >= 0");
             table.HasCheckConstraint("CK_Settings_StartIncrementMinutes_AtLeastOne", "StartIncrementMinutes >= 1");
+
+            // Zero hours is not a shorter hold, it is a proposal that has lapsed before the mail
+            // carrying it has been composed. Same shape as the start increment's floor of one.
+            table.HasCheckConstraint("CK_Settings_ProposalHoldHours_AtLeastOne", "ProposalHoldHours >= 1");
         });
 
         // The only HasData in the model. The numbers live in SchedulingDefaults so the seed and
@@ -46,6 +50,7 @@ public sealed class SettingsConfiguration : IEntityTypeConfiguration<Settings>
             MinNoticeMinutes = SchedulingDefaults.MinNoticeMinutes,
             DailyCap = SchedulingDefaults.DailyCap,
             StartIncrementMinutes = SchedulingDefaults.StartIncrementMinutes,
+            ProposalHoldHours = SchedulingDefaults.ProposalHoldHours,
         });
     }
 }

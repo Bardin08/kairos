@@ -1,4 +1,6 @@
+using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Scheduling;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +21,30 @@ public class SchemaTests
     /// the race needs is that the two contexts are looking at the same day.
     /// </summary>
     private static readonly DateOnly ContestedDate = new(2026, 9, 14);
+
+    private const string ProposalPatternName = "Proposal pattern";
+    private const string ProposalSlug = "proposal";
+    private const string ProposalLinkName = "Proposal link";
+    private const string ProposalManageHash = "proposal-manage-hash";
+
+    /// <summary>
+    /// Two of them, and they have to differ: TokenHash is uniquely indexed, so a second proposal
+    /// sharing one would be refused by that index and the test would never reach the filtered one
+    /// it is about.
+    /// </summary>
+    private const string FirstTokenHash = "first-token-hash";
+    private const string SecondTokenHash = "second-token-hash";
+
+    private const long ProposalStartUtc = 1_900_000_000;
+    private const int ProposalMinutes = 30;
+    private const int SecondsPerMinute = 60;
+    private const int SecondsPerHour = 60 * SecondsPerMinute;
+
+    /// <summary>Clear of the booking, so nothing here turns on the two intervals overlapping.</summary>
+    private const int ProposalOffsetHours = 3;
+
+    private const int ProposalOffsetSeconds = ProposalOffsetHours * SecondsPerHour;
+    private const int ProposalHoldSeconds = SchedulingDefaults.ProposalHoldHours * SecondsPerHour;
 
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
@@ -186,4 +212,89 @@ public class SchemaTests
         alsoRead.Version++;
         Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
     }
+
+    /// <summary>
+    /// One open proposal per meeting, enforced by the database rather than by whoever wrote the
+    /// endpoint. Two open holds for one booking means two slots held for one meeting and an
+    /// accept race with no good answer.
+    /// </summary>
+    [Fact]
+    public void Schema_ASecondOpenProposalForOneBooking_IsRefused()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+
+        var bookingId = SeedBooking(context);
+        context.BookingProposals.Add(NewProposal(bookingId, FirstTokenHash));
+        context.SaveChanges();
+
+        context.BookingProposals.Add(NewProposal(bookingId, SecondTokenHash));
+
+        Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
+    /// The filter is what makes the index above liveable: a meeting that has been proposed to
+    /// twice and answered twice holds two closed rows, and a third proposal is still allowed.
+    /// </summary>
+    [Fact]
+    public void Schema_SeveralClosedProposalsForOneBooking_AreAllowed()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+
+        var bookingId = SeedBooking(context);
+
+        var declined = NewProposal(bookingId, FirstTokenHash);
+        declined.State = ProposalState.Declined;
+        var expired = NewProposal(bookingId, SecondTokenHash);
+        expired.State = ProposalState.Expired;
+
+        context.BookingProposals.AddRange(declined, expired);
+        context.SaveChanges();
+
+        context.BookingProposals.Count().ShouldBe(2);
+    }
+
+    private static Guid SeedBooking(KairosDbContext context)
+    {
+        var pattern = new Pattern { Id = Guid.CreateVersion7(), Name = ProposalPatternName };
+        var link = new Link
+        {
+            Id = Guid.CreateVersion7(),
+            PatternId = pattern.Id,
+            Slug = ProposalSlug,
+            Name = ProposalLinkName,
+            Active = true,
+        };
+        var booking = new Booking
+        {
+            Id = Guid.CreateVersion7(),
+            LinkId = link.Id,
+            StartUtc = ProposalStartUtc,
+            EndUtc = ProposalStartUtc + (ProposalMinutes * SecondsPerMinute),
+            Status = BookingStatus.Confirmed,
+            ManageTokenHash = ProposalManageHash,
+            CreatedAt = ProposalStartUtc,
+        };
+
+        context.Patterns.Add(pattern);
+        context.Links.Add(link);
+        context.Bookings.Add(booking);
+        context.SaveChanges();
+
+        return booking.Id;
+    }
+
+    private static BookingProposal NewProposal(Guid bookingId, string tokenHash) => new()
+    {
+        Id = Guid.CreateVersion7(),
+        BookingId = bookingId,
+        StartUtc = ProposalStartUtc + ProposalOffsetSeconds,
+        EndUtc = ProposalStartUtc + ProposalOffsetSeconds + (ProposalMinutes * SecondsPerMinute),
+        ExpiresAt = ProposalStartUtc + ProposalHoldSeconds,
+        CreatedAt = ProposalStartUtc,
+        State = ProposalState.Open,
+        TokenHash = tokenHash,
+    };
 }

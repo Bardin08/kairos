@@ -18,7 +18,11 @@ namespace Kairos.Api.Features.Bookings;
 /// </summary>
 public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxWriter outbox)
 {
-    /// <summary>The slot conflicts with a confirmed booking. The only failure this returns.</summary>
+    /// <summary>
+    /// The slot is not available: it conflicts with a confirmed booking, or with the hold an open
+    /// proposal has on it. The only failure this returns, and one code for both because the caller
+    /// can do nothing different about either — the slot is gone and another has to be picked.
+    /// </summary>
     public const string SlotTakenReason = "slot_taken";
 
     private const int ManageTokenBytes = 32;
@@ -40,6 +44,8 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     private const int NoMarginFallback = 0;
 
     private static readonly int ConfirmedStatus = (int)BookingStatus.Confirmed;
+
+    private static readonly int OpenProposalState = (int)ProposalState.Open;
 
     /// <summary>
     /// EF's BeginTransaction issues a DEFERRED transaction, which takes a write lock only when it
@@ -97,17 +103,44 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
             started = true;
 
-            // Half-open on both sides, and MAX here is SQLite's two-argument scalar maximum, so
-            // the rule matches SlotGenerator exactly: pad by the larger of the two margins,
-            // never their sum, and let a slot start the moment the padding ends.
+            // After the lock, not before it: BEGIN IMMEDIATE can wait out the whole busy-timeout
+            // budget behind another writer, and a reading taken before that wait would compare a
+            // hold's expiry against a clock several seconds stale. One reading, used by the hold
+            // check and by the booking it writes, so both agree on when this call happened.
+            var now = clock.GetCurrentInstant().ToUnixTimeSeconds();
+
+            // Two terms, summed, because a slot is unavailable for two different reasons and both
+            // have to be inside the same BEGIN IMMEDIATE. Half-open on both sides, and MAX here is
+            // SQLite's two-argument scalar maximum, so the rule matches SlotGenerator exactly: pad
+            // by the larger of the two margins, never their sum, and let a slot start the moment
+            // the padding ends.
+            //
+            // The second term is the proposal hold. Its expiry is compared against the clock here
+            // rather than against a row the sweeper has marked, for the reason LocalBusySource
+            // gives: a hold that has lapsed must stop holding whether or not anything has run.
+            // The meeting behind it has to still be on for the same reason — a proposal left open
+            // over a booking cancelled underneath it would hold a slot for a meeting that is off.
             var clashes = context.Database.SqlQuery<int>($"""
-                SELECT COUNT(*) AS Value
-                FROM Bookings b
-                JOIN Links l ON l.Id = b.LinkId
-                LEFT JOIN Settings s ON s.Id = {Settings.SingletonId}
-                WHERE b.Status = {ConfirmedStatus}
-                  AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
-                  AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc}
+                SELECT
+                  (SELECT COUNT(*)
+                   FROM Bookings b
+                   JOIN Links l ON l.Id = b.LinkId
+                   LEFT JOIN Settings s ON s.Id = {Settings.SingletonId}
+                   WHERE b.Status = {ConfirmedStatus}
+                     AND b.StartUtc - (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
+                     AND b.EndUtc   + (MAX(COALESCE(l.MarginMinutes, s.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc})
+                  +
+                  (SELECT COUNT(*)
+                   FROM BookingProposals p
+                   JOIN Bookings pb ON pb.Id = p.BookingId
+                   JOIN Links pl ON pl.Id = pb.LinkId
+                   LEFT JOIN Settings ps ON ps.Id = {Settings.SingletonId}
+                   WHERE p.State = {OpenProposalState}
+                     AND pb.Status = {ConfirmedStatus}
+                     AND p.ExpiresAt > {now}
+                     AND p.StartUtc - (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) < {endUtc}
+                     AND p.EndUtc   + (MAX(COALESCE(pl.MarginMinutes, ps.MarginMinutes, {NoMarginFallback}), {queryingMargin}) * {SecondsPerMinute}) > {startUtc})
+                  AS Value
                 """).AsEnumerable().Single();
 
             if (clashes > 0)
@@ -129,7 +162,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
                 Notes = notes,
                 Status = BookingStatus.Confirmed,
                 ManageTokenHash = Hash(manageToken),
-                CreatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds(),
+                CreatedAt = now,
                 Participants =
                 [
                     new BookingParticipant

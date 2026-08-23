@@ -23,6 +23,9 @@ namespace Kairos.Api.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("CancelledAt")
                         .HasColumnType("INTEGER");
 
@@ -108,6 +111,54 @@ namespace Kairos.Api.Persistence.Migrations
                     b.HasIndex("Email");
 
                     b.ToTable("BookingParticipants");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.BookingProposal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("DecidedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("EndUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("NotifiedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId")
+                        .IsUnique()
+                        .HasFilter("State = 10");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("State", "ExpiresAt");
+
+                    b.ToTable("BookingProposals");
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.CalendarEntry", b =>
@@ -399,6 +450,9 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<int>("MinNoticeMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("ProposalHoldHours")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("StartIncrementMinutes")
                         .HasColumnType("INTEGER");
 
@@ -416,6 +470,8 @@ namespace Kairos.Api.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_Settings_MinNoticeMinutes_NonNegative", "MinNoticeMinutes >= 0");
 
+                            t.HasCheckConstraint("CK_Settings_ProposalHoldHours_AtLeastOne", "ProposalHoldHours >= 1");
+
                             t.HasCheckConstraint("CK_Settings_StartIncrementMinutes_AtLeastOne", "StartIncrementMinutes >= 1");
                         });
 
@@ -426,6 +482,7 @@ namespace Kairos.Api.Persistence.Migrations
                             DailyCap = 4,
                             MarginMinutes = 15,
                             MinNoticeMinutes = 120,
+                            ProposalHoldHours = 48,
                             StartIncrementMinutes = 30,
                             TimeZoneId = "UTC"
                         });
@@ -448,6 +505,17 @@ namespace Kairos.Api.Persistence.Migrations
                         .WithMany("Participants")
                         .HasForeignKey("BookingId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.BookingProposal", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Booking");

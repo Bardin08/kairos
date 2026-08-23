@@ -33,7 +33,7 @@ public class LocalBusySourceTests
         AddBooking(context, MentorshipId, Instant.FromUtc(2026, 9, 14, 12, 0), BookingStatus.Confirmed);
         AddBooking(context, ConsultingId, Instant.FromUtc(2026, 9, 14, 14, 0), BookingStatus.Cancelled);
 
-        var busy = await new LocalBusySource(context).GetBusyAsync(
+        var busy = await new LocalBusySource(context, SystemClock.Instance).GetBusyAsync(
             Window(Instant.FromUtc(2026, 9, 14, 9, 0), Instant.FromUtc(2026, 9, 14, 16, 0)),
             TestContext.Current.CancellationToken);
 
@@ -55,7 +55,7 @@ public class LocalBusySourceTests
         AddBooking(context, ConsultingId, Instant.FromUtc(2026, 9, 14, 8, 30), BookingStatus.Confirmed);
         AddBooking(context, MentorshipId, Instant.FromUtc(2026, 9, 14, 8, 0), BookingStatus.Confirmed);
 
-        var busy = await new LocalBusySource(context).GetBusyAsync(
+        var busy = await new LocalBusySource(context, SystemClock.Instance).GetBusyAsync(
             Window(Instant.FromUtc(2026, 9, 14, 9, 30), Instant.FromUtc(2026, 9, 14, 12, 0)),
             TestContext.Current.CancellationToken);
 

@@ -26,6 +26,8 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<BookingParticipant> BookingParticipants => Set<BookingParticipant>();
 
+    public DbSet<BookingProposal> BookingProposals => Set<BookingProposal>();
+
     public DbSet<IntegrationCredential> IntegrationCredentials => Set<IntegrationCredential>();
 
     public DbSet<CalendarEntry> CalendarEntries => Set<CalendarEntry>();
