@@ -77,6 +77,43 @@ public class SchemaTests
     }
 
     /// <summary>
+    /// The index asserted as enforcement rather than as declaration, on the same reasoning as the
+    /// foreign-key test above: a unique index that was configured and never created refuses
+    /// nothing, and reading the configuration would not tell you which. Two rows identical in all
+    /// four columns is what two writers who each passed ValidateDay alone can produce, so this is
+    /// the endpoint's last line rather than its first.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WithTheSameWindowOnOneDateTwice_IsRejectedByTheUniqueIndex()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var patternId = Guid.CreateVersion7();
+        context.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+        context.SaveChanges();
+
+        context.PatternOverrides.AddRange(
+            new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = ContestedDate,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            },
+            new PatternOverride
+            {
+                Id = Guid.CreateVersion7(),
+                PatternId = patternId,
+                Date = ContestedDate,
+                StartMinute = NineAm,
+                EndMinute = FivePm,
+            });
+
+        Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
     /// The assumption <see cref="Kairos.Api.Shared.ConcurrentWrite"/> stands on: two writers that
     /// both read a date's rows before either saves, which is two admin tabs on one date. The
     /// second delete finds nothing to delete and EF raises rather than writing a merged set. If a
@@ -121,8 +158,9 @@ public class SchemaTests
     /// holding no rows yet: there is nothing to delete then, so the stale delete above never
     /// fires and the two windows differ, so the unique index has nothing to refuse either. Both
     /// writers raise the number they read, and the second finds the row already moved. Remove
-    /// IsConcurrencyToken from the column and this passes silently — which is precisely the
-    /// state in which two tabs left a date holding both of their windows.
+    /// IsConcurrencyToken from the column and the second save simply succeeds, this test fails,
+    /// and what it was guarding is gone — that is the state in which two tabs left a date holding
+    /// both of their windows.
     /// </summary>
     [Fact]
     public void SaveChanges_WhenTwoWritersBothRaiseThePatternVersion_RaisesConcurrency()
