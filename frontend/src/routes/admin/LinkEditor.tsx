@@ -30,9 +30,9 @@ const BOOK_PATH = '/book/'
  * two-digit minute count sat in a box a thousand pixels wide while the help
  * text beside it stopped at 68ch.
  *
- * Two writes on save, not one, and that is the shape of the API rather than an
- * accident: the limits have their own full-replace PUT precisely so that `null`
- * on one of them is an instruction and not an omission.
+ * Two writes on save, not one, and that is the shape of the API: the limits have
+ * their own full-replace PUT precisely so that `null` on one of them is an
+ * instruction and not an omission.
  */
 export default function LinkEditor({
   link,
@@ -62,9 +62,9 @@ export default function LinkEditor({
   const changed = changedCount(baseline, draft)
   // The saved slug, never the draft. The button is only rendered for a link that
   // exists, and what exists is what the server last stored — an address typed a
-  // second ago resolves to nothing, and a copied 404 is worse than no button.
-  // The field below still shows `draft.slug`: what is being typed is what the
-  // operator is deciding about, and what is copied is what currently works.
+  // second ago resolves to nothing. The field below still shows `draft.slug`:
+  // what is being typed is what the operator is deciding about, and what is
+  // copied is what currently works.
   const address = window.location.origin + BOOK_PATH + (link?.slug ?? draft.slug)
 
   function set<K extends keyof EditorDraft>(key: K, value: EditorDraft[K]) {
@@ -134,12 +134,11 @@ export default function LinkEditor({
           <h2 className="title-section">What it is</h2>
 
           {/* Stacked, not a field-row: a bare one-word label next to a 288px
-              control leaves roughly 200px of dead space in the label track —
-              the same complaint that started this piece of work, rotated
-              ninety degrees. A row only reads as intentional when the label
-              column has something in it, the way Pattern's help text and the
-              limits' do. Name has none, so it takes the full column instead,
-              matching Address and Description below. */}
+              control leaves roughly 200px of dead space in the label track. A
+              row only reads as intentional when the label column has something
+              in it, the way Pattern's help text and the limits' do. Name has
+              none, so it takes the full column, matching Address and
+              Description below. */}
           <div className="field">
             <label htmlFor="link-name">Name</label>
             <input
@@ -150,19 +149,15 @@ export default function LinkEditor({
             />
           </div>
 
-          {/* Stacked rather than a two-column field-row: the composite here is
-              a static prefix and an input, meant to span the full column the
-              way Name and Description do — nothing that wide belongs beside a
-              label. Label and help go above, full column below.
+          {/* Stacked rather than a two-column field-row: the composite here is a
+              static prefix and an input, meant to span the full column the way
+              Name and Description do — nothing that wide belongs beside a label.
 
-              Copy sits on the label line rather than beside the control:
-              once the row below is the prefix and the input at full width,
-              there is no room left in it for a third element without
-              wrapping. Right-aligned opposite the label, above the help
-              text — .row-between's own gap keeps it clear of "Address"
-              on one side, and it is a sibling of the help paragraph below
-              rather than sharing a line with it, so the two never compete
-              for the same row. */}
+              Copy sits on the label line rather than beside the control: once
+              the row below is the prefix and the input at full width, there is
+              no room left for a third element without wrapping. Right-aligned
+              opposite the label, above the help text, and a sibling of the help
+              paragraph rather than sharing a line with it. */}
           <div className="field">
             <div className="row row-between">
               <label htmlFor="link-slug">Address</label>
@@ -186,19 +181,18 @@ export default function LinkEditor({
             {/* The whole URL, not its last word. An operator setting this is
                 deciding what to paste into a chat, and they cannot judge
                 `consulting` without the part in front of it. The scheme is
-                dropped from what is shown — the browser's own address bar
-                does the same, and the operator does not need to read
-                `http://` — but the Copy button above copies `address`, which
-                still carries it: the display is shortened, the copied string
-                must stay a full, working absolute URL.
+                dropped from what is SHOWN, as the browser's own address bar
+                does — but the Copy button above copies `address`, which still
+                carries it: the copied string must stay a full, working
+                absolute URL.
 
-                No fixed size class on the input: .prefix already reserves
-                the static segment's intrinsic width via `flex: none` and
-                lets the input's own `min-width: 0` (kairos.css, `.prefix >
-                .input`) absorb the rest, so the pair ends flush with Name and
-                Description above and below rather than stopping at ctl-md's
-                288px partway through the column — and shrinks rather than
-                overflowing on a viewport narrower than the two together. */}
+                No fixed size class on the input: .prefix already reserves the
+                static segment's intrinsic width via `flex: none` and lets the
+                input's own `min-width: 0` (kairos.css, `.prefix > .input`)
+                absorb the rest, so the pair ends flush with Name and
+                Description rather than stopping at ctl-md's 288px partway
+                through the column — and shrinks rather than overflowing on a
+                narrow viewport. */}
             <span className="prefix">
               <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
               <input
@@ -320,10 +314,9 @@ export default function LinkEditor({
             through it are untouched.
           </p>
           {/* Rendered only while dirty: a permanent sentence about a condition
-              that is usually false is noise. Without it, archiving or
-              restoring calls `onSaved`, the parent unmounts this editor, and
-              whatever the operator typed above is gone with no word said
-              about it. */}
+              that is usually false is noise. Without it, archiving or restoring
+              calls `onSaved`, the parent unmounts this editor, and whatever the
+              operator typed above is gone with no word said about it. */}
           {changed !== CLEAN && (
             <p className="prose t-sm mb-4">
               This form has unsaved changes. {link.active ? 'Archiving' : 'Restoring'} discards

@@ -18,11 +18,9 @@ import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitCopy } from './limitCopy'
  * Ends the Kairos session and not the identity provider's.
  *
  * A server route under a path the single page nests on, so it is reached with a
- * plain anchor: a wouter `<Link>` would be swallowed by the router and render
- * its own not-found. Signing out of Pocket ID as well would be a second
- * redirect and a second URL registered there, to log the operator out of
- * everything else they were using it for — which is not what pressing sign out
- * on a scheduling app asks for.
+ * plain anchor: a wouter `<Link>` would be swallowed by the router. Signing out
+ * of Pocket ID as well would be a second redirect and a second URL registered
+ * there, to log the operator out of everything else they were using it for.
  */
 const SIGN_OUT = '/admin/logout'
 
@@ -96,11 +94,9 @@ function draftOf(settings: OperatorSettings): Draft {
 }
 
 /**
- * The organizer's zone, the global defaults, the theme, and the way to Part
- * B's integrations.
- *
- * Everything here is visited about twice a year, which is why it is one screen
- * behind one secondary destination rather than four tabs.
+ * The organizer's zone, the global defaults, the theme, and the way to Part B's
+ * integrations. Everything here is visited about twice a year, which is why it
+ * is one screen behind one secondary destination rather than four tabs.
  */
 export default function Settings() {
   const zoneId = useId()
