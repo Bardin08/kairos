@@ -46,10 +46,9 @@ function weekOf(rules: readonly PatternRule[]): Week {
 /**
  * The exact set a save would send, or null while any window is unfinished.
  *
- * Days in week order and windows in the order the pane shows them, so the
- * request reads the way the screen does and a refusal naming a day can be found
- * on it. A closed day contributes nothing, which is the whole of how closure is
- * expressed: there is no flag to send, only an absence.
+ * Days in week order and windows in the order the pane shows them, so a refusal
+ * naming a day can be found on the request. A closed day contributes nothing:
+ * there is no flag to send, only an absence.
  */
 function rulesOf(week: Week): Hours[] | null {
   const rules: Hours[] = []
@@ -67,21 +66,16 @@ function rulesOf(week: Week): Hours[] | null {
 /**
  * A pattern's week: seven rows, Monday to Sunday, always all seven.
  *
- * A day with no windows is a closed day. There is no closed flag in the data and
- * no close button on the screen, because removing a day's last window and
- * closing the day are one act — a row that has run out of windows draws itself
- * as closed and offers to be opened again.
+ * A day with no windows is a closed day. There is no closed flag and no close
+ * button, because removing a day's last window and closing the day are one act.
  *
  * Edits are made against a draft and sent in one PUT when the operator asks. A
- * pattern in use is live, so a keystroke in a time field that widened a window
- * would be an hour on offer the moment it was typed, and a half-typed one would
- * be refused as a window ending before it starts. The endpoint has the same
- * shape — it stores the whole set or refuses the whole set.
+ * pattern in use is live, so a keystroke that widened a window would be an hour
+ * on offer the moment it was typed. The endpoint has the same shape: it stores
+ * the whole set or refuses the whole set.
  *
- * Whether two windows overlap is the server's answer and not this pane's. The
- * same bound guards the booking engine, and a second copy here is the copy that
- * goes stale; what this owns is putting the server's sentence where the operator
- * pressed.
+ * Whether two windows overlap is the server's answer. The same bound guards the
+ * booking engine, and a second copy here is the copy that goes stale.
  */
 export default function WeekEditor({
   pattern,
@@ -122,10 +116,10 @@ export default function WeekEditor({
   }
 
   /**
-   * That day's windows onto every day that is already open, closed days left
-   * closed — this sets hours and never decides which days a pattern works. The
-   * windows are copied rather than shared, so editing one day afterwards cannot
-   * move the rest of the week with it.
+   * That day's windows onto every day already open, closed days left closed —
+   * this sets hours and never decides which days a pattern works. The windows
+   * are copied rather than shared, so editing one day afterwards cannot move the
+   * rest of the week with it.
    */
   function applyToEveryOpenDay(index: number) {
     edit(week.map((day) => (day.length === 0 ? day : week[index].map((draft) => ({ ...draft })))))

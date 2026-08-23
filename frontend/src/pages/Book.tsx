@@ -58,11 +58,10 @@ function notice(title: string, body: string) {
 /**
  * The page a stranger opens from a pasted link.
  *
- * Two zones are in play throughout and mixing them is the bug worth naming
- * once: the month grid is keyed on the ORGANIZER's calendar, because that is
- * what `from` and `to` mean to the slots endpoint, while every time on screen
- * is rendered in the INVITEE's. The instant itself is never re-derived — the
- * string the server sent is the string that comes back to it.
+ * Two zones are in play and mixing them is the bug worth naming once: the month
+ * grid is keyed on the ORGANIZER's calendar, because that is what `from` and
+ * `to` mean to the slots endpoint, while every time on screen is the INVITEE's.
+ * The instant itself is never re-derived.
  */
 export default function Book() {
   const { slug = '' } = useParams()
@@ -204,20 +203,15 @@ export default function Book() {
     wantFocus.current = true
   }
 
-  // The SPA's debt: a server-rendered page would have moved focus by
-  // navigating, and here nothing does unless it is written. It runs after the
-  // commit rather than inside the click handler, because before the commit the
-  // section still carries the previous day's accessible name and a screen
-  // reader announces the day the invitee has just left.
+  // The SPA's debt: a server-rendered page would have moved focus by navigating.
+  // It runs after the commit rather than in the click handler, because before
+  // the commit the section still carries the previous day's accessible name.
   //
-  // Gated on intent rather than on `activeDay` changing. `activeDay` is DERIVED:
-  // it moves when the month pages and when the duration closes the selected day,
-  // neither of which is a request to go and read the times. Keyed on the value,
-  // paging forward three months threw focus out of the month arrow three times.
-  //
-  // No dependency array on purpose. The trigger is the flag, not a value, so the
-  // effect looks after every commit — including one where the day chosen is the
-  // day already showing, which a dependency on `activeDay` would skip.
+  // Gated on intent rather than on `activeDay`, which is DERIVED: it moves when
+  // the month pages and when the duration closes the selected day, neither of
+  // which is a request to read the times. Keyed on the value, paging forward
+  // three months threw focus out of the month arrow three times. No dependency
+  // array, so the flag is what triggers it and not a value.
   useEffect(() => {
     if (!wantFocus.current) return
     wantFocus.current = false

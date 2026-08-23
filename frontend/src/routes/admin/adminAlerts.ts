@@ -1,17 +1,14 @@
 // The alert channel's half of the operator's HTTP surface.
 //
-// Here rather than in lib/api.ts because the booking page imports lib/api.ts, so
-// anything added there lands in the entry chunk and is charged to the invitee's
-// bundle budget. This module is imported only from behind the lazily loaded
-// admin shell, so Rollup keeps it in the admin chunk.
+// Here rather than in lib/api.ts, which the booking page imports: anything added
+// there lands in the entry chunk and is charged to the invitee's bundle budget.
+// This module is imported only from behind the lazily loaded admin shell.
 
 import { adminRequest } from './session'
 
 /**
- * One thing that is broken, as the shell renders it.
- *
- * Every field is source-neutral: a source this build has never heard of still
- * draws a row.
+ * One thing that is broken, as the shell renders it. Every field is
+ * source-neutral: a source this build has never heard of still draws a row.
  */
 export type Alert = {
   /** Machine-readable, never a sentence. Copy for it lives in AlertPanel. */

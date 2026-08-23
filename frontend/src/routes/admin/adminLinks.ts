@@ -1,16 +1,12 @@
 // The links half of the operator's HTTP surface.
 //
-// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is
-// imported by the booking page, so anything added to it lands in the entry chunk
-// as endpoints the invitee can never call. This module is imported only by
-// Links.tsx and LinkEditor.tsx, both reachable only through the lazily imported
-// admin shell, so Rollup places it in the admin chunk. It still makes no fetch
-// of its own: `adminRequest` wraps lib/api's `request`, still the one place a
-// failure becomes an ApiError, and latches session.ts on a 401.
+// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is in
+// the booking route's entry chunk, so anything added to it is downloaded as
+// endpoints the invitee can never call. This is reached only through the lazily
+// imported admin shell, and still goes through `adminRequest`.
 //
-// Named adminLinks rather than links, unlike its sibling patterns.ts: Links.tsx
-// sits in this directory, and on a case-insensitive filesystem `./links` and
-// `./Links` are the same name to the module resolver.
+// Named adminLinks rather than links: Links.tsx sits in this directory, and on a
+// case-insensitive filesystem `./links` and `./Links` are the same name.
 
 import { adminRequest } from './session'
 
@@ -21,10 +17,9 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
  * One link as the workbench edits it.
  *
  * The four limits are the database's own values and are NOT resolved: `null`
- * means the link inherits the global, a number means it does not, and `0` is a
- * number. Anything that flattens those two into one — a `?? globals.margin` on
- * the way in, a `|| null` on the way out — is invisible afterwards: a link
- * showing 15 looks identical whether it inherited that or had it written in.
+ * inherits the global, a number does not, and `0` is a number. Anything that
+ * flattens the two — a `?? globals.margin` in, a `|| null` out — is invisible
+ * afterwards: a link showing 15 looks the same either way.
  */
 export type AdminLink = {
   id: string
@@ -62,8 +57,7 @@ export type LinksPage = {
 /**
  * The four, exactly as the PUT takes them: all of them, every time. A full
  * replace and not a patch — under patch semantics "absent" and "explicitly null"
- * are different intentions and JSON has no clean way to tell them apart, which
- * is precisely the distinction that must survive here.
+ * are different intentions, and that is the distinction that must survive here.
  */
 export type LinkLimits = Pick<
   AdminLink,

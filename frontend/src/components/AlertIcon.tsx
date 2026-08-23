@@ -1,9 +1,7 @@
 /**
- * The mark beside a message that names a problem.
- *
- * Its own file because DESIGN.md's Second Channel Rule puts it next to every
- * error the product shows. The booking page and its form both import it; the
- * manage page still carries its own copy.
+ * The mark beside a message that names a problem. Its own file because
+ * DESIGN.md's Second Channel Rule puts it next to every error the product shows;
+ * the manage page still carries its own copy.
  */
 export default function AlertIcon() {
   return (

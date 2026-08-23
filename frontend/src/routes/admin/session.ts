@@ -1,17 +1,13 @@
-// Whether the workbench may still ask anything, and the one place that question
-// is answered.
+// Whether the workbench may still ask anything, answered in one place.
 //
 // Every admin call goes through `adminRequest` rather than `request`: a refusal
 // latches this module before the rejection reaches the page that made the call,
-// AdminShell subscribes, and it replaces itself with the screen for that
-// refusal. Without that, a refused read leaves the page rendering its own chrome
-// around nothing — `/admin/availability` drew its heading, its name field, its
-// New pattern button and "No patterns yet" over a refused request, and an
-// operator with fifty patterns read that as fifty patterns gone.
+// and AdminShell replaces itself with the screen for that refusal. Without it,
+// `/admin/availability` drew its heading, its name field, its New pattern button
+// and "No patterns yet" over a refused request, and an operator with fifty
+// patterns read that as fifty patterns gone.
 //
-// Here rather than in lib/api.ts, which is in the invitee's entry chunk. This is
-// imported only from behind the lazily loaded admin shell, so Rollup keeps it in
-// the admin chunk.
+// Here rather than in lib/api.ts, which is in the invitee's entry chunk.
 
 import { asApiError, request, requestNothing } from '../../lib/api'
 
@@ -27,8 +23,8 @@ const NOT_AN_OPERATOR = 'not_an_operator'
 /**
  * The two ways an admin call is refused, and they are not one state with two
  * wordings. A session that ran out is fixed by signing in; an account this
- * Kairos does not admit is not, and offering that as the way out sends an
- * operator round a loop that ends where it started.
+ * Kairos does not admit is not, and offering that sends an operator round a loop
+ * that ends where it started.
  */
 export type Refusal = 'no-session' | 'not-an-operator'
 
@@ -59,9 +55,8 @@ function refuse(kind: Refusal): void {
 
 /**
  * Marks the session gone if the failure says so, and rethrows either way: the
- * caller's own catch still runs, still clears its pending flag, still aborts
- * cleanly. It simply stops being the thing on screen, because the shell above it
- * is about to unmount it.
+ * caller's own catch still runs and still clears its pending flag. It simply
+ * stops being the thing on screen, because the shell is about to unmount it.
  */
 async function guard<T>(work: Promise<T>): Promise<T> {
   try {
@@ -87,10 +82,10 @@ export function adminRequestNothing(path: string, init?: RequestInit): Promise<v
  * Where to send an operator who has no session.
  *
  * Read from the server rather than compiled in: one bundle is deployed
- * everywhere, and a deployment that wants the operator through a portal first
- * sets Authentication__SignInUrl without rebuilding anything. The route is
- * anonymous, so this call deliberately does NOT go through `guard` — a 401 from
- * it would mean the route is broken, not the session.
+ * everywhere, and a deployment wanting a portal first sets
+ * Authentication__SignInUrl without rebuilding. The route is anonymous, so this
+ * deliberately does NOT go through `guard` — a 401 would mean the route is
+ * broken, not the session.
  */
 export function getSignInUrl(signal?: AbortSignal): Promise<string> {
   return request<{ signInUrl: string }>('/sign-in', { signal }).then(

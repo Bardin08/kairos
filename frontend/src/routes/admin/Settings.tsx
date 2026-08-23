@@ -19,8 +19,7 @@ import { LIMIT_COPY, LIMIT_KEYS, ZERO_FLOOR, type LimitCopy } from './limitCopy'
  *
  * A server route under a path the single page nests on, so it is reached with a
  * plain anchor: a wouter `<Link>` would be swallowed by the router. Signing out
- * of Pocket ID as well would be a second redirect and a second URL registered
- * there, to log the operator out of everything else they were using it for.
+ * of Pocket ID too would log the operator out of everything else it serves.
  */
 const SIGN_OUT = '/admin/logout'
 
@@ -63,11 +62,10 @@ type Draft = Record<FieldKey, string>
 type Phase = 'loading' | 'ready' | 'broken'
 
 /**
- * A whole number at or above the floor, or null.
- *
- * `Number('')` is 0 and `Number(' 3 ')` is 3, both of which would let a field
- * the operator has emptied submit as a value they never typed. The pattern is
- * what makes "nothing" different from "zero".
+ * A whole number at or above the floor, or null. `Number('')` is 0 and
+ * `Number(' 3 ')` is 3, both of which would let a field the operator emptied
+ * submit as a value they never typed. The pattern is what makes "nothing"
+ * different from "zero".
  */
 function whole(value: string, floor: number): number | null {
   if (!/^\d+$/.test(value.trim())) return null

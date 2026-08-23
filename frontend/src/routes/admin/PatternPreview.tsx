@@ -50,12 +50,10 @@ function countByDay(slots: readonly string[], zone: string): Map<string, number>
 }
 
 /**
- * What one date does instead of the week.
- *
- * Every window it has, however many — this line is the only place a date's own
- * hours are legible, since the grid draws a date with hours as an ordinary open
- * day. A list cut short at two would hide an afternoon on the one screen that
- * exists to show it.
+ * What one date does instead of the week — every window it has, however many.
+ * This line is the only place a date's own hours are legible, since the grid
+ * draws a date with hours as an ordinary open day, so a list cut short at two
+ * would hide an afternoon on the one screen that exists to show it.
  */
 function describe(override: PatternOverride | undefined): string {
   if (override === undefined) return 'Follows the weekly hours'
@@ -86,10 +84,9 @@ function dateStateOf(override: PatternOverride | undefined): DateState {
 }
 
 /**
- * The weekday's own hours in text, for the Weekly state's one-line summary under
- * the control. Null means the weekday has none — `windowsOn` seeds a single
- * blank row for that case, the one shape a date's own hours can never take on
- * their own, so recognising it here answers "is this weekday closed".
+ * The weekday's own hours in text, for the Weekly state's summary under the
+ * control. Null means the weekday has none — `windowsOn` seeds a single blank
+ * row for that case, the one shape a date's own hours can never take.
  */
 function weekdayHours(day: string, rules: readonly PatternRule[]): string | null {
   const windows = windowsOn(day, rules)
@@ -100,29 +97,24 @@ function weekdayHours(day: string, rules: readonly PatternRule[]): string | null
 /**
  * What this pattern actually offers, as a month.
  *
- * Two readings of the same pattern, and the split is the whole design. By
- * default the month shows DAYS — open, closed, blocked — and no times at all,
- * which is the only picture that is true of every link standing on the pattern
- * and is still true of one no link points at yet. Times are on demand: pick a
- * link and the squares fill with that link's real bookable starts, fetched from
- * the same public endpoint an invitee's browser calls.
+ * By default the month shows DAYS — open, closed, blocked — and no times, which
+ * is the only picture true of every link standing on the pattern and of one no
+ * link points at yet. Times are on demand: pick a link and the squares fill with
+ * that link's real starts, from the same public endpoint an invitee calls.
  *
- * The times are fetched rather than computed here. Margin, minimum notice, daily
- * cap and start increment differ per link while a pattern is shared, so a single
- * "what an invitee sees" would be a lie about every link but one; and a second
- * implementation of them in the browser is the one that drifts from the engine
- * that takes the booking. See patternDays.ts for what is computed locally.
+ * Fetched rather than computed here. Margin, minimum notice, daily cap and start
+ * increment differ per link while a pattern is shared, and a second
+ * implementation in the browser drifts from the engine that takes the booking.
+ * See patternDays.ts for what is computed locally.
  */
 export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   /*
    * The overrides this pane writes are kept here rather than handed back to the
    * page, and that is a decision about the pane beside it. An override write
-   * answers with the whole pattern, a fresh `rules` array included; WeekEditor
-   * reads a new `rules` array as a reload and replaces its draft with it.
-   * Handing the answer up would make blocking a holiday throw away a week
-   * somebody was halfway through typing. Nothing outside this pane reads
-   * `overrides`, and the moment the week IS saved the server's answer arrives
-   * here as a new `pattern.overrides` and takes over again.
+   * answers with the whole pattern, `rules` included; WeekEditor reads a new
+   * `rules` array as a reload and replaces its draft, so handing the answer up
+   * would make blocking a holiday discard a half-typed week. When the week IS
+   * saved, the server's answer arrives here and takes over again.
    */
   const [source, setSource] = useState(pattern.overrides)
   const [overrides, setOverrides] = useState(pattern.overrides)
@@ -136,15 +128,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   // is selected, which is also when the panel holding them first renders.
   const [draft, setDraft] = useState<Draft[]>([])
   const [unsaved, setUnsaved] = useState(false)
-  // Picking Own hours writes nothing, so there is no override yet for
-  // `dateStateOf` to read it back from — this is the one bit the control adds on
-  // top of the data, and it exists for exactly that gap. Three guards keep it
-  // from disagreeing with the data: `choose` resets it on every new selection;
-  // picking Weekly or Blocked clears it in the same click that sends the write,
-  // and both are blocked while a write is in flight, so Own hours can never be
-  // picked between a write firing and it landing; and the resync below clears it
-  // whenever `pattern.overrides` moves for a reason that was not this pane's own
-  // write.
+  // Picking Own hours writes nothing, so there is no override for `dateStateOf`
+  // to read back — the one bit the control adds on top of the data. Three guards
+  // keep it from disagreeing: `choose` resets it on every new selection; picking
+  // Weekly or Blocked clears it in the same click that sends the write, and both
+  // are blocked while a write is in flight; and the resync below clears it
+  // whenever `pattern.overrides` moves for a reason that was not this pane's.
   const [editingOwnHours, setEditingOwnHours] = useState(false)
   const [saving, setSaving] = useState(false)
   // The error itself, not a sentence made from it: `Failure` reads the status
@@ -156,13 +145,11 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   const [linksFailure, setLinksFailure] = useState<unknown>(null)
 
   /*
-   * The organizer's zone, which decides two things: the date a slot instant
-   * lands on, and which dates have already happened and are therefore closed to
-   * editing. Starts as the browser's and becomes the organizer's as soon as
-   * settings answer — the same opening guess Meetings.tsx makes, because the
-   * grid has to be drawn before any answer exists. Where the two differ the
-   * correction is at most a day at the boundary, and it arrives before anything
-   * can be clicked.
+   * The organizer's zone, which decides the date a slot instant lands on and
+   * which dates are past and closed to editing. Starts as the browser's and
+   * becomes the organizer's when settings answer — the grid has to be drawn
+   * before any answer exists, and the correction is at most a day at the
+   * boundary, arriving before anything can be clicked.
    */
   const [zone, setZone] = useState(localZone)
   const [slug, setSlug] = useState(DAYS_ONLY)
@@ -348,11 +335,9 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
   /**
    * Reveals the rows; sends nothing. Own hours is the one state a pick alone
    * cannot write, because there is nothing to write until a window is typed.
-   * Guarded the same way `write` guards the other two picks, even though a
-   * genuine keystroke or click cannot reach this while `disabled` is set — a
-   * disabled button cannot hold focus. The guard keeps that true if a later
-   * change loosens how `disabled` is wired; the test that exercises it can only
-   * do so because `fireEvent` dispatches straight at the element.
+   * Guarded like `write` guards the other two even though a disabled button
+   * cannot hold focus, so a later change loosening `disabled` stays safe; the
+   * test reaches it only because `fireEvent` dispatches straight at the element.
    */
   function pickOwnHours() {
     if (saving) return
@@ -371,14 +356,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
 
   /**
    * Roving focus with MANUAL activation — not the APG default, which moves focus
-   * and selects together. The default is wrong here: Weekly and Blocked write to
-   * the server the instant they are selected, so automatic activation would turn
-   * arrowing across the group into a write per keystroke, and holding the key
-   * down into a burst of them. So the arrows move focus and nothing else; only
-   * Space or Enter selects the option focus is already on. `tabIndex` follows
-   * `dateState` rather than wherever focus last landed, so Tab always re-enters
-   * the group on the option that is actually selected — what a native radio
-   * group does, and why there is no separate "last focused" state here.
+   * and selects together. Weekly and Blocked write the instant they are
+   * selected, so automatic activation would make arrowing across the group a
+   * write per keystroke. The arrows move focus and nothing else; Space or Enter
+   * selects. `tabIndex` follows `dateState` rather than where focus last landed,
+   * so Tab re-enters on the selected option — what a native radio group does,
+   * and why there is no "last focused" state here.
    */
   function handleRadioKeyDown(event: KeyboardEvent<HTMLButtonElement>, state: DateState) {
     const index = DATE_STATES.indexOf(state)
@@ -526,16 +509,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
               anything is pressed — the replacement for the square's two gestures
               whose outcome depended on state the operator could not see.
               "Weekly" rather than "Follows the weekly hours": the column is
-              roughly 276px wide and three full-length labels overflow it.
-              Blocked alone carries the danger treatment, because it alone takes
-              availability away.
+              roughly 276px wide. Blocked alone carries the danger treatment.
 
-              All three disabled while a write is in flight, independently of
-              what that write is for. It is the door `editingOwnHours` would
-              otherwise have into disagreeing with the data: without this, Own
-              hours could be picked between Blocked's write firing and it
-              landing, and the rows would show for a date the server still holds
-              as blocked. */}
+              All three disabled while a write is in flight. It is the door
+              `editingOwnHours` would otherwise have into disagreeing with the
+              data: Own hours could be picked between Blocked's write firing and
+              it landing, and the rows would show for a date still blocked. */}
           <div
             className="segmented segmented-equal mt-3"
             role="radiogroup"
@@ -604,14 +583,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
                 <WindowRows label={longDate(selected)} windows={draft} onChange={edit} />
               </div>
 
-              {/* Its own hairline-separated footer, structured exactly like the
-                  week pane's: a primary button with its status beside it, so a
-                  date's own hours are saved the same way a week's are. Typed
-                  against a draft and sent when the operator asks: a pattern in
-                  use is live, and a keystroke that widened a window would be an
-                  hour on offer the moment it was typed. The endpoint replaces
-                  the date's set entire, so one press is one set — which makes a
-                  morning and an afternoon one request rather than two. */}
+              {/* Its own hairline-separated footer, structured like the week
+                  pane's, so a date's own hours are saved the same way a week's
+                  are. Typed against a draft and sent when the operator asks: a
+                  pattern in use is live, and a keystroke that widened a window
+                  would be an hour on offer the moment it was typed. The endpoint
+                  replaces the date's set entire, so one press is one set. */}
               <div className="row gap-2 wrap sep-top">
                 <button
                   className="btn btn-primary"
@@ -647,15 +624,12 @@ export default function PatternPreview({ pattern }: { pattern: Pattern }) {
 
       {/* The third state, which the grid cannot draw: a date with its own hours
           is an open day and looks like one. Listed rather than marked, because
-          the list is also the only way to reach an exception in a month nobody
-          is looking at — and reading one here does not change it, which a click
-          on the square would.
-
-          It is also where an exception on a past date survives. Every one stays
-          listed, because a pattern the operator cannot see all of is worse than
-          one carrying a holiday that has been and gone — but the date is text
-          rather than a button, since the only thing pressing it leads to is the
-          panel that edits it. */}
+          the list is the only way to reach an exception in a month nobody is
+          looking at — and reading one here does not change it, which a click on
+          the square would. Exceptions on past dates stay listed, because a
+          pattern the operator cannot see all of is worse than one carrying a
+          holiday that has been and gone; the date is text rather than a button,
+          since pressing it leads only to the panel that edits it. */}
       {overrides.length > 0 && (
         <div className="sep-top">
           <h3 className="title-section mb-3">Exceptions</h3>

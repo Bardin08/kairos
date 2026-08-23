@@ -14,14 +14,11 @@ export default function App() {
     <Switch>
       <Route path="/book/:slug" component={Book} />
       {/* Keyed on the manage token, not on the booking's id. Every manage route
-          the API ships takes the token as its path segment and accepts no id at
-          all, and the token is the capability anyway: minted once, stored only
-          as a SHA-256 hash, never handed back after the 201 that created the
-          booking. A `/manage/:id?token=` shape would need a second identifier
-          the server has no use for, and it would leak no less — a Referer
-          carries the whole URL, path included, so the query string is not what
-          makes the difference. What keeps the token out of a referrer is the
-          `no-referrer` policy the API sends on every response. */}
+          takes the token as its path segment and accepts no id, and the token is
+          the capability anyway: minted once, stored only as a SHA-256 hash.
+          `/manage/:id?token=` would need a second identifier and leak no less —
+          a Referer carries the whole URL, path included. What keeps the token
+          out of a referrer is the `no-referrer` policy the API sends. */}
       <Route path="/manage/:token" component={Manage} />
       {/* Keyed on the PROPOSAL's token, which is not the manage token and
           cannot be exchanged for one: it answers a single question and is

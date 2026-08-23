@@ -1,17 +1,15 @@
 // The calendar helpers only the workbench uses.
 //
 // Here rather than in lib/time.ts, which the booking page imports: a helper left
-// there ships in the entry chunk even when nothing an invitee can reach calls it
-// — Rollup shakes out an export nobody imports, but not one a lazy chunk
-// imports, because the module it lives in is already in the eager graph.
+// there ships in the entry chunk even when nothing an invitee reaches calls it —
+// Rollup shakes out an export nobody imports, but not one a lazy chunk imports.
 // Anything the booking page also needs belongs back in lib/time.ts, whose header
-// defines the two vocabularies these follow: an INSTANT is what the API speaks,
-// a DATE KEY is a civil date with no zone of its own.
+// defines the INSTANT and DATE KEY vocabularies these follow.
 //
-// A third vocabulary starts here: a MINUTE OF DAY, which is what an availability
-// rule holds — minutes from local midnight in the organizer's zone, with no date
-// attached and therefore no instant to derive. A DRAFT is the same window while
-// it is still in a form, and everything that turns one into the other is below.
+// A third starts here: a MINUTE OF DAY, what an availability rule holds —
+// minutes from local midnight in the organizer's zone, with no date attached and
+// therefore no instant to derive. A DRAFT is the same window while it is still
+// in a form.
 
 const LOCALE = 'en-GB'
 const START_OF_DAY = 'T00:00:00Z'
@@ -34,8 +32,7 @@ export function shortMonth(day: string): string {
 /**
  * The date key `delta` days from this one. Negative goes back. Days rather than
  * milliseconds: `setUTCDate` rolls the month and the year on its own, and the
- * key it produces is a civil date with no zone, so a clock that shifted an hour
- * in between cannot move it.
+ * key it produces is a civil date, so a clock that shifted cannot move it.
  */
 export function shiftDays(day: string, delta: number): string {
   const date = new Date(day + START_OF_DAY)
@@ -75,20 +72,18 @@ export function minuteOfDay(value: string): number | null {
 export type Draft = { start: string; end: string }
 
 /**
- * What Add window adds, and what a day with nothing to borrow opens on.
- *
- * Empty rather than a working nine-to-five, which is a safety property: hours
- * nobody typed are hours nobody chose to offer, and a default window on a day
- * that already has one would be an overlap the server exists to refuse.
+ * What Add window adds, and what a day with nothing to borrow opens on. Empty
+ * rather than a working nine-to-five, which is a safety property: hours nobody
+ * typed are hours nobody chose to offer, and a default window on a day that
+ * already has one would be an overlap the server exists to refuse.
  */
 export const BLANK: Draft = { start: '', end: '' }
 
 /**
  * The minutes a set of drafts would send, or null while any window is
- * unfinished. Order is kept, so the request reads the way the screen does and a
- * refusal naming a window can be found on it. A set with nothing in it is a set,
- * not a failure — what an empty one means is the caller's question, and the week
- * pane and the date panel answer it differently.
+ * unfinished. Order is kept, so a refusal naming a window can be found on the
+ * request. A set with nothing in it is a set, not a failure — what an empty one
+ * means is the caller's question.
  */
 export function windowsOf(
   drafts: readonly Draft[],

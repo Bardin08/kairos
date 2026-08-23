@@ -3,11 +3,9 @@ import { useState } from 'react'
 import AlertIcon from './AlertIcon'
 
 /**
- * The four lengths nearly every link uses.
- *
- * A custom value attaches to the link that asked for it and never joins this
- * menu: most links want one of these, and the one that needs 25 or 50 gets it
- * without every other link's picker growing a row it will never pick.
+ * The four lengths nearly every link uses. A custom value attaches to the link
+ * that asked for it and never joins this menu, so the one link needing 25 or 50
+ * does not grow a row in every other link's picker.
  */
 const PRESETS = [15, 30, 45, 60]
 
@@ -18,16 +16,13 @@ const CUSTOM = 'custom'
 const PLACEHOLDER = ''
 
 /**
- * The lengths a link is offered at, as chips plus a way to add one.
+ * The lengths a link is offered at, as chips plus a way to add one. Order is the
+ * operator's and is kept: it becomes `SortOrder` and then the order of the
+ * booking page's tabs, which is not ascending length.
  *
- * Order is the operator's and is kept: it becomes `SortOrder` on the way to the
- * database and then the order of the booking page's tabs, which is not the same
- * list as ascending length.
- *
- * Every refusal is stated beside the control rather than in a banner, and the
- * one that matters most is the last chip: a link with no durations passes every
- * constraint SQLite can express — the rule spans two tables — and then kills the
- * public booking page on a message that names an index.
+ * Refusals are stated beside the control. The one that matters is the last chip:
+ * a link with no durations passes every constraint SQLite can express — the rule
+ * spans two tables — and then kills the public booking page.
  */
 export default function DurationEditor({
   durations,
@@ -115,15 +110,12 @@ export default function DurationEditor({
           </span>
         ))}
 
-        {/* Held at "" so the menu returns to its prompt after every pick — it
-            is an action, not a selection, and a select that stayed on "30 min"
-            would read as the link's state rather than as the last thing added.
-            Dressed as a chip, at chip height: the old .select-inline was 36px
-            beside 44px chips and the row never lined up. The placeholder now
-            reads "+ Add" rather than a prompt, which looks like a button — but
-            it is still `option value={PLACEHOLDER}`, so picking it is still
-            the no-op `pick` guards on with its first line; do not "fix" that
-            guard into a real option. */}
+        {/* Held at "" so the menu returns to its prompt after every pick — an
+            action, not a selection, and a select stuck on "30 min" would read as
+            the link's state. Dressed as a chip, at chip height: the old
+            .select-inline was 36px beside 44px chips. The placeholder reads
+            "+ Add" but is still `option value={PLACEHOLDER}`, so picking it is
+            the no-op `pick` guards on; do not "fix" that guard. */}
         <select
           className="chip-add"
           value={PLACEHOLDER}

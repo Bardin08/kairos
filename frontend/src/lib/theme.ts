@@ -3,11 +3,9 @@
 // sets data-theme and wins in both directions.
 //
 // index.html repeats the read half of this file as an inline script in <head>,
-// on purpose and permanently: it has to run before first paint or a stored
-// choice flashes the wrong theme for a frame, and importing this module would
-// cost a network round trip to avoid a repaint. Change the storage key or the
-// attribute here and that script changes too — nothing enforces it but this
-// comment.
+// permanently: it has to run before first paint or a stored choice flashes the
+// wrong theme for a frame. Change the storage key or the attribute here and that
+// script changes too — nothing enforces it but this comment.
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
 const STORAGE_KEY = 'theme'

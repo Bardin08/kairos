@@ -38,8 +38,8 @@ type Phase = 'loading' | 'ready' | 'locked' | 'broken'
 /**
  * What a row says and offers, worked out from the flags alone. No provider name
  * reaches this function: a row describes itself out of `configured` /
- * `connected` / `reconnectRequired`, which is what lets the page render a
- * provider this build has never heard of.
+ * `connected` / `reconnectRequired`, which lets the page render a provider this
+ * build has never heard of.
  */
 type Presentation = {
   /** Filled dot, or hollow. Only a working connection fills it. */
@@ -61,15 +61,13 @@ const SIGN_IN = '/admin/login'
  * Where this page is reached from, and the way back out of it.
  *
  * The route has to stay `/integrations` — `IntegrationEndpoints.ReturnPath` is
- * that string and the provider redirects a browser to it — so this page renders
- * outside the admin shell and inherits none of its chrome. This link is that
- * missing edge, and it is the page's own rather than the browser's Back button:
- * Back only works when there is somewhere behind you, and the OAuth callback
- * arrives here as a redirect from another origin while the same URL in a fresh
- * tab has no history at all.
+ * that string — so this page renders outside the admin shell and inherits none
+ * of its chrome. This link is the missing edge, and it is the page's own rather
+ * than the browser's Back: the OAuth callback arrives as a redirect from another
+ * origin, and the same URL in a fresh tab has no history.
  *
- * A wouter `<Link>` and not an anchor, unlike `SIGN_IN` above: /admin/settings
- * is a client route the single page owns, so this is a push and not a reload.
+ * A wouter `<Link>` and not an anchor, unlike `SIGN_IN`: /admin/settings is a
+ * client route the single page owns, so this is a push and not a reload.
  */
 const SETTINGS = '/admin/settings'
 
@@ -77,21 +75,19 @@ const SETTINGS = '/admin/settings'
  * A 401 here means one thing now, and it has a fix.
  *
  * Until Part C this named `Integrations:AdminToken` and told the operator to
- * clear it from configuration and restart — a stopgap Task 1 deleted along with
- * the setting, which left this page instructing people to unset something that
- * no longer exists. Pocket ID stands here now, so the recovery is to sign in.
+ * clear it from configuration and restart — a stopgap Task 1 deleted with the
+ * setting, leaving this page pointing at something that no longer exists.
  */
 const LOCKED_MESSAGE =
   'Your session has expired, or you were never signed in — so there is nothing here to read yet.'
 
 /**
- * What the page can offer about a failure, and never more than the failure
- * actually has.
+ * What the page can offer about a failure, and never more than the failure has.
  *
  * A control that cannot work is worse than none: it invites a press, spends a
- * round trip and comes back with the same sentence. So `none` is a real answer —
- * a Connect refused with `provider_not_configured` is fixed in a configuration
- * file and a restart, and neither retrying nor reconnecting touches it.
+ * round trip and returns the same sentence. So `none` is a real answer — a
+ * Connect refused with `provider_not_configured` is fixed in a configuration
+ * file and a restart.
  */
 type Recovery = 'none' | 'sign-in' | 'retry'
 
@@ -104,22 +100,19 @@ const RETRY_MESSAGE = 'Nothing on this page can put that right. Read it again, a
 
 /**
  * A provider name as a heading, without knowing any provider. The API sends the
- * lowercase enum name because that is what the connect path takes, and
- * capitalising the first letter is the whole transformation: a lookup table
- * would be a list of vendors in the frontend, which the endpoint exists to
- * avoid.
+ * lowercase enum name the connect path takes, and capitalising the first letter
+ * is the whole transformation: a lookup table would be a list of vendors in the
+ * frontend, which the endpoint exists to avoid.
  */
 function label(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
 function describe(integration: Integration): Presentation {
-  // Asked before `configured`, and that order is the point. This row holds a
-  // credential that cannot be read, so there IS something to put right here and
-  // reconnecting is what puts it right — not true of the ordinary unconfigured
-  // row below, where nothing is stored and nothing is broken. The button is
-  // offered either way: on a deployment that also lacks client credentials the
-  // sentence says so first, and pressing it says so again in `connectMessage`.
+  // Asked before `configured`, and that order is the point: this row holds a
+  // credential that cannot be read, so reconnecting puts something right — not
+  // true of the unconfigured row below, where nothing is stored and nothing is
+  // broken. The button is offered either way; `connectMessage` says the rest.
   if (integration.fault === CREDENTIAL_UNREADABLE) {
     const missing = integration.configured
       ? ''
@@ -182,8 +175,7 @@ function describe(integration: Integration): Presentation {
  *
  * The backend logs the provider's own words and sends a code, on purpose — the
  * raw text is attacker-controllable and arrives on a route anyone can call. So
- * these four sentences are all there is, and each has to name the recovery
- * rather than the fault.
+ * these four sentences are all there is, and each names the recovery.
  */
 function calledBackMessage(code: string): string {
   switch (code) {
@@ -427,11 +419,10 @@ export default function Integrations() {
         )}
 
         {/* Named rather than silently absent, the same way the manage page names
-            a missing Reschedule. Task 4 shipped list, connect and callback and
-            no fourth route, and a Disconnect that calls nothing would be worse
-            than no Disconnect at all. It needs a DELETE that drops the stored
-            credential and revokes the grant with the provider — revokes, or the
-            token keeps working after Kairos has forgotten it. */}
+            a missing Reschedule. Task 4 shipped no fourth route, and a
+            Disconnect that calls nothing is worse than none. It needs a DELETE
+            that drops the stored credential and revokes the grant — revokes, or
+            the token keeps working after Kairos has forgotten it. */}
         {phase === 'ready' && rows.length > 0 && (
           <p className="fine mt-5">
             Disconnecting is not built yet. Revoking Kairos in the provider&apos;s own account settings ends its

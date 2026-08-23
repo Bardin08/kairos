@@ -4,20 +4,16 @@ import { BLANK, type Draft } from './adminTime'
 
 /**
  * One day's windows as rows — a time pair each, a Remove each, Add window
- * beneath.
+ * beneath. One component for two panes because it is one act on two keys: a
+ * weekday's windows and a single date's are typed the same way and refused by
+ * the same server check.
  *
- * One component for two panes because it is one act on two keys: a weekday's
- * windows and a single date's are typed the same way and refused by the same
- * server check, so a pane with its own copy of this is the pane that drifts.
+ * `label` names the day and every control repeats it, because the week and the
+ * selected date share a page: to a reader listing this page's controls, five
+ * identical "Remove"s are a list nobody can act on.
  *
- * `label` names the day the windows belong to and every control repeats it. On
- * screen the row above already says which day; out of that context — a reader
- * listing this page's controls — five identical "Remove"s are a list nobody can
- * act on, and the week and the selected date are on one page together.
- *
- * What an empty set means is deliberately not decided here. To the week it is a
- * closed day, to a date it is a date offering nothing at all, and those are the
- * two panes' own sentences to write.
+ * What an empty set means is decided by each pane — a closed day to the week, a
+ * date offering nothing to the date panel.
  */
 export default function WindowRows({
   label,
@@ -40,14 +36,12 @@ export default function WindowRows({
   return (
     <div className="group">
       {windows.map((draft, position) => (
-        // Keyed by position because a window has no identity of its own until it
-        // is saved, and the ids the server gives them do not survive a set that
-        // is replaced entire.
+        // Keyed by position because a window has no identity until it is saved,
+        // and the server's ids do not survive a set replaced entire.
         //
-        // Not .wrap: the preview pane's narrow column already has .week-time
-        // giving ground (kairos.css) so this line does not overflow. Wrapping on
-        // top of that dropped × onto its own line beneath the times, reading as
-        // a stray row rather than a control still attached to them.
+        // Not .wrap: .week-time already gives ground in the preview pane's
+        // narrow column (kairos.css). Wrapping on top of that dropped × onto its
+        // own line, reading as a stray row rather than a control.
         <div className="row gap-2" key={position}>
           <input
             className="input numeric week-time"

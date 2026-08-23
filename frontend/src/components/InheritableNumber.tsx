@@ -3,28 +3,20 @@ import { useEffect, useId, useRef } from 'react'
 /**
  * Three states through controls that natively offer two.
  *
- * A limit can be inherited, an explicit zero, or a value, and the whole
- * global-then-override design rests on the first two being different: `null`
- * inherits the global, `0` is a deliberate zero. A plain number input cannot
- * hold "inherit" at all, and the obvious substitute — an empty box — is
- * indistinguishable from a box the operator has not filled in yet, so the moment
- * anything coerces it the link silently stops tracking the global.
+ * `null` inherits the global, `0` is a deliberate zero, and the design rests on
+ * those being different. A number input cannot hold "inherit", and an empty box
+ * is indistinguishable from one not filled in yet, so anything that coerces it
+ * silently stops the link tracking the global. The first attempt, a checkbox
+ * under a disabled input, read backwards: the control governing the field sat
+ * below it in the faintest type on the page.
  *
- * The first version solved that with a checkbox under a disabled input, and it
- * read backwards: the control that governed the field sat below it in the
- * faintest type on the page, and the inherited state was a box showing a number
- * the operator had never typed and could not edit.
+ * - inherited  → the global as read-only prose, a Global chip, an Override
+ *                button. No input at all.
+ * - overridden → a number field the width of its longest value, unit inside,
+ *                and a button back to the global.
  *
- * So the two states become two different things rather than one thing twice:
- *
- * - inherited  → the global, stated as read-only prose, with a Global chip and
- *                an Override button. There is no input at all.
- * - overridden → a number field the width of its longest value, with the unit
- *                inside it and a button back to the global.
- *
- * Nothing here is carried by colour. The states differ in shape and in the word
- * `Global`, so the control survives a monochrome screenshot — DESIGN.md's
- * Second Channel Rule.
+ * Nothing is carried by colour: the states differ in shape and in the word
+ * `Global` — DESIGN.md's Second Channel Rule.
  */
 export default function InheritableNumber({
   label,
@@ -46,9 +38,8 @@ export default function InheritableNumber({
   globalValue: number
   /**
    * The floor. Zero for margin, minimum notice and daily cap — no gap, book
-   * immediately, nothing bookable today are all real settings. One for the
-   * start increment, where zero is the value that makes the slot generator's
-   * step never advance.
+   * immediately, nothing bookable today are all real settings. One for the start
+   * increment, where zero makes the slot generator's step never advance.
    */
   min: number
   onChange: (value: number | null) => void
@@ -166,10 +157,9 @@ const DECIMAL = 10
  * A whole number at or above the floor, never NaN and never negative.
  *
  * `min` on the input is a hint a keyboard walks straight past: typing `-5` or
- * clearing the field both reach this handler, and a negative margin would
- * subtract from the busy interval and start creating overlaps — availability
- * that is not there. Parsed rather than read from `valueAsNumber` so the answer
- * does not depend on how faithfully the test environment implements it.
+ * clearing the field both reach this handler, and a negative margin subtracts
+ * from the busy interval and starts creating availability that is not there.
+ * Parsed rather than read from `valueAsNumber`, which jsdom implements loosely.
  */
 function floor(raw: string, min: number): number {
   const parsed = Number.parseInt(raw, DECIMAL)

@@ -1,13 +1,11 @@
 /**
  * The four limits in words, in one place.
  *
- * Two screens describe the same four settings — the globals in Settings and the
- * per-link overrides in the link editor — and before this module they described
- * them differently: `Bookings a day` in one and `Booking cap` in the other, for
- * the same column. A reader cannot tell whether that is two settings or one.
- *
- * `short` exists because the affix inside a numeric input has room for `min` and
- * not for `minutes`, while a screen reader should still hear the whole word.
+ * Two screens describe the same four settings, and before this module they
+ * described them differently: `Bookings a day` in one, `Booking cap` in the
+ * other, for the same column. `short` exists because the affix inside a numeric
+ * input has room for `min` and not `minutes`, while a screen reader should still
+ * hear the whole word.
  */
 import type { GlobalLimits } from './adminLinks'
 
@@ -16,9 +14,8 @@ export type LimitKey = keyof GlobalLimits
 
 /**
  * `label`, `unit`, `short` and `help` are words; `floor` is not — it rides along
- * because it is per-limit like the words are, and both screens need it next to
- * the copy they render it beside. A fifth parallel record keyed by `LimitKey`
- * would cost more than this one field's naming mismatch does.
+ * because it is per-limit like the words are, and a fifth parallel record keyed
+ * by `LimitKey` would cost more than the naming mismatch does.
  *
  * `floor` is not decoration: a negative margin inverts the padded busy interval
  * and starts creating overlaps that look like availability, and a zero start

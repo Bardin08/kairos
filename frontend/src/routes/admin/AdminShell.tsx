@@ -19,8 +19,8 @@ import { refusal, subscribeToRefusal } from './session'
  * One place the operator can be, and the icon that stands for it.
  *
  * Paths are relative: the shell is mounted with `nest`, so wouter's base is
- * `/admin` and both `<Link>` and `<Route>` prefix it. Writing `/admin/links`
- * here would produce `/admin/admin/links`.
+ * `/admin` and both `<Link>` and `<Route>` prefix it. `/admin/links` here would
+ * produce `/admin/admin/links`.
  */
 type Destination = {
   path: string
@@ -165,11 +165,10 @@ function destinationLink(destination: Destination, current: string) {
 /**
  * The operator's workbench: a rail on desktop, a bottom tab bar on a phone.
  *
- * Which of the two is drawn is kairos.css's decision alone — `.rail` and
- * `.tabbar` swap at 900px in a media query, and both are always rendered. No
- * width is read here and none should be: layout set in JavaScript stops
- * surviving a resize with JS busy, and the breakpoint would then exist in two
- * places that could disagree.
+ * Which is drawn is kairos.css's decision alone — `.rail` and `.tabbar` swap at
+ * 900px in a media query, and both are always rendered. No width is read here:
+ * layout set in JavaScript stops surviving a resize with JS busy, and the
+ * breakpoint would exist in two places that could disagree.
  */
 export default function AdminShell() {
   // Relative to the mount point, so `/admin/links` reads as `/links` and

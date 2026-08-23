@@ -22,9 +22,8 @@ type Editing = { link: AdminLink | null }
 
 /**
  * A margin cell that says where its number came from. An inherited 15 and an
- * overridden 15 are the same digits, so the difference has to be in the words.
- * This is the list's half of the distinction InheritableNumber draws in the
- * form.
+ * overridden 15 are the same digits, so the difference has to be in the words —
+ * the list's half of the distinction InheritableNumber draws in the form.
  */
 function margin(link: AdminLink, globals: GlobalLimits) {
   if (link.marginMinutes === null) {

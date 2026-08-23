@@ -26,11 +26,9 @@ const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 type FieldErrors = { name?: string; email?: string }
 
 /**
- * Who is booking, and the commit.
- *
- * Everything here renders in the invitee's zone, including the day: by this
- * point the organizer's calendar is not on screen and has nothing to anchor a
- * `+1d` to, so the summary states the meeting as the invitee will live it.
+ * Who is booking, and the commit. Everything renders in the invitee's zone,
+ * including the day: the organizer's calendar is off screen by now and has
+ * nothing to anchor a `+1d` to.
  */
 export default function BookingForm({
   link,

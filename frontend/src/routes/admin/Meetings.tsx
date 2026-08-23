@@ -21,10 +21,9 @@ const CONFIRMED = 'confirmed'
 
 /**
  * The three ranges the period filter offers. All three are date ranges, which is
- * what the endpoint takes; the presets are only the three an operator actually
- * asks for. `RECENT` is bounded rather than open because "everything behind me"
- * is a list that grows without limit — and `ALL` is still there for the year no
- * preset covers.
+ * what the endpoint takes; the presets are the three an operator asks for.
+ * `RECENT` is bounded because "everything behind me" grows without limit, and
+ * `ALL` is there for the year no preset covers.
  */
 const UPCOMING = 'upcoming'
 const RECENT = 'recent'
@@ -50,15 +49,13 @@ function rangeOf(period: string, zone: string): { from?: string; to?: string } {
  * The date as the comp's record chip draws it — `docs/ui/admin.html` line 214 —
  * with the year as a third line inside it.
  *
- * The comp carries no year because it is showing four meetings in one month. A
- * list spanning "past and upcoming" spans years, and a bare "20 Aug" does not
- * say which one. It goes on its own quiet line rather than beside the month,
- * whose 54px chip would wrap the pair — and inside the chip rather than under
- * it, because a sibling of the chip is a full-width block that takes the cell's
- * own alignment, which is how day, month and year ended up on three alignments.
+ * The comp carries no year because it shows four meetings in one month; a list
+ * spanning "past and upcoming" spans years. The year goes on its own line rather
+ * than beside the month, whose 54px chip would wrap the pair — and inside the
+ * chip rather than under it, because a sibling of the chip is a full-width block
+ * that takes the cell's alignment.
  *
- * A `div` rather than the comp's `span`: `p` is not phrasing content, and the
- * chip is a block in every layout that uses it.
+ * A `div` rather than the comp's `span`: `p` is not phrasing content.
  */
 function dateChip(instant: string, zone: string) {
   const day = zonedDate(instant, zone)
@@ -73,12 +70,11 @@ function dateChip(instant: string, zone: string) {
 }
 
 /**
- * What time the participant thought this was.
- *
- * The question that gets asked after a no-show, which is why the zone is stored
- * on the participant rather than derived from the organizer's. Null when the
- * booking carries no zone at all; the zone's own name when `Intl` does not carry
- * it, because a thrown RangeError would take the whole page down over one row.
+ * What time the participant thought this was — the question asked after a
+ * no-show, and why the zone is stored on the participant rather than derived
+ * from the organizer's. Null when the booking carries no zone; the zone's own
+ * name when `Intl` does not carry it, because a thrown RangeError would take the
+ * whole page down over one row.
  */
 function theirTime(meeting: Meeting): string | null {
   if (meeting.participantTimeZone === '') return null
@@ -98,10 +94,9 @@ function label(provider: string): string {
 /**
  * Why a meeting is not in the calendar, in the operator's terms.
  *
- * "Not synced" on its own sends them to the server log for something the row
- * already knows, so the provider's own words go on the detail. No error at all
- * means nothing was ever attempted — the ordinary state of a Kairos whose
- * operator never connected a calendar, and it must not read like a fault.
+ * "Not synced" alone sends them to the server log for something the row already
+ * knows, so the provider's own words go on the detail. No error at all means
+ * nothing was attempted, and it must not read like a fault.
  */
 function whyNotSynced(meeting: Meeting): string {
   if (meeting.calendarError === null) {
@@ -116,11 +111,10 @@ function whyNotSynced(meeting: Meeting): string {
  * Every meeting Kairos made, and the one fact a calendar cannot supply: the link
  * it came through.
  *
- * A confirmed meeting can be called off from its own row, because the operator's
- * alternative was editing the calendar by hand — which leaves the calendar and
- * Kairos disagreeing about a meeting Kairos is the source of truth for. Meetings
- * Kairos did not create are still absent: reading a calendar back is a slice with
- * its own conflict rules.
+ * A confirmed meeting can be called off from its own row; the alternative was
+ * editing the calendar by hand, leaving it and Kairos disagreeing about a
+ * meeting Kairos is the source of truth for. Meetings Kairos did not create stay
+ * absent: reading a calendar back has its own conflict rules.
  */
 export default function Meetings() {
   const [period, setPeriod] = useState(UPCOMING)

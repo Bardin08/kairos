@@ -22,17 +22,14 @@ const BOOK_PATH = '/book/'
 
 /**
  * One link, in full: what it is called, where it lives, how long it runs, which
- * hours it may be booked in, and which of the four global scheduling limits it
- * narrows.
+ * hours it may be booked in, and which of the four global limits it narrows.
  *
- * Three cards down a 620px column rather than one card across the page. The
- * previous version stretched every control to the width of a 1180px card, so a
- * two-digit minute count sat in a box a thousand pixels wide while the help
- * text beside it stopped at 68ch.
+ * Three cards down a 620px column rather than one across the page. The previous
+ * version stretched every control to a 1180px card, so a two-digit minute count
+ * sat in a box a thousand pixels wide while the help text stopped at 68ch.
  *
- * Two writes on save, not one, and that is the shape of the API: the limits have
- * their own full-replace PUT precisely so that `null` on one of them is an
- * instruction and not an omission.
+ * Two writes on save, not one: the limits have their own full-replace PUT
+ * precisely so that `null` on one of them is an instruction, not an omission.
  */
 export default function LinkEditor({
   link,
@@ -134,10 +131,8 @@ export default function LinkEditor({
 
           {/* Stacked, not a field-row: a bare one-word label next to a 288px
               control leaves roughly 200px of dead space in the label track. A
-              row only reads as intentional when the label column has something
-              in it, the way Pattern's help text and the limits' do. Name has
-              none, so it takes the full column, matching Address and
-              Description below. */}
+              row reads as intentional only when the label column has something
+              in it, the way Pattern's help text and the limits' do. */}
           <div className="field">
             <label htmlFor="link-name">Name</label>
             <input
@@ -148,15 +143,11 @@ export default function LinkEditor({
             />
           </div>
 
-          {/* Stacked rather than a two-column field-row: the composite here is a
-              static prefix and an input, meant to span the full column the way
-              Name and Description do — nothing that wide belongs beside a label.
-
-              Copy sits on the label line rather than beside the control: once
-              the row below is the prefix and the input at full width, there is
-              no room left for a third element without wrapping. Right-aligned
-              opposite the label, above the help text, and a sibling of the help
-              paragraph rather than sharing a line with it. */}
+          {/* Stacked rather than a two-column field-row: a static prefix and an
+              input, meant to span the full column the way Name and Description
+              do. Copy sits on the label line because once the row below is the
+              prefix and the input at full width, there is no room for a third
+              element without wrapping. */}
           <div className="field">
             <div className="row row-between">
               <label htmlFor="link-slug">Address</label>
@@ -177,21 +168,17 @@ export default function LinkEditor({
               )}
             </div>
             <p className="fine">Lowercase words joined by hyphens.</p>
-            {/* The whole URL, not its last word. An operator setting this is
-                deciding what to paste into a chat, and they cannot judge
-                `consulting` without the part in front of it. The scheme is
-                dropped from what is SHOWN, as the browser's own address bar
-                does — but the Copy button above copies `address`, which still
-                carries it: the copied string must stay a full, working
-                absolute URL.
+            {/* The whole URL, not its last word: an operator setting this is
+                deciding what to paste into a chat, and cannot judge `consulting`
+                without the part in front of it. The scheme is dropped from what
+                is SHOWN, as the browser's own address bar does — but Copy copies
+                `address`, which must stay a full, working absolute URL.
 
-                No fixed size class on the input: .prefix already reserves the
-                static segment's intrinsic width via `flex: none` and lets the
-                input's own `min-width: 0` (kairos.css, `.prefix > .input`)
-                absorb the rest, so the pair ends flush with Name and
-                Description rather than stopping at ctl-md's 288px partway
-                through the column — and shrinks rather than overflowing on a
-                narrow viewport. */}
+                No size class on the input: .prefix reserves the static segment's
+                intrinsic width via `flex: none` and the input's own
+                `min-width: 0` (kairos.css, `.prefix > .input`) absorbs the rest,
+                so the pair ends flush with Name rather than stopping at ctl-md's
+                288px partway through the column. */}
             <span className="prefix">
               <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
               <input

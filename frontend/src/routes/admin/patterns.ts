@@ -1,12 +1,9 @@
 // The availability half of the operator's HTTP surface.
 //
-// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is
-// imported by the booking page, so anything added to it lands in the entry chunk
-// — 240 gzipped bytes of endpoints the invitee can never call. This module is
-// imported only by Availability.tsx, reachable only through the lazily imported
-// admin shell, so Rollup places it in the admin chunk. It still makes no fetch
-// of its own: `adminRequest` wraps lib/api's `request`, still the one place a
-// failure becomes an ApiError, and latches session.ts on a 401.
+// Here rather than in lib/api.ts, and the reason is measured: lib/api.ts is in
+// the booking route's entry chunk — 240 gzipped bytes of endpoints the invitee
+// can never call. This is reached only through the lazily imported admin shell,
+// and still goes through `adminRequest`.
 
 import { adminRequest, adminRequestNothing } from './session'
 
@@ -28,10 +25,10 @@ export type OverrideWindow = {
 /**
  * What one date does instead of the weekly rules.
  *
- * No windows is not missing data — it is the day being blocked entirely, which
- * is how a holiday is expressed. A UI that reads the empty list as "not loaded
- * yet" turns a deliberate closure into a rendering accident. A date the pattern
- * says nothing about is absent from `Pattern.overrides` altogether.
+ * No windows is not missing data — it is the day blocked entirely, which is how
+ * a holiday is expressed, and a UI reading the empty list as "not loaded yet"
+ * turns a deliberate closure into a rendering accident. A date the pattern says
+ * nothing about is absent from `Pattern.overrides` altogether.
  */
 export type PatternOverride = {
   /** A date key, `2026-12-25`. No time, so no zone of its own. */
@@ -101,11 +98,9 @@ export function replacePatternRules(
 /**
  * The date's whole set in one request, the way the week's is: the server stores
  * it entire or refuses it entire, so a date holding a morning and an afternoon
- * is one write and not two.
- *
- * Keyed on the date, so it is a replacement and never a create-or-update the
- * caller has to choose between. An empty list blocks the date; DELETE on the
- * same route puts it back on the weekly rules.
+ * is one write. Keyed on the date, so it is a replacement and never a
+ * create-or-update. An empty list blocks the date; DELETE on the same route puts
+ * it back on the weekly rules.
  */
 export function savePatternOverride(
   patternId: string,

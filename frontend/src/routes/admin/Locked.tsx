@@ -3,25 +3,20 @@ import { useEffect, useState } from 'react'
 import { getSignInUrl } from './session'
 
 /**
- * The whole screen when there is no session — and it is the whole screen on
- * purpose.
+ * The whole screen when there is no session.
  *
- * It replaces AdminShell rather than appearing inside it, so there is no rail,
- * no tab bar, no page heading, no button and no empty state anywhere in the
- * document. Chrome drawn around a refused request invites actions that cannot
- * succeed, and an empty state under it asserts something the page never learned:
- * "No patterns yet" is a sentence about the data, a 401 is a sentence about
- * permission.
+ * It replaces AdminShell rather than sitting inside it: no rail, no tab bar, no
+ * heading, no button, no empty state. Chrome around a refused request invites
+ * actions that cannot succeed, and "No patterns yet" is a claim about data the
+ * page was never allowed to read.
  *
- * One wording covers both a session that expired and a browser that never had
- * one. Nothing here can tell them apart honestly — the cookie handler answers
- * 401 to a missing cookie and to an expired one alike — so it says what is true
- * in both cases rather than guessing, which is what the old "Your session has
- * expired." did to somebody who had never signed in.
+ * One wording covers a session that expired and a browser that never had one:
+ * the cookie handler answers 401 to both, so nothing here can tell them apart.
+ * The old "Your session has expired." was wrong for anyone who never signed in.
  *
  * No new CSS: `.page`, `.card`, `.card-narrow`, `.card-pad`, `.title-page`,
- * `.prose` and `.btn` are all already in kairos.css, the global `:focus-visible`
- * rule paints the ring, and every colour comes from the theme tokens.
+ * `.prose` and `.btn` are already in kairos.css, `:focus-visible` paints the
+ * ring, and every colour comes from the theme tokens.
  */
 export default function Locked() {
   // Null until the anonymous route answers. No fallback constant: baking

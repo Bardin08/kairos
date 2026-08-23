@@ -1,12 +1,10 @@
 // A month of days as the pattern alone shapes them: open, closed, blocked, past
 // — and the hours a date would open on if it were given its own.
 //
-// It knows nothing about margin, minimum notice, daily cap or start increment,
-// and that is the design. Those four differ per link while a pattern is shared,
-// so a month drawn through them would be true of one link and a lie about every
-// other; and they are the expensive half of the booking engine, so a second
-// implementation here is the copy that goes stale. When the preview needs real
-// bookable times it asks the slots endpoint.
+// It knows nothing about margin, minimum notice, daily cap or start increment.
+// Those four differ per link while a pattern is shared, and they are the
+// expensive half of the booking engine, so a second implementation here is the
+// copy that goes stale. Real bookable times come from the slots endpoint.
 
 import type { DayState } from '../../components/MonthGrid'
 import { monthCells } from '../../lib/time'
@@ -31,16 +29,14 @@ function isoDayOfWeek(day: string): number {
  * What each day of `month` is, keyed on the ORGANIZER's date — the same key the
  * slots endpoint's `from` and `to` speak.
  *
- * Every day of the month is in the map, closed ones included. `MonthGrid`
- * renders no attribute for a day it was given no state for, which is byte for
- * byte what it renders when no states are passed at all, so a day left out draws
- * as the booking page's default rather than as wrong.
+ * Every day is in the map, closed ones included. `MonthGrid` renders no
+ * attribute for a day it was given no state for, byte for byte what it renders
+ * with no states at all, so a day left out draws as the booking page's default.
  *
- * `today` is the ORGANIZER's date too, because the pattern's hours are their
- * wall clock. Every day before it is `past` whatever the week or an override
- * says, and that outranks the rest: blocking a day that has already happened
- * changes nothing an invitee can be offered. What an override on such a date
- * said stays legible in the exceptions list.
+ * `today` is the ORGANIZER's date too. Every day before it is `past` whatever
+ * the week or an override says: blocking a day that has already happened changes
+ * nothing an invitee can be offered, and the override stays in the exceptions
+ * list.
  */
 export function patternDays({
   month,
@@ -87,16 +83,14 @@ export function patternDays({
 /**
  * The windows a date's own editor should open on, earliest first.
  *
- * What the date would otherwise offer, so moving one end leaves the rest already
+ * What the date would otherwise offer, so moving one end leaves the rest
  * sensible: its own windows where it has them, otherwise every window its
- * weekday opens with. All of them, not the first — a date holds a morning and an
- * afternoon exactly as a weekday does, so seeding one of two would propose
- * closing the afternoon of a date nobody asked to change.
+ * weekday opens with. All of them, not the first — seeding one of two would
+ * propose closing the afternoon of a date nobody asked to change.
  *
  * One blank window on a weekday the pattern never opens, the one case with
- * nothing to borrow. Blank rather than an invented nine-to-five, for the reason
- * BLANK exists; one rather than none, because a panel that opened with no
- * windows would be proposing to block the date it was opened to give hours to.
+ * nothing to borrow. Blank for the reason BLANK exists; one rather than none,
+ * because a panel with no windows would propose blocking the date.
  */
 export function windowsOn(
   day: string,

@@ -21,8 +21,7 @@ export type DayState = 'open' | 'closed' | 'blocked' | 'past'
  * A month of days, keyed on the ORGANIZER's calendar — which is what the slots
  * endpoint's `from` and `to` mean.
  *
- * Days with nothing in them stay in place and dimmed rather than vanishing. An
- * invitee needs to see that a month is mostly full; a calendar with holes
+ * Days with nothing in them stay in place and dimmed. A calendar with holes
  * punched in it reads as a rendering fault, not as a busy fortnight.
  */
 export default function MonthGrid({
@@ -34,10 +33,9 @@ export default function MonthGrid({
 }: {
   month: string
   /**
-   * Slots per date key. A day missing from the map has none — and the whole map
-   * missing means times are not known at all, which is not the same thing: the
-   * pattern editor's default preview is days alone, and it has no link to count
-   * the times of.
+   * Slots per date key. A day missing from the map has none; the whole map
+   * missing means times are not known at all — the pattern editor's default
+   * preview is days alone, with no link to count the times of.
    */
   counts?: Map<string, number>
   /**

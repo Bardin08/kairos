@@ -57,10 +57,9 @@ function listNames(names: string[]): string {
  * The operator's patterns, as a wall of read-only cards.
  *
  * Everything that changes one pattern lives at `/admin/availability/{id}`; this
- * page holds only what is true of the set — what exists, what each one is for,
- * and which links would break if one went away. No booking and no link editing
- * either: both have been proposed for this tab, and either one turns a reusable
- * shape into a diary of exactly one.
+ * page holds only what is true of the set. No booking and no link editing: both
+ * have been proposed for this tab, and either turns a reusable shape into a
+ * diary of exactly one.
  */
 export default function Availability() {
   const [patterns, setPatterns] = useState<Pattern[]>([])
@@ -130,10 +129,9 @@ export default function Availability() {
 
   /**
    * Refused while any link stands on the pattern, and the refusal names them.
-   * Never softened into a confirmation: a cascade would leave those links
-   * active, resolvable and offering nothing, which reads as an outage rather
-   * than as a deletion somebody chose. The server's own sentence is shown
-   * verbatim because it is the one that has the link names in it.
+   * Never softened into a confirmation: a cascade would leave those links active
+   * and offering nothing, which reads as an outage. The server's sentence is
+   * shown verbatim because it is the one with the link names in it.
    */
   function remove(patternId: string) {
     setDeleting(patternId)
