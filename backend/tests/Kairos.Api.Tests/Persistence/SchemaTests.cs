@@ -26,11 +26,25 @@ public class SchemaTests
     private const string ProposalSlug = "proposal";
     private const string ProposalLinkName = "Proposal link";
     private const string ProposalManageHash = "proposal-manage-hash";
+
+    /// <summary>
+    /// Two of them, and they have to differ: TokenHash is uniquely indexed, so a second proposal
+    /// sharing one would be refused by that index and the test would never reach the filtered one
+    /// it is about.
+    /// </summary>
+    private const string FirstTokenHash = "first-token-hash";
+    private const string SecondTokenHash = "second-token-hash";
+
     private const long ProposalStartUtc = 1_900_000_000;
     private const int ProposalMinutes = 30;
     private const int SecondsPerMinute = 60;
-    private const int ProposalOffsetSeconds = 3 * 60 * 60;
-    private const int ProposalHoldSeconds = SchedulingDefaults.ProposalHoldHours * 60 * 60;
+    private const int SecondsPerHour = 60 * SecondsPerMinute;
+
+    /// <summary>Clear of the booking, so nothing here turns on the two intervals overlapping.</summary>
+    private const int ProposalOffsetHours = 3;
+
+    private const int ProposalOffsetSeconds = ProposalOffsetHours * SecondsPerHour;
+    private const int ProposalHoldSeconds = SchedulingDefaults.ProposalHoldHours * SecondsPerHour;
 
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
@@ -211,10 +225,10 @@ public class SchemaTests
         using var context = database.CreateContext();
 
         var bookingId = SeedBooking(context);
-        context.BookingProposals.Add(NewProposal(bookingId, "aaa"));
+        context.BookingProposals.Add(NewProposal(bookingId, FirstTokenHash));
         context.SaveChanges();
 
-        context.BookingProposals.Add(NewProposal(bookingId, "bbb"));
+        context.BookingProposals.Add(NewProposal(bookingId, SecondTokenHash));
 
         Should.Throw<DbUpdateException>(() => context.SaveChanges());
     }
@@ -231,9 +245,9 @@ public class SchemaTests
 
         var bookingId = SeedBooking(context);
 
-        var declined = NewProposal(bookingId, "aaa");
+        var declined = NewProposal(bookingId, FirstTokenHash);
         declined.State = ProposalState.Declined;
-        var expired = NewProposal(bookingId, "bbb");
+        var expired = NewProposal(bookingId, SecondTokenHash);
         expired.State = ProposalState.Expired;
 
         context.BookingProposals.AddRange(declined, expired);
