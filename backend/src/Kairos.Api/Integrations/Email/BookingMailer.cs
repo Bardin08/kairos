@@ -13,21 +13,14 @@ using NodaTime.Text;
 
 namespace Kairos.Api.Integrations.Email;
 
-/// <summary>
-/// What an invitee is told about their meeting: that it is booked, that it has moved, or that it
-/// is off — each with the times, the link that lets them act, and the .ics that makes their
-/// client add, update or remove the event.
-/// </summary>
 /// <remarks>
-/// Composition is separated from sending because composition is the half that can be proved. The
-/// MIME structure, the agreement between the .ics METHOD and the MIME <c>method=</c> parameter,
-/// and the manage link are all assertable without a relay; whether the message lands in an inbox
-/// is not assertable at all and is verified by sending real mail to real accounts.
+/// Composition is separated from sending because composition is the half that can be proved: the
+/// MIME structure, the METHOD/<c>method=</c> agreement and the manage link are all assertable
+/// without a relay. Inbox placement is not, and is verified by sending real mail.
 ///
-/// One composer for all three notices rather than three. The MIME shape, the transfer encodings,
-/// the Message-Id and the zone the times are rendered in are identical across them and are the
-/// parts that are delicate; what actually differs is three strings and the METHOD. Three
-/// composers would be three places for the folded .ics to get its encoding wrong.
+/// One composer for all three notices. What differs is three strings and the METHOD; the MIME
+/// shape, transfer encodings, Message-Id and rendering zone are identical and are the delicate
+/// parts — three composers would be three places for the folded .ics to get its encoding wrong.
 /// </remarks>
 public sealed class BookingMailer(
     EmailSender sender,
@@ -67,19 +60,15 @@ public sealed class BookingMailer(
         SendAsync(BookingNotice.Confirmation, booking, manageToken, cancellationToken);
 
     /// <summary>
-    /// The booking moved. <c>METHOD:REQUEST</c> again, with the same <c>UID</c> and a
-    /// <see cref="Booking.Sequence"/> the caller has already advanced — which is precisely what
-    /// makes a client treat this as a change to the meeting it is holding rather than as a second
-    /// invitation. A stale sequence is not an error anybody is told about: the client discards the
-    /// update without a word, nobody reports a reschedule that did not arrive, and the invitee
-    /// turns up at the old time.
+    /// <c>METHOD:REQUEST</c> again, same <c>UID</c>, with a <see cref="Booking.Sequence"/> the
+    /// caller has already advanced — which is what makes a client update the meeting it holds
+    /// rather than show a second invitation. A stale sequence is discarded without a word, so
+    /// nobody reports the reschedule that did not arrive and the invitee turns up at the old time.
     /// </summary>
     /// <remarks>
-    /// The token is nullable for the same reason a cancellation's is, and it became so when a
-    /// second caller appeared: the invitee's own reschedule arrived holding their manage link, but
-    /// accepting a proposal arrives holding the PROPOSAL's token, and the manage one cannot be
-    /// recovered from a stored SHA-256. The mail goes without the link rather than not going —
-    /// the invitee still has it in the confirmation that minted it.
+    /// The token is nullable for the same reason a cancellation's is, and became so when a second
+    /// caller appeared: accepting a proposal arrives holding the PROPOSAL's token, and the manage
+    /// one cannot be recovered from a stored SHA-256. The mail goes without the link.
     /// </remarks>
     public Task SendRescheduleAsync(
         Booking booking,
@@ -88,15 +77,14 @@ public sealed class BookingMailer(
         SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
 
     /// <summary>
-    /// The booking is off. <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
+    /// <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
     /// <c>STATUS:CANCELLED</c> — both, because Outlook removes the event on the status and leaves
     /// one marked CONFIRMED in place however the message was labelled.
     /// </summary>
     /// <remarks>
-    /// A cancellation the operator triggered has no plaintext token to put in the mail and no way
-    /// to recover one. The confirmation keeps <c>string</c> deliberately: it is the one message
-    /// that mints the manage token, and shipped without the link that token never appears in any
-    /// later response.
+    /// A cancellation the operator triggered has no plaintext token and no way to recover one. The
+    /// confirmation keeps <c>string</c> deliberately: it mints the manage token, which appears in
+    /// no later response.
     /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
@@ -108,11 +96,10 @@ public sealed class BookingMailer(
     /// The operator has offered a new time. Nothing has moved; the invitee decides.
     /// </summary>
     /// <returns>
-    /// Whether it went. The one notice that reports this, and the one that has to: a proposal's
-    /// token exists only inside the call that minted it, so a hold whose mail was swallowed can
-    /// never be answered by anybody and holds its slot for the whole window. The other three
-    /// describe a booking that stands on its own whether or not the message arrived, which is what
-    /// rule 14 is about; this one IS the message.
+    /// Whether it went — the one notice that has to report this. A proposal's token exists only
+    /// inside the call that minted it, so a hold whose mail was swallowed can never be answered
+    /// and keeps its slot for the whole window. The other three describe a booking that stands
+    /// whether or not the message arrived; this one IS the message.
     /// </returns>
     public Task<bool> SendProposalAsync(
         Booking booking,
@@ -125,10 +112,6 @@ public sealed class BookingMailer(
             () => ComposeProposal(booking, proposal, proposalToken),
             cancellationToken);
 
-    /// <summary>
-    /// Every notice <see cref="Compose"/> builds — the ones that carry an .ics, and a manage link
-    /// wherever the caller has the plaintext token to build one from.
-    /// </summary>
     private Task SendAsync(
         BookingNotice notice,
         Booking booking,
@@ -137,28 +120,22 @@ public sealed class BookingMailer(
         SendComposedAsync(notice, booking, () => Compose(booking, manageToken, notice), cancellationToken);
 
     /// <summary>
-    /// Sends the notice, or does not, and says which. Composition is deferred rather than
-    /// passed in already done, so that this stays the one home for the configured check, the try
-    /// and the logging: rule 14 is a promise about every notice, and a second copy of the swallow
-    /// is a second place for one of them to stop keeping it.
+    /// Composition is deferred rather than passed in already done, so that this stays the one home
+    /// for the configured check, the try and the logging: rule 14 is a promise about every notice,
+    /// and a second copy of the swallow is a second place for one of them to stop keeping it.
     /// </summary>
     /// <remarks>
     /// Ground rule 14, at the only place it can be enforced: the booking has been written, moved
-    /// or cancelled before this is called, and nothing in here can reach back and undo it. Both
-    /// ways out are silent to the caller — no relay configured is the ordinary state of a fresh
-    /// deployment, and a relay that refused is a delivery problem rather than a booking problem. A
-    /// cancellation that answered 500 because SMTP was down would leave the invitee pressing the
-    /// button again on a meeting that is already off.
+    /// or cancelled before this is called, and nothing here can undo it. Both ways out are silent
+    /// — an unconfigured relay is the ordinary state of a fresh deployment, and a relay that
+    /// refused is a delivery problem, not a booking one.
     ///
-    /// What that trades away, said plainly: a failed send is not retried and the invitee gets
-    /// nothing. It is logged at Warning with the booking id so the organizer can resend by hand.
-    /// The outbox would give retries for free and is the right home for the webhook, but not for
-    /// this: an email row would have to carry a raw token in its payload, and Part A stores only
-    /// those tokens' SHA-256 on purpose. Persisting the plaintext to buy a retry would make one
-    /// database read worth cancel-and-reschedule on every booking in the file. That is why every
-    /// send runs on the request that caused it, where the plaintext is already in hand — from the
-    /// 201 for a confirmation, from the URL the invitee just opened for a cancel or a move, and
-    /// from the mint itself for a proposal.
+    /// The trade: a failed send is not retried and the invitee gets nothing, logged at Warning
+    /// with the booking id so the organizer can resend by hand. The outbox would give retries free
+    /// and is the right home for the webhook, but an email row would have to carry a raw token in
+    /// its payload, and Part A stores only those tokens' SHA-256 — persisting the plaintext would
+    /// make one database read worth cancel-and-reschedule on every booking in the file. So every
+    /// send runs on the request that caused it, where the plaintext is in hand.
     /// </remarks>
     private async Task<bool> SendComposedAsync(
         BookingNotice notice,
@@ -182,11 +159,9 @@ public sealed class BookingMailer(
             var response = await sender.SendAsync(message, cancellationToken);
 
             // Said at Information, not Debug. Silence on the happy path is what let a message
-            // Kairos had not sent be read twice as proof that Kairos could send: the only visible
-            // difference between a working relay and a broken one was mail that may or may not
-            // have come from somewhere else. The Message-Id and the relay's own response are the
-            // two handles that settle it from a log line alone, and the sequence is the third —
-            // it is what decides whether a client acts on the message or drops it.
+            // Kairos had not sent be read twice as proof that Kairos could send. The Message-Id
+            // and the relay's response settle that from a log line alone; the sequence is the
+            // third handle, deciding whether a client acts on the message or drops it.
             logger.LogInformation(
                 "{Notice} for booking {Booking} at sequence {Sequence} accepted by the relay as "
                 + "{MessageId}: {Response}",
@@ -209,13 +184,9 @@ public sealed class BookingMailer(
         }
     }
 
-    /// <summary>
-    /// The message, exactly as it goes on the wire.
-    /// </summary>
     /// <remarks>
-    /// The structure is Google Calendar's own, because Gmail and Outlook are the two clients that
-    /// have to render an accept/decline control and that shape is the one both are known to
-    /// handle:
+    /// The structure is Google Calendar's own — the shape Gmail and Outlook are both known to
+    /// render an accept/decline control from:
     /// <code>
     /// multipart/mixed
     /// ├── multipart/alternative
@@ -232,10 +203,9 @@ public sealed class BookingMailer(
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
         var organizer = MailboxAddress.Parse(settings.From!);
 
-        // Null for anything the operator triggered. The plaintext token exists only in the request
-        // that minted it or in a URL the invitee opened, and neither is true of a cancel pressed in
-        // the workbench — only the SHA-256 is stored. The mail goes without the link rather than
-        // not going.
+        // Null for anything the operator triggered: only the SHA-256 is stored, so a cancel pressed
+        // in the workbench has no plaintext to build a link from. The mail goes without the link
+        // rather than not going.
         var manageUrl = manageToken is null ? null : ManageUrl(settings.PublicBaseUrl!, manageToken);
 
         var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
@@ -277,9 +247,8 @@ public sealed class BookingMailer(
         var invitation = new TextPart(CalendarSubtype)
         {
             // Base64 rather than left to MimeKit's choice. The .ics is folded at 75 octets with a
-            // single leading space marking each continuation, and any encoding that normalises
-            // whitespace or line endings unfolds it into a file no client will parse. Base64 is
-            // the one encoding that cannot touch the bytes.
+            // single leading space per continuation, and any encoding that normalises whitespace
+            // or line endings unfolds it into a file no client will parse.
             ContentTransferEncoding = ContentEncoding.Base64,
         };
         invitation.ContentType.Parameters[MethodParameter] = IcsBuilder.Keyword(method);
@@ -304,14 +273,10 @@ public sealed class BookingMailer(
             Mailbox(booker));
     }
 
-    /// <summary>
-    /// The proposal, as plain text and nothing else.
-    /// </summary>
     /// <remarks>
-    /// No <c>text/calendar</c> part and no attachment, and that is the design rather than an
-    /// omission: a calendar part is applied by the client, so attaching one would move the meeting
-    /// the message exists to ask about. The link is the whole interface — the decision is made by
-    /// opening it, not by an RSVP control the invitee's client would draw.
+    /// No <c>text/calendar</c> part and no attachment, by design: a calendar part is applied by
+    /// the client, so attaching one would move the meeting the message exists to ask about. The
+    /// link is the whole interface.
     /// </remarks>
     public MimeMessage ComposeProposal(Booking booking, BookingProposal proposal, string proposalToken)
     {
@@ -348,27 +313,22 @@ public sealed class BookingMailer(
             $"A new time for {booking.Link.Name}?", body, organizer, Mailbox(booker));
     }
 
-    /// <summary>The invitee, as an address: the name they gave, around the mailbox they gave.</summary>
     private static MailboxAddress Mailbox(BookingParticipant booker) => new(booker.Name, booker.Email);
 
     /// <summary>
-    /// The invitee's only route to cancelling or moving the meeting, and the shape Part A's
-    /// frontend routes: the raw token in the path, nothing else. Escaped and the base trimmed,
-    /// so a base URL written with a trailing slash does not produce a double one that some mail
-    /// clients decline to linkify.
+    /// The token is escaped and the base trimmed, so a base URL written with a trailing slash does
+    /// not produce a double one that some mail clients decline to linkify.
     /// </summary>
     private static string ManageUrl(string baseUrl, string manageToken) =>
         OutgoingMail.Url(baseUrl, $"{ManagePath}/{Uri.EscapeDataString(manageToken)}");
 
-    /// <summary>The same shape one path along: the proposal's token, and nothing else.</summary>
     private static string ProposalUrl(string baseUrl, string proposalToken) =>
         OutgoingMail.Url(baseUrl, $"{ProposalPath}/{Uri.EscapeDataString(proposalToken)}");
 
     /// <summary>
     /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
-    /// <see cref="ComposeProposal"/> instead. It is spelled out anyway because the discard arm's
-    /// "unknown booking notice" is a lie for this one — the notice is known and this is the wrong
-    /// composer for it, which is an instruction rather than a puzzle.
+    /// <see cref="ComposeProposal"/>. Spelled out anyway because the discard arm's "unknown
+    /// booking notice" is a lie here: the notice is known and this is the wrong composer for it.
     /// </summary>
     private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice) =>
         new(
@@ -409,21 +369,17 @@ public sealed class BookingMailer(
     /// text-only body is one fewer thing for a filter to score.
     /// </summary>
     /// <remarks>
-    /// Assembled out of blocks joined by one blank line rather than written as one template with
-    /// holes in it, because two of the blocks are optional and a hole leaves a mark. A template
-    /// prints an empty line where an absent block was and a heading over nothing where its label
-    /// was; both are things the invitee reads.
+    /// Assembled out of blocks joined by one blank line rather than a template with holes in it:
+    /// two blocks are optional, and a template prints an empty line where an absent one was and a
+    /// heading over nothing where its label was.
     ///
     /// The manage link is in every notice that has a token to build one from, the cancellation
-    /// included: it costs nothing and it is the only way an invitee can check that a cancellation
-    /// they are reading about is real, rather than taking the word of an email — which is the same
-    /// reason the link exists at all. A notice the operator triggered has no token and no way to
-    /// recover one, and drops the block whole.
+    /// included — it is the only way an invitee can check that a cancellation they are reading
+    /// about is real. A notice the operator triggered has no token and drops the block whole.
     ///
-    /// The reason is the operator's own words and is the point of an operator's cancel: a meeting
-    /// called off with no explanation is what the invitee is otherwise left with. It is absent
-    /// from every notice the invitee triggered themselves — they know why — and absent means the
-    /// mail is byte-for-byte what it was before this existed.
+    /// The reason is the operator's own words and the point of an operator's cancel. Absent from
+    /// notices the invitee triggered themselves, and absent leaves the mail byte-for-byte as it
+    /// was before this existed.
     /// </remarks>
     private static string Body(
         BookingNotice notice,

@@ -9,8 +9,7 @@ namespace Kairos.Api.Integrations.Webhooks;
 
 /// <summary>
 /// The one event nothing can ask for: a meeting ending is the absence of a request, so a clock
-/// has to notice it. Every minute this asks which confirmed bookings are now over and enqueues
-/// <c>meeting.ended</c> for each.
+/// has to notice it.
 /// </summary>
 /// <remarks>
 /// It enqueues and it never delivers. Those are separate jobs on purpose — a service that
@@ -55,9 +54,7 @@ public sealed class MeetingEndedPoller(
         }
     }
 
-    /// <summary>
-    /// One sweep, then the wait. Returns false when the host is shutting down.
-    /// </summary>
+    /// <summary>Returns false when the host is shutting down.</summary>
     private async Task<bool> TickAsync(PeriodicTimer timer, CancellationToken stoppingToken)
     {
         try
