@@ -30,7 +30,9 @@ public sealed class Booking
     /// <summary>
     /// Why the operator called it off, in their words, and null for every booking the invitee
     /// cancelled themselves. The null is the record of which of the two happened, which is why
-    /// there is no second column saying who.
+    /// there is no second column saying who. Nothing writes it yet — the admin cancel in the next
+    /// pull request does; the column ships here because all three of this feature's schema changes
+    /// belong in one migration.
     /// </summary>
     public string? CancellationReason { get; set; }
 
