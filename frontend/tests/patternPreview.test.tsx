@@ -98,10 +98,9 @@ function usedByMentorship(overrides: Pattern['overrides'] = []): Pattern {
 }
 
 /**
- * A promise whose settlement the test controls, for putting a write genuinely
- * in flight rather than merely mocking its eventual answer. `mockResolvedValue`
- * settles before the test can act in between — this is what lets a click land
- * while the request before it is still unanswered.
+ * A promise whose settlement the test controls, for putting a write genuinely in
+ * flight rather than merely mocking its eventual answer: `mockResolvedValue`
+ * settles before the test can act in between.
  */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void
@@ -143,8 +142,8 @@ afterEach(() => {
   cleanup()
 })
 
-// August 2026: the 23rd is a Sunday, which the weekly rules leave closed, so
-// nothing but an exception can put hours on it.
+// The 23rd is a Sunday, left closed by the weekly rules, so only an exception
+// can put hours on it.
 const A_SUNDAY_LABEL = '23 August'
 const OWN_HOURS = { date: A_SUNDAY, windows: [{ startMinute: NINE_AM, endMinute: NOON }] }
 
@@ -225,12 +224,9 @@ test('picking Own hours writes nothing until Save this date', async () => {
 })
 
 /**
- * Manual activation, checked at the one point it matters: moving focus across
- * the group must never itself be a write. The APG default moves focus and
- * selects together, which here would mean an arrow key fires a save at a
- * pattern links stand on — this is the assertion that would catch a
- * regression back to that default, so it is explicit rather than implied by
- * the tests that check what a deliberate pick does.
+ * Manual activation, at the one point it matters: moving focus across the group
+ * must never itself be a write. The APG default moves focus and selects together,
+ * which here would mean an arrow key fires a save at a pattern links stand on.
  */
 test('arrow key moves focus between options and writes nothing', () => {
   render(<PatternPreview pattern={usedByMentorship()} />)
@@ -321,13 +317,11 @@ test('only the selected option is a tab stop', () => {
 })
 
 /**
- * The race: Blocked is picked and its write left hanging, then Own hours is
- * picked before that write lands. `editingOwnHours` has no write of its own
- * to guard it, so without the fix this is exactly the sequence that let it
- * win — the control would show rows for a date the server had not yet agreed
- * was anything but Blocked. `mockResolvedValue` cannot reach this sequence at
- * all, because it settles before a second click has anywhere to land; the
- * deferred promise is what keeps the first write genuinely open.
+ * The race: Blocked is picked and its write left hanging, then Own hours is picked
+ * before that write lands. `editingOwnHours` has no write of its own to guard it,
+ * so without the fix it won — the control showing rows for a date the server had
+ * not yet agreed was anything but Blocked. `mockResolvedValue` cannot reach the
+ * sequence at all: it settles before a second click has anywhere to land.
  */
 test('a write in flight blocks the other picks, and the control agrees with the data once it lands', async () => {
   const blocked = { date: A_SUNDAY, windows: [] }
@@ -338,10 +332,9 @@ test('a write in flight blocks the other picks, and the control agrees with the 
   fireEvent.click(day(A_SUNDAY_LABEL))
   fireEvent.click(screen.getByRole('radio', { name: 'Blocked' }))
 
-  // The write has fired and is still unanswered — the control has not yet
-  // heard back, so it still reads Weekly, the state it was in before the
-  // click. Own hours is picked through both entry points a click or a
-  // keystroke could reach it by.
+  // The write has fired and is still unanswered, so the control still reads
+  // Weekly, the state it was in before the click. Own hours is picked through
+  // both entry points, click and keystroke.
   const ownHours = screen.getByRole('radio', { name: 'Own hours' })
   expect(ownHours.hasAttribute('disabled')).toBe(true)
   fireEvent.click(ownHours)
@@ -372,12 +365,11 @@ test('a write in flight blocks the other picks, and the control agrees with the 
 })
 
 /**
- * The ordinary failure this branch had no test for: the server refuses, or
- * the network drops, and the pick that caused it never happened. `write`'s
- * own catch is what this pins — `setFailure` for `Failure` to surface,
- * `setSaving(false)` so the control is not left disabled over a write that
- * is no longer in flight, and `overrides` untouched, so the control settles
- * back on what the data actually says rather than on what was asked for.
+ * The ordinary failure this branch had no test for: the server refuses, or the
+ * network drops, and the pick that caused it never happened. `write`'s own catch
+ * is what this pins — `setFailure` for `Failure` to surface, `setSaving(false)` so
+ * the control is not left disabled over a write no longer in flight, and
+ * `overrides` untouched, so the control settles back on what the data says.
  */
 test('a rejected write surfaces the failure and leaves the control usable', async () => {
   const said = 'The date could not be blocked.'
@@ -425,11 +417,10 @@ test('a date with its own hours is readable without being changed', () => {
 })
 
 /**
- * The reported defect, at the surface the operator met it on: 6 August was
- * blocked from this grid on the 15th, and no click on a day that has already
- * happened can change what any invitee was offered. Today stays live — the rest
- * of it is still ahead, and closing it would take a working day away to fix an
- * untidiness in the past.
+ * The reported defect, at the surface the operator met it on: 6 August was blocked
+ * from this grid on the 15th, and no click on a day that has already happened can
+ * change what any invitee was offered. Today stays live — the rest of it is still
+ * ahead, and closing it would take a working day away for nothing.
  */
 test('a date before today writes nothing, and today is still live', async () => {
   vi.mocked(savePatternOverride).mockResolvedValue(weekdays)
@@ -516,12 +507,9 @@ test("a date's hours open on the week's, so moving one end is enough", async () 
 })
 
 /**
- * The feature, and the fact that it is ONE request.
- *
- * The endpoint replaces a date's windows entire, so a morning sent and then an
- * afternoon sent would leave the date offering the morning alone in between —
- * live, on a pattern links stand on. The draft is what makes the two one act,
- * and the press is what sends it.
+ * The feature, and the fact that it is ONE request. The endpoint replaces a date's
+ * windows entire, so a morning sent and then an afternoon sent would leave the
+ * date offering the morning alone in between — live, on a pattern links stand on.
  */
 test('a date can offer a morning and an afternoon, and it saves in one request', async () => {
   const morning = { date: A_SUNDAY, windows: [{ startMinute: NINE_AM, endMinute: NOON }] }
@@ -623,10 +611,10 @@ test('a times read that fails says so rather than drawing an empty month', async
 })
 
 /**
- * Every class this pane renders has to be one the stylesheet already has. A name
- * that exists only in the markup styles nothing, and it fails silently — at a
- * width no unit test can see. Rendered with a link and both kinds of override,
- * so the picker and the exception list are in the markup being checked.
+ * Every class this pane renders has to be one the stylesheet already has; a name
+ * that exists only in the markup styles nothing, and fails silently at a width no
+ * unit test can see. Rendered with a link and both kinds of override, so the
+ * picker and the exception list are in the markup being checked.
  */
 test('every class the preview renders exists in kairos.css', async () => {
   const css = readFileSync(stylesheet, 'utf8')
@@ -649,11 +637,10 @@ test('every class the preview renders exists in kairos.css', async () => {
 })
 
 /**
- * The preview's own reading of the week, checked against the one the pane draws
- * a link's times from. Two implementations that must not drift: this one says
- * which days the pattern opens, the server says which of them a link can
- * actually be booked on, and the second is a subset of the first — never a day
- * the pattern never opened.
+ * The preview's own reading of the week, checked against the one the pane draws a
+ * link's times from. Two implementations that must not drift: this one says which
+ * days the pattern opens, the server says which of them a link can be booked on,
+ * and the second is a subset of the first — never a day the pattern never opened.
  */
 test('the days a link offers times on are days the pattern opens', async () => {
   vi.mocked(getSlots).mockResolvedValue([
@@ -722,11 +709,10 @@ test('the times picker goes when the last link standing on the pattern does', as
 })
 
 /**
- * The other half of finding 11, and the half clearing the links alone cannot
- * show. With `links` emptied `chosen` resolves to nothing whether or not `slug`
- * was reset, so nothing on screen tells the two apart — until the pattern gains
- * a link again and the picker comes back open on a selection that no longer
- * exists, fetching the slots of a link the operator never picked twice.
+ * The other half of finding 11, the half clearing the links alone cannot show.
+ * With `links` emptied `chosen` resolves to nothing whether or not `slug` was
+ * reset, so nothing on screen tells the two apart — until the pattern gains a link
+ * again and the picker comes back open on a selection that no longer exists.
  */
 test('a pattern that gains a link again opens the picker on Days only', async () => {
   vi.mocked(getSlots).mockResolvedValue([])

@@ -20,10 +20,9 @@ const ADMIN_BASE = '/admin'
 const SIGN_IN_PATH = '/sign-in'
 const FORBIDDEN = 403
 
-// The code the admin policy puts in the body of its refusal. Spelled here the
-// way the server spells it in Kairos.Api/Security/AdminAuthorization.cs — the
-// two are one contract, and a test that generated it from the source could not
-// notice either side changing it.
+// The code the admin policy puts in the body of its refusal, spelled here the way
+// Kairos.Api/Security/AdminAuthorization.cs spells it. The two are one contract,
+// and a test that generated it from the source could not notice either changing.
 const NOT_AN_OPERATOR = 'not_an_operator'
 
 const HEADING = 'This account is not an operator'
@@ -59,10 +58,10 @@ beforeEach(() => {
 afterEach(cleanup)
 
 /**
- * The screen the admin boundary made reachable. Before it, an account the
- * identity provider authenticated and Kairos does not admit was impossible; now
- * it is the ordinary state of anyone else with an account at the provider, and
- * without this it read as a server fault.
+ * The screen the admin boundary made reachable. An account the identity provider
+ * authenticated and Kairos does not admit was impossible before it; now it is the
+ * ordinary state of anyone else with an account there, and without this screen it
+ * read as a server fault.
  */
 test('an account the boundary refuses gets its own screen, and no chrome around it', async () => {
   const container = await mount('/admin/links', (_path, fail) =>

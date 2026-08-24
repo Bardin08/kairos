@@ -28,11 +28,9 @@ const google: Integration = {
 }
 
 /**
- * A provider that does not exist and never will.
- *
- * It is the point of the first test: the page has to render whatever the array
- * holds. Anything that made this row fail to appear would be a vendor name
- * baked into the frontend, which is what Task 4's list endpoint exists to
+ * A provider that does not exist and never will. The page has to render whatever
+ * the array holds, and anything that made this row fail to appear would be a
+ * vendor name baked into the frontend — what Task 4's list endpoint exists to
  * prevent.
  */
 const invented: Integration = {
@@ -179,10 +177,9 @@ test('offers the way back to Settings and carries no invitee footer', async () =
 })
 
 // Breaks if a credential this deployment cannot decrypt goes back to being a
-// sentence with nothing to press. Reconnecting is the fix, so the row that
-// reports the fault has to carry the button that performs it — and it has to
-// carry it even where the deployment holds no client credentials, because that
-// is exactly the instance the operator is on.
+// sentence with nothing to press. Reconnecting is the fix, so the row reporting
+// the fault carries the button that performs it — even where the deployment holds
+// no client credentials, because that is exactly the instance the operator is on.
 test('a credential that will not decrypt offers the reconnect it asks for', async () => {
   vi.mocked(listIntegrations).mockResolvedValue([
     {
