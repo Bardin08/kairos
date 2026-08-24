@@ -40,19 +40,14 @@ afterEach(() => {
 
 /**
  * The one assertion in this suite that reads what actually goes on the wire.
- *
- * When a date stopped holding one window and started holding a set, this module
- * kept sending `{ startMinute, endMinute }` and the server answered 400 to every
- * save — with `tsc`, eslint and the whole of vitest green, because the body
- * leaves through `JSON.stringify` and the answer comes back into a hand-written
- * type, so nothing between the two ever compared them to the contract. Pinning
- * the body is the cheap half of that: it is the shape a backend change breaks,
- * and it breaks here rather than in the operator's browser.
- *
- * Both meanings of the route are pinned, because they differ only in the body:
- * windows in the list are the hours the date offers, and an empty list blocks
- * it. Nothing about the RESPONSE is pinned — it is parsed by assertion and not
- * by validation, so a test of it would only be asserting its own mock.
+ * This module kept sending `{ startMinute, endMinute }` after a date stopped
+ * holding one window and started holding a set: the server answered 400 to every
+ * save while `tsc`, eslint and vitest all stayed green, because the body leaves
+ * through `JSON.stringify` and nothing ever compared it to the contract. Both
+ * meanings of the route are pinned since they differ only in the body — a list of
+ * windows is the hours the date offers, an empty list blocks it. The response is
+ * not pinned: it is parsed by assertion rather than validation, so a test of it
+ * would only assert its own mock.
  */
 test('a date override goes out as its whole set of windows', async () => {
   const hours = stubFetch()
