@@ -20,11 +20,10 @@ public sealed record LinkResponse(
     string TimeZone);
 
 /// <summary>
-/// The read side of links. There is deliberately no write here: Part A seeds links by SQL, so
-/// the rule that a link may never be left with zero durations — which spans two tables and
-/// therefore cannot be a SQLite CHECK — has no endpoint to live in yet. It belongs to Part C's
-/// admin write, next to the create and update that can break it. Until then
-/// <see cref="Availability.SlotQuery"/> refuses such a link with
+/// The read side of links; the write is <see cref="Admin.LinksAdminEndpoints"/>. The rule that a
+/// link may never be left with zero durations spans two tables and therefore cannot be a SQLite
+/// CHECK, so <c>RequireDurations</c> enforces it there, on the create and update that can break
+/// it. <see cref="Availability.SlotQuery"/> still refuses such a link with
 /// <c>link_has_no_durations</c> rather than letting the public page fall over.
 /// </summary>
 public static class LinksEndpoints
