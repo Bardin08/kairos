@@ -26,9 +26,7 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 const WARSAW = 'Europe/Warsaw'
 const UTC = 'UTC'
 
-// The attribute the invalid-state CSS in kairos.css selects on. Named once so
-// the test below and its selector stay in sync rather than repeating the
-// literal.
+// The attribute the invalid-state CSS in kairos.css selects on.
 const INVALID_ATTRIBUTE_SELECTOR = '[data-invalid="true"]'
 
 const SEEDED_HOLD_HOURS = 48
@@ -146,10 +144,9 @@ test('a start increment of zero is refused here rather than by the server', asyn
 })
 
 /**
- * The hold's floor, which is the start increment's floor for a different
- * reason: a zero-hour hold has lapsed before the invitee's mail is composed,
- * so the proposal would hold nothing at all. The backend refuses it; this is
- * the same rule said early enough that nothing is submitted to learn it.
+ * The hold's floor, which is the start increment's floor for a different reason:
+ * a zero-hour hold has lapsed before the invitee's mail is composed, so the
+ * proposal would hold nothing at all.
  */
 test('a proposal hold of zero hours is refused here rather than by the server', async () => {
   render(<Settings />)
@@ -164,13 +161,11 @@ test('a proposal hold of zero hours is refused here rather than by the server', 
 })
 
 /**
- * Task 7 moved `data-invalid` off `.field` and onto the `.field-row` that
- * wraps each global — a restructure a `kairos.css` selector could silently
- * stop matching after (see `stylesheet.test.ts`), and separately one this
- * markup could silently stop producing after: the attribute landing on the
- * wrong wrapper, or the input ending up outside it. This pins the DOM shape
- * the CSS selector depends on, not the resolved colour — jsdom does not
- * resolve `var()` in computed style, so asserting on that would pin nothing.
+ * Task 7 moved `data-invalid` off `.field` and onto the `.field-row` that wraps
+ * each global — a restructure this markup could silently stop producing: the
+ * attribute landing on the wrong wrapper, or the input ending up outside it. The
+ * CSS half is `stylesheet.test.ts`. What is pinned here is the DOM shape, not the
+ * resolved colour: jsdom does not resolve `var()` in computed style.
  */
 test('an invalid limit puts data-invalid on the row that contains its input', async () => {
   render(<Settings />)
@@ -185,12 +180,10 @@ test('an invalid limit puts data-invalid on the row that contains its input', as
 })
 
 /**
- * Three states, not two.
- *
- * `system` is the default and the one most people should stay on, and it is
- * exactly the state a two-state icon toggle cannot express — so what is pinned
- * is that light and dark override the device in both directions AND that there
- * is still a way back to letting the device decide.
+ * Three states, not two. `system` is the default and exactly the state a
+ * two-state icon toggle cannot express, so what is pinned is that light and dark
+ * override the device in both directions AND that there is still a way back to
+ * letting the device decide.
  */
 test('the theme control forces light and dark, and hands control back to the system', async () => {
   render(<Settings />)
@@ -224,13 +217,11 @@ test('the session can be ended, through a plain anchor and not a router link', a
 })
 
 /**
- * A refused read is no longer this page's problem, and that is the change.
- *
- * A 401 latches session.ts on its way through `adminRequest`, AdminShell
- * replaces itself with the locked screen, and this page is unmounted before it
- * could draw a heading, a Save button or a banner apologising for either. It is
- * pinned in tests/locked.test.tsx, where the mechanism lives; what stays here is
- * that every OTHER failure is still the server's own sentence, said in place.
+ * A refused read is no longer this page's problem. A 401 latches session.ts on
+ * its way through `adminRequest` and AdminShell replaces itself with the locked
+ * screen, so this page is unmounted before it could draw a heading, a Save button
+ * or a banner apologising for either — pinned in tests/locked.test.tsx, where the
+ * mechanism lives. What stays here is every OTHER failure, said in place.
  */
 test('a failure the shell cannot fix is reported in place, in the server words', async () => {
   vi.mocked(getSettings).mockRejectedValue(new ApiError(503, null, 'The database is busy.'))
@@ -248,9 +239,8 @@ test('every class this page renders exists in kairos.css', async () => {
     [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),
   )
 
-  // A class this markup invents is a class that styles nothing, and the failure
-  // it produces is silent: a control simply stops keeping its shape, in a
-  // viewport no unit test can see.
+  // A class this markup invents styles nothing, and fails silently: a control
+  // stops keeping its shape, in a viewport no unit test can see.
   const missing = [...used].filter((name) => !css.includes(`.${name}`))
   expect(missing).toEqual([])
 })
