@@ -38,9 +38,9 @@ public class OperatorMailerTests
     private const int DurationMinutes = 25;
 
     /// <summary>
-    /// Reserved by IANA and bindable by nothing on any platform, so a connection to it is refused
-    /// at once rather than after a timeout — the same handle <see cref="BookingMailerTests"/> uses
-    /// to reach the failure path without a relay and without a mock.
+    /// Reserved by IANA and privileged, so nothing a test run starts is listening and the
+    /// connection is refused at once rather than after a timeout — the same handle
+    /// <see cref="BookingMailerTests"/> uses to reach the failure path without a relay or a mock.
     /// </summary>
     private const int PortNothingListensOn = 1;
 

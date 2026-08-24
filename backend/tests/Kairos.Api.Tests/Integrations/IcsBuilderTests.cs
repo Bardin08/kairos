@@ -13,7 +13,7 @@ public class IcsBuilderTests
     private static readonly Guid BookingId = Guid.Parse("0199a1b2-c3d4-7e5f-8091-a2b3c4d5e6f7");
     private const int NonRoundDurationMinutes = 25;
 
-    /// <summary>RFC 5545 §3.1 — the octet budget a content line may not exceed.</summary>
+    /// <summary>RFC 5545 §3.1 — a content line SHOULD NOT exceed this many octets, line break excluded.</summary>
     private const int MaxLineOctets = 75;
 
     private const string LineBreak = "\r\n";
@@ -74,12 +74,12 @@ public class IcsBuilderTests
     [Fact]
     public void Build_Cancellation_MarksTheEventCancelled() =>
         // METHOD:CANCEL labels the message; STATUS:CANCELLED is what takes the event
-        // out of the calendar. Without it Outlook keeps the original booking.
+        // out of the calendar — RFC 5546 §3.2.5 requires it to cancel the whole event.
         Build(2, IcsMethod.Cancel).ShouldContain("STATUS:CANCELLED");
 
     [Fact]
     public void Build_Always_StampsTheCurrentTimeInUtc() =>
-        // A REQUEST without DTSTAMP is rejected outright by some clients.
+        // RFC 5545 §3.6.1 makes DTSTAMP REQUIRED in every VEVENT.
         new IcsBuilder(new FixedClock(Instant.FromUtc(2026, 8, 15, 10, 15, 30)))
             .Build(Request())
             .ShouldContain("DTSTAMP:20260815T101530Z");

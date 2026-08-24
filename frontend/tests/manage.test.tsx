@@ -184,10 +184,10 @@ test('a refused reschedule reports beside the times, not as a banner above them'
 
 /**
  * The phase-1 condition that did not hold: the date rendered inside the button's
- * own label, in the proportional face, where `Book.tsx:573` puts the same date
- * in a `numeric` span beside its button. Figures are the one place typography is
- * load-bearing on this product — and a button whose width follows the date is
- * the visible half of the same mistake.
+ * own label, in the proportional face, where the `desktop-cta` block of `Book.tsx`
+ * puts the same date in a `numeric` span beside its button. Figures are the one
+ * place typography is load-bearing on this product — and a button whose width
+ * follows the date is the visible half of the same mistake.
  */
 test('the reschedule CTA sets its date in the numeric face, beside the button', async () => {
   vi.mocked(getBooking).mockResolvedValue(confirmed)
