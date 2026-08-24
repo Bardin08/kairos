@@ -8,11 +8,10 @@ import { ApiError, getSlots } from '../src/lib/api'
 import { cancelMeeting, listMeetings } from '../src/routes/admin/adminMeetings'
 import type { Meeting, MeetingProposal, Meetings as List } from '../src/routes/admin/adminMeetings'
 
-// The propose panel reads the PUBLIC slots endpoint. Mocked here so opening the
-// panel from a row makes no fetch, and so the argument the row hands it can be
-// asserted — that argument is the row's own slug, and nothing else on the page
-// would notice it being wrong. ApiError and asApiError stay real: the page
-// reads a failure through `asApiError`, which branches on `instanceof`.
+// The propose panel reads the PUBLIC slots endpoint. Mocked so opening the panel
+// makes no fetch, and so the argument the row hands it can be asserted — the
+// row's own slug, which nothing else on the page would notice being wrong.
+// ApiError and asApiError stay real: `asApiError` branches on `instanceof`.
 vi.mock('../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/api')>()),
   getSlots: vi.fn(),
@@ -181,10 +180,9 @@ test('every cell keeps its column name, which is what survives below 760px', asy
   const cells = [...row.querySelectorAll('td')].map((cell) => cell.getAttribute('data-column'))
 
   // Below 760px kairos.css hides the heading row and reprints `data-column` in
-  // front of every value. A cell without the attribute does not look wrong on a
-  // laptop and is an orphaned value on a phone, which is why this asserts the
-  // attribute rather than the appearance. The identity column carries it empty
-  // on purpose — that is the selector that lays the row's title out as a title.
+  // front of every value, so a cell without the attribute looks fine on a laptop
+  // and is an orphaned value on a phone. The identity column carries it empty on
+  // purpose: that is the selector that lays the row's title out as a title.
   expect(cells).toHaveLength(headings.length)
   expect(cells.every((name) => name !== null)).toBe(true)
   expect(cells.filter((name) => name === '')).toHaveLength(1)
@@ -199,11 +197,10 @@ test('the day, the month and the year are all inside the one date chip', async (
   const row = await rowFor(synced)
   const chip = row.querySelector('.record-date')
 
-  // Not a pixel assertion — jsdom computes nothing — but the structure the
-  // pixels came out of. A year rendered as a SIBLING of the chip is a
-  // full-width block that takes the cell's own start alignment while the two
-  // lines above it are centred in the chip's 54px, which is exactly the
-  // misalignment the operator reported. Inside it, one column, one centre.
+  // Not a pixel assertion — jsdom computes nothing — but the structure the pixels
+  // came out of. A year rendered as a SIBLING of the chip is a full-width block
+  // taking the cell's own start alignment while the two lines above it are centred
+  // in the chip's 54px, which is exactly the misalignment the operator reported.
   expect(chip?.querySelector('.record-day')?.textContent).toBe('07')
   expect(chip?.querySelector('.record-month')?.textContent).toBe('Sept')
   expect(chip?.querySelector('.record-meta')?.textContent).toBe('2026')
@@ -227,11 +224,10 @@ test('cancelling a row redraws that row from the answer rather than reloading th
   fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }))
   fireEvent.click(within(row).getByRole('button', { name: 'Call it off' }))
 
-  // The write answers with the row as it now stands, in the shape the list
-  // draws — which is what the server's single-row projection exists for. A page
-  // that threw it away and refetched would ask for every meeting to learn one
-  // fact it already had, and would redraw the whole table under an operator who
-  // changed one line of it.
+  // The write answers with the row as it now stands, in the shape the list draws
+  // — what the server's single-row projection exists for. A page that refetched
+  // would ask for every meeting to learn one fact it already had, and redraw the
+  // whole table under an operator who changed one line of it.
   expect(await within(row).findByText('Cancelled')).toBeDefined()
   expect(within(row).queryByRole('button')).toBeNull()
 
@@ -273,9 +269,9 @@ test('every class the page renders exists in kairos.css', async () => {
     [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),
   )
 
-  // The task adds no CSS, so a class this markup invents is a class that styles
-  // nothing — and the failure is silent: a cell simply stops keeping its column
-  // name, in a viewport no unit test can see.
+  // The task adds no CSS, so a class this markup invents styles nothing, and
+  // fails silently: a cell stops keeping its column name, in a viewport no unit
+  // test can see.
   expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
 })
 
@@ -294,12 +290,10 @@ test('the page reads the organizer zone back and settles rather than refetching 
 /**
  * The second page asserting the same thing, and the reason there is a shared
  * `Failure` at all: four pages each deciding what a failure reads like is four
- * places for the fifth to forget.
- *
- * A 401 is deliberately not this test. It latches session.ts inside
- * `adminRequest` and AdminShell replaces itself with the locked screen, so this
- * page is unmounted rather than left drawing a table under an apology — pinned
- * in tests/locked.test.tsx, where that mechanism lives.
+ * places for the fifth to forget. A 401 is deliberately not this test — it latches
+ * session.ts inside `adminRequest` and AdminShell replaces itself with the locked
+ * screen, so this page is unmounted rather than left drawing a table under an
+ * apology, pinned in tests/locked.test.tsx.
  */
 test('a failure the shell cannot fix is reported in place, and no table under it', async () => {
   vi.mocked(listMeetings).mockRejectedValue(new ApiError(503, null, 'The database is busy.'))
@@ -377,11 +371,10 @@ const proposed: Meeting = {
   proposal: { ...closedProposal, start: SUGGESTED_AT_ONE, state: 'open' },
 }
 
-// A third zone, used by the hold test alone. ORGANIZER_ZONE above is Warsaw,
-// which is also the zone of the machine this suite was written on — so an
-// assertion against it cannot tell the stored setting apart from the browser's
-// guess, which is exactly what that test is about. It still cannot on a runner
-// sitting in New York; there is no zone that is nobody's.
+// A third zone, used by the hold test alone. ORGANIZER_ZONE above is Warsaw, also
+// the zone of the machine this suite was written on, so an assertion against it
+// cannot tell the stored setting apart from the browser's guess. It still cannot
+// on a runner sitting in New York; there is no zone that is nobody's.
 const REMOTE_ZONE = 'America/New_York'
 const PROPOSED_REMOTE_TIME = '09:00'
 const PROPOSED_WARSAW_TIME = '15:00'

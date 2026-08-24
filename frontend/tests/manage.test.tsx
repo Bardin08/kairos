@@ -211,10 +211,9 @@ test('the reschedule CTA sets its date in the numeric face, beside the button', 
   expect(when?.textContent).toContain('13:00')
 
   // Named by the verb, described by the date — otherwise the control announces
-  // "Move" and never says where to. Both bars, because both render a button
-  // with that label: the phone one is display:none beside this one at this
-  // width, never absent, and an accessible name is not a thing a media query
-  // gets to differ on.
+  // "Move" and never says where to. Both bars, because both render a button with
+  // that label: the phone one is display:none beside this one at this width, never
+  // absent, and an accessible name is not a thing a media query gets to differ on.
   for (const [bar, date] of [
     ['.desktop-cta', '.desktop-cta .numeric'],
     ['.actionbar', '.actionbar-when'],
