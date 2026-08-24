@@ -27,9 +27,9 @@ public class OperatorMailerTests
     private const string LinkName = "Consulting call";
 
     /// <summary>
-    /// The invitee's zone, and deliberately not the organizer's: every time in this message is
-    /// rendered in the zone of whoever it is addressed to, and this mail is addressed to the
-    /// organizer. A composer that reached for the booker's zone would render 09:00 and 13:00.
+    /// The invitee's zone, and deliberately not the one this mail renders in: every time is shown
+    /// in the zone of whoever it is addressed to. A composer reaching for the booker's would
+    /// render 09:00 and 13:00.
     /// </summary>
     private const string BookerZone = "Europe/Warsaw";
 
@@ -66,9 +66,8 @@ public class OperatorMailerTests
     private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 7, 17, 0);
 
     /// <summary>
-    /// To the organizer, not to the invitee, and with no calendar part: nothing about a suggestion
-    /// nobody acted on changes a calendar. The address is the one Kairos sends from, which is the
-    /// only operator mailbox it has.
+    /// Nothing about a suggestion nobody acted on changes a calendar, hence no calendar part. The
+    /// address is the one Kairos sends from, the only operator mailbox it has.
     /// </summary>
     [Fact]
     public void Compose_ADeclinedProposal_GoesToTheSendingAddressWithNoCalendarPart()
@@ -81,8 +80,8 @@ public class OperatorMailerTests
     }
 
     /// <summary>
-    /// The invitee said no, and the operator is handed the one screen that lets them suggest
-    /// another hour. No token anywhere in it — the link the invitee held is spent.
+    /// The operator is handed the one screen that lets them suggest another hour, and no token
+    /// anywhere in it — the link the invitee held is spent.
     /// </summary>
     [Fact]
     public void Compose_ADeclinedProposal_SaysSoAndPointsAtTheWorkbench()
@@ -94,9 +93,8 @@ public class OperatorMailerTests
     }
 
     /// <summary>
-    /// The difference the enum exists for. Nobody answered is not the same news as somebody said
-    /// no, and both end with the sentence that makes the mail actionable rather than alarming:
-    /// the meeting has not moved.
+    /// The difference the enum exists for: nobody answered is not the same news as somebody said
+    /// no. Both end on the sentence that makes the mail actionable — the meeting has not moved.
     /// </summary>
     [Fact]
     public void Compose_AnExpiredProposal_SaysNobodyAnsweredAndTheMeetingStandsWhereItWas()
@@ -109,9 +107,8 @@ public class OperatorMailerTests
 
     /// <summary>
     /// The one sentence in this mail that can go stale under it. A cancel closes an OPEN hold, so
-    /// a row that is already Expired survives its meeting being called off — and the next tick
-    /// picking that row up would otherwise mail the operator that a meeting they cancelled stays
-    /// where it is.
+    /// a row already Expired survives its meeting being called off — and the next tick to pick it
+    /// up would otherwise tell the operator a meeting they cancelled stays where it is.
     /// </summary>
     [Fact]
     public void Compose_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
@@ -123,10 +120,9 @@ public class OperatorMailerTests
     }
 
     /// <summary>
-    /// The organizer's zone, not the booker's, because the organizer is who this is addressed to
-    /// — the same rule the invitee's mail follows in the other direction. Both instants are
-    /// asserted: the hour that was suggested and the hour the meeting is still at are read off
-    /// the same line of a calendar, and one of them rendered in a stranger's zone is a missed call.
+    /// Both instants are asserted, because the hour that was suggested and the hour the meeting is
+    /// still at are read off the same line of a calendar, and one of them rendered in a stranger's
+    /// zone is a missed call.
     /// </summary>
     [Fact]
     public void Compose_Always_RendersBothTimesInTheOrganizersOwnZone()
@@ -229,9 +225,7 @@ public class OperatorMailerTests
         };
     }
 
-    /// <summary>
-    /// A proposal whose token is never looked at: this mailer is the one that carries none.
-    /// </summary>
+    /// <summary>A proposal whose token is never read: this mailer is the one that carries none.</summary>
     private static BookingProposal Proposal() =>
         new()
         {

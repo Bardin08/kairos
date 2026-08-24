@@ -22,18 +22,15 @@ namespace Kairos.Api.Tests.Features;
 /// the two writes happen in — which is the whole of its failure story.
 /// </summary>
 /// <remarks>
-/// The work method is driven directly rather than through the timer. What the loop adds is a
-/// cadence, and a test that started the service and waited for a sweep would be asserting on a
-/// clock — the same test written twice a minute apart, one of which is flaky. The clock is fixed
-/// for the same reason, and because the expiry is a half-open bound whose edge is only reachable
-/// with a clock a test can name.
+/// The work method is driven directly rather than through the timer: a test that waited for a
+/// sweep would be asserting on a clock. The clock is fixed for the same reason, and because the
+/// expiry is a half-open bound whose edge is only reachable with a clock a test can name.
 ///
-/// The relay is substituted at the socket, which needs a different argument from the one
-/// <see cref="EmailSender"/>'s own remarks make: that carve-out is for a caller that acts on the
-/// answer, and this one discards it. What is being observed here is not the answer but the calls —
-/// how many were made, and what was on disk while each was in flight — and neither is visible from
-/// anywhere else. Everything above the socket is real: the sweeper resolves its own scope, its own
-/// context and its own mailer out of a container built the way the application builds one.
+/// The relay is substituted at the socket, and not on the argument <see cref="EmailSender"/>'s own
+/// remarks make: that carve-out is for a caller that acts on the answer, and this one discards it.
+/// What is observed here is the calls — how many were made, and what was on disk while each was in
+/// flight. Everything above the socket is real, out of a container built the way the application
+/// builds one.
 /// </remarks>
 public class ProposalSweeperTests
 {
@@ -119,11 +116,9 @@ public class ProposalSweeperTests
     }
 
     /// <summary>
-    /// The edge, which is where a half-open bound goes wrong. A hold that expires at the instant
-    /// this tick reads the clock has lapsed, because that is what every other reader of
-    /// <see cref="BookingProposal.ExpiresAt"/> in this feature decides — and a sweeper drawing the
-    /// line one second later than the conflict readers would leave a slot free to book and a
-    /// suggestion still open over it.
+    /// The edge, which is where a half-open bound goes wrong. A sweeper drawing the line one second
+    /// later than the other readers of <see cref="BookingProposal.ExpiresAt"/> would leave a slot
+    /// free to book and a suggestion still open over it.
     /// </summary>
     [Fact]
     public async Task Sweep_AHoldExpiringOnThisVeryTick_HasLapsed()
@@ -162,9 +157,8 @@ public class ProposalSweeperTests
     /// this notice is deliberately biased in.
     /// </summary>
     /// <remarks>
-    /// Read through a second connection, so what is asserted is what is committed at the moment of
-    /// the send rather than what the sweeper's own change tracker is holding. Both halves matter:
-    /// Expired says the first save has landed, and a null marker says the second has not.
+    /// Read through a second connection, and both halves of the row matter: Expired says the first
+    /// save has landed, and a null marker says the second has not.
     /// </remarks>
     [Fact]
     public async Task Sweep_Always_SendsBeforeItMarksTheRowNotified()
@@ -201,11 +195,10 @@ public class ProposalSweeperTests
     }
 
     /// <summary>
-    /// The seam between two pull requests, driven through the real writer rather than by seeding
-    /// the state it leaves behind. The propose route closes a lapsed hold itself so the operator
-    /// can suggest again without waiting for a tick, and leaves the marker null on purpose — the
-    /// notice is handed here rather than swallowed. Nothing else pins that pairing, and it spans
-    /// two files that were written a pull request apart.
+    /// The seam between two pull requests, nothing else pins it, and it is driven through the real
+    /// writer rather than by seeding the state it leaves behind. The propose route closes a lapsed
+    /// hold itself so the operator can suggest again without waiting for a tick, and leaves the
+    /// marker null on purpose — the notice is handed here rather than swallowed.
     /// </summary>
     [Fact]
     public async Task Sweep_AHoldTheProposeRouteClosedItself_IsStillAnnounced()
@@ -254,9 +247,8 @@ public class ProposalSweeperTests
     }
 
     /// <summary>
-    /// One bad row must not strand the rest of the sweep, and must not be recorded as told. The
-    /// relay refuses the first message and takes the second: both holds close, the row that got
-    /// through is marked, the refused one is not — and the next tick finds it and retries it.
+    /// One bad row must not strand the rest of the sweep, and must not be recorded as told: both
+    /// holds close, only the one that got through is marked, and the next tick retries the other.
     /// </summary>
     /// <remarks>
     /// The refusal is absorbed inside <see cref="OperatorMailer"/> — rule 14 — so the sweep never
