@@ -135,10 +135,8 @@ test('the address prefix shows the host and path, not just the slug, and drops t
   show()
 
   // The operator setting this is deciding what to paste into a chat, and they
-  // cannot judge `consulting` without the host and path in front of it. The
-  // scheme is left off the display — the browser's own address bar does the
-  // same — even though the Copy button still copies it in full; see the
-  // dedicated test for that below.
+  // cannot judge `consulting` without the host and path in front of it. The scheme
+  // is left off the display, the way the browser's own address bar leaves it off.
   expect(screen.getByText(`${window.location.host}/book/`)).toBeTruthy()
   expect(screen.queryByText(/http:\/\//)).toBeNull()
 })
@@ -188,9 +186,9 @@ test('the copied address keeps its scheme even though the display drops it', () 
 
   fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
 
-  // The display above shortens to host + path; what lands on the clipboard
-  // must still be the full, working absolute URL, scheme included, or a
-  // paste into a chat is a link nothing can follow.
+  // The display above shortens to host + path; what lands on the clipboard must
+  // still be the full absolute URL, scheme included, or a paste into a chat is a
+  // link nothing can follow.
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
     `${window.location.origin}/book/${LINK.slug}`,
   )

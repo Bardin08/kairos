@@ -33,15 +33,13 @@ const settings = {
 }
 
 /**
- * A fresh module graph per test, and the reason is session.ts's whole design:
- * the lock latches and is never released, because the way out of it is a full
- * browser navigation to the provider and back — a new document. Kept across
- * tests, the first 401 would lock every test after it.
+ * A fresh module graph per test: session.ts's lock latches and is never released,
+ * because the way out of it is a full browser navigation to the provider and
+ * back. Kept across tests, the first 401 would lock every test after it.
  *
- * `answer` is the whole server: it receives the path `request` was called with
- * and either resolves or rejects. The ApiError it rejects with comes from the
- * freshly imported module so it is the same class `asApiError` will test
- * against.
+ * `answer` is the whole server — it takes the path `request` was called with and
+ * either resolves or rejects. Its ApiError comes from the freshly imported
+ * module, so it is the same class `asApiError` will test against.
  */
 async function mount(
   path: string,
@@ -84,18 +82,15 @@ beforeEach(() => {
 afterEach(cleanup)
 
 /**
- * The bug this whole part exists for, from a real screenshot.
+ * The bug this whole part exists for, from a real screenshot. With an expired
+ * session /admin/availability rendered its heading, its pattern-name field, its
+ * New pattern button and "No patterns yet. A pattern is the weekly shape a link
+ * books against…" under a small banner. Every word of that empty state was a lie:
+ * the page was refused permission to ask rather than told there were none, and an
+ * operator with fifty of them read it as fifty gone.
  *
- * With an expired session /admin/availability rendered its heading, its
- * pattern-name field, its New pattern button and "No patterns yet. A pattern is
- * the weekly shape a link books against…" with a small banner above it. Every
- * word of that empty state was a lie: the page did not learn there were no
- * patterns, it was refused permission to ask, and an operator with fifty of them
- * read it as fifty gone.
- *
- * Absent from the DOM rather than hidden. A rail that is display:none is still
- * in the tab order of nothing and still in the document a screen reader walks,
- * and "hidden" is a rendering decision that a media query can undo.
+ * Absent from the DOM rather than hidden: a display:none rail is still in the
+ * document a screen reader walks, and hidden is a decision a media query undoes.
  */
 test('a refused read replaces the whole workbench, chrome and all', async () => {
   const container = await mount('/admin/availability', (path, fail) =>
@@ -120,12 +115,11 @@ test('a refused read replaces the whole workbench, chrome and all', async () => 
 })
 
 /**
- * The URL is deployment configuration, not a compile-time constant.
- *
- * One bundle is built and deployed everywhere, and an operator who wants the
- * browser sent through a portal or a provider's own page first sets
- * Authentication__SignInUrl and restarts. A default baked in here would make
- * that setting unreachable from the one screen that needs it.
+ * The URL is deployment configuration, not a compile-time constant. One bundle is
+ * built and deployed everywhere, and an operator who wants the browser sent
+ * through a portal or a provider's own page first sets Authentication__SignInUrl
+ * and restarts; a default baked in here would put that setting out of reach of
+ * the one screen that needs it.
  */
 test('the sign-in link is whatever the server said, not a constant in the bundle', async () => {
   const elsewhere = 'https://id.example.test/authorize/kairos'
@@ -142,12 +136,11 @@ test('the sign-in link is whatever the server said, not a constant in the bundle
 })
 
 /**
- * The guard is on the data layer, not on the shell's own read.
- *
- * Here the shell's settings call succeeds — the rail would have drawn — and it
- * is the Links page's own list call that is refused. Wired to the shell alone,
- * this is exactly the case that would have rendered a rail, a New link button
- * and an empty list, which is the other half of the screenshot.
+ * The guard is on the data layer, not on the shell's own read. Here the shell's
+ * settings call succeeds — the rail would have drawn — and the Links page's own
+ * list call is the one refused. Wired to the shell alone, this is the case that
+ * would have rendered a rail, a New link button and an empty list: the other half
+ * of the screenshot.
  */
 test('a page whose own call is refused locks the shell that mounted it', async () => {
   const container = await mount('/admin/links', (path, fail) => {
@@ -163,15 +156,14 @@ test('a page whose own call is refused locks the shell that mounted it', async (
 
 /**
  * The editor is a route of its own now, and a route of its own is an address
- * somebody can arrive at directly — from a bookmark, hours after the session
- * ran out. Its read goes through patterns.ts for exactly this: fetching on its
- * own it would draw a heading, a way back and two empty panes at an operator
- * who was never allowed to ask what the pattern is.
+ * somebody can arrive at directly — from a bookmark, hours after the session ran
+ * out. Its read goes through patterns.ts for exactly this: fetching on its own it
+ * would draw a heading, a way back and two empty panes at an operator who was
+ * never allowed to ask what the pattern is.
  */
 test('a pattern editor reached with no session shows the locked screen, not a frame', async () => {
-  // The shell's own settings read succeeds here, so the rail would have drawn:
-  // the only refused call is the editor's list read, which is the one that has
-  // to do the locking.
+  // The shell's settings read succeeds, so the rail would have drawn; the only
+  // refused call is the editor's list read, and it is the one that must lock.
   const container = await mount(PATTERN_PATH, (path, fail) => {
     if (path === SIGN_IN_PATH) return Promise.resolve({ signInUrl: '/admin/login' })
     if (path === '/admin/settings') return Promise.resolve(settings)

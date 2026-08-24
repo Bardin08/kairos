@@ -33,11 +33,10 @@ const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kai
 const TOKEN = 'a'.repeat(64)
 
 // The INVITEE's own — the zone the booking carries, the one the proposal mail
-// formatted against and the one the manage page for this booking renders. NOT
-// the organizer's, which is the whole point: this is the third surface an
-// invitee sees about one booking and all three have to say the same clock time.
-// Deliberately neither UTC nor the zone this machine is in, so every assertion
-// below is also proof the page renders what the API sent rather than a guess.
+// formatted against and the one the manage page renders. NOT the organizer's:
+// this is the third surface an invitee sees about one booking and all three have
+// to say the same clock time. Neither UTC nor the zone this machine is in, so
+// every assertion below is also proof the page renders what the API sent.
 const INVITEE_ZONE = 'Asia/Tokyo'
 
 // September, so Tokyo is +09:00 throughout. 11:00Z is 20:00 there and 14:00Z is
@@ -87,11 +86,10 @@ beforeEach(() => {
   vi.mocked(getProposal).mockResolvedValue(open)
 })
 
-// Cleared after the test rather than reset before it, which is what
-// meetingActions.test.tsx does and is not a stylistic choice: mockReset drops
-// the recorded results, and vitest reads a rejected result it no longer has a
-// record of being awaited as an unhandled rejection — so every test here that
-// exercises a failure would fail on the failure it is asserting.
+// Cleared after the test rather than reset before it, unlike
+// meetingActions.test.tsx: mockReset drops the recorded results, and vitest reads
+// a rejected result it no longer has a record of being awaited as an unhandled
+// rejection — so every failure test here would fail on the failure it asserts.
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -281,8 +279,8 @@ test('every class the page renders exists in kairos.css', async () => {
     [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),
   )
 
-  // This task adds no CSS, so a class this markup invents is a class that
-  // styles nothing — and the failure is silent: the card simply stops keeping
-  // its shape, in a viewport no unit test can see.
+  // This task adds no CSS, so a class this markup invents styles nothing, and
+  // fails silently: the card stops keeping its shape, in a viewport no unit
+  // test can see.
   expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
 })

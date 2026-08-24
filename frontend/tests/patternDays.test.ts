@@ -46,28 +46,25 @@ test('reads a blocked date as blocked, not as a day with no hours', () => {
 })
 
 /**
- * Breaks if a day is left out of the map. `MonthGrid` renders no attribute for
- * a day it has no state for, which is byte for byte what it renders when no
- * states are passed at all — so a forgotten day does not draw as wrong, it
- * draws as the booking page's default and says nothing about the pattern.
+ * Breaks if a day is left out of the map. `MonthGrid` renders no attribute for a
+ * day it has no state for — byte for byte what it renders when no states are
+ * passed at all, so a forgotten day draws as the default rather than as wrong.
  */
 test('supplies every day of the month, including the closed ones', () => {
   const states = patternDays({ month: MONTH, rules: onTuesdays, overrides: [], today: TODAY })
 
   expect(states.size).toBe(DAYS_IN_AUGUST)
-  // Both Sundays, and both still ahead of TODAY — a day the week never opens
-  // and a day already gone are different answers, and this test asks for the
-  // first one.
+  // Both Sundays, both still ahead of TODAY: a day the week never opens and a
+  // day already gone are different answers, and this asks for the first.
   expect(states.get('2026-08-16')).toBe('closed')
   expect(states.get('2026-08-30')).toBe('closed')
 })
 
 /**
- * The defect: a date that has already happened was as clickable as any other,
- * so a pattern collected blocks that could not change what anyone was offered.
- * Past outranks everything the week or an override says, and today is not past
- * — bookings later today are still ahead, and closing today would take a
- * working day away for nothing.
+ * The defect: a date that has already happened was as clickable as any other, so
+ * a pattern collected blocks that could not change what anyone was offered. Past
+ * outranks the week and any override; today is not past, because bookings later
+ * today are still ahead.
  */
 test('a date before today is past, and today itself is not', () => {
   const states = patternDays({

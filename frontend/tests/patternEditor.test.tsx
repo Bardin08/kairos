@@ -90,11 +90,9 @@ beforeEach(() => {
 afterEach(cleanup)
 
 /**
- * The pattern names the page, and the way back is a link rather than a button.
- *
- * The editor is a route now, so leaving it is a navigation: a link carries the
- * address, opens in a new tab, and survives the browser's own back button —
- * none of which an onClick handler does.
+ * The way back is a link rather than a button. The editor is a route now, so
+ * leaving it is a navigation: a link carries the address, opens in a new tab and
+ * survives the browser's own back button, none of which an onClick handler does.
  */
 test('shows the pattern name as the heading and a way back to the list', async () => {
   renderEditor()
@@ -104,11 +102,9 @@ test('shows the pattern name as the heading and a way back to the list', async (
 })
 
 /**
- * The server's own sentence, not one made up here.
- *
- * The read is the pattern list — there is no single-pattern endpoint — so the
- * failure that reaches this screen is whatever that list answered with, and it
- * is the only text that says what actually went wrong.
+ * The server's own sentence, not one made up here. The read is the pattern list —
+ * there is no single-pattern endpoint — so the failure that reaches this screen is
+ * whatever that list answered with, and the only text saying what went wrong.
  */
 test("reports the server's own words when the pattern will not load", async () => {
   const said = 'The patterns could not be read.'
@@ -120,11 +116,9 @@ test("reports the server's own words when the pattern will not load", async () =
 })
 
 /**
- * A typed, stale or deleted id, and none of them is a crash.
- *
- * The address is shareable now, so an id that matches nothing is an ordinary
- * arrival — a bookmark to a pattern deleted in another tab reaches exactly this
- * state, and it is not a failure to report as one.
+ * A typed, stale or deleted id, and none of them is a crash. The address is
+ * shareable now, so an id that matches nothing is an ordinary arrival — a bookmark
+ * to a pattern deleted in another tab reaches exactly this state.
  */
 test('an id that matches no pattern says so and keeps the way back', async () => {
   vi.mocked(listPatterns).mockResolvedValue([])
@@ -137,14 +131,10 @@ test('an id that matches no pattern says so and keeps the way back', async () =>
 })
 
 /**
- * The action this pane exists for, and the whole of it is the request.
- *
- * An operator sets Monday and wants the rest of the week to match. What is
- * pinned is the exact set that reaches the server: Monday's hours on the days
- * that were already open, Thursday to Sunday still absent because absent IS
+ * What is pinned is the exact set that reaches the server: Monday's hours on the
+ * days that were already open, Thursday to Sunday still absent because absent IS
  * closed, and one request rather than one per day — the endpoint takes the whole
- * week, so a loop over the open days would be six ways for the week to end up
- * half applied.
+ * week, so a loop over the open days would be six ways to end up half applied.
  */
 test("uses one day's hours on every open day, and leaves the closed days closed", async () => {
   patternWith([
@@ -169,13 +159,11 @@ test("uses one day's hours on every open day, and leaves the closed days closed"
 })
 
 /**
- * A split day, made here rather than merely tolerated.
- *
- * The booking engine honours several windows on one day and the server accepts
- * two that touch, so a lunch break is two rules on one day and not a rule the
- * pane has to flatten. The second half of this test is the other half of the
- * design: nothing has been sent while the times were typed, because a pattern
- * in use is live and a half-typed window would be an hour on offer.
+ * A split day, made here rather than merely tolerated. The booking engine honours
+ * several windows on one day and the server accepts two that touch, so a lunch
+ * break is two rules and not something the pane flattens. Nothing is sent while
+ * the times are typed: a pattern in use is live, and a half-typed window would be
+ * an hour on offer.
  */
 test('a second window on one day is sent as two windows, and not before the save', async () => {
   patternWith([{ id: 'r1', isoDayOfWeek: MONDAY, startMinute: NINE_AM, endMinute: NOON }])
@@ -226,12 +214,10 @@ test("removing a day's last window closes that day", async () => {
 })
 
 /**
- * The server's own sentence, under the control that asked for it.
- *
  * Overlap is refused by the endpoint and by nothing on this page, deliberately:
  * the same bound guards the booking engine, and a second copy here is the copy
- * that goes stale. So the refusal has to arrive as prose the operator can act
- * on, which is the server's, not one invented next to the button.
+ * that goes stale. So the refusal arrives as the server's own prose, under the
+ * control that asked for it.
  */
 test('a refused save shows what the server said about it', async () => {
   const said =
@@ -287,7 +273,5 @@ test('a rule on a day of the week that does not exist drops rather than taking t
 
   renderEditor()
 
-  // The week the rules actually describe is still editable, and the rule that
-  // named no weekday is simply not in it.
   expect(await screen.findByLabelText('Tuesday, window 1, opens at')).toBeDefined()
 })

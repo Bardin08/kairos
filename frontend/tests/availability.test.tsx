@@ -68,10 +68,9 @@ beforeEach(() => {
 afterEach(cleanup)
 
 /**
- * The hours on a card carry the zone they are read in.
- *
- * A card is the unit somebody screenshots, quotes and argues with, and
- * 09:00–17:00 with no zone on it is a time that means four different things.
+ * The hours on a card carry the zone they are read in. A card is the unit
+ * somebody screenshots, quotes and argues with, and 09:00–17:00 with no zone on
+ * it is a time that means four different things.
  */
 test('a pattern card names the organizer zone beside its hours', async () => {
   render(<Availability />)
@@ -80,8 +79,6 @@ test('a pattern card names the organizer zone beside its hours', async () => {
 })
 
 /**
- * The card is a summary, so the one thing it has to do is lead somewhere.
- *
  * The path is relative on purpose: the shell is mounted with `nest`, so wouter
  * prefixes `/admin`, and an absolute href here would resolve to
  * `/admin/admin/availability/…`.
@@ -109,11 +106,9 @@ test('the header button opens a name field and creates from it', async () => {
 })
 
 /**
- * The refusal is shown, and shown verbatim.
- *
- * The server's sentence is the only one with the link names in it, so replacing
- * it with a friendlier message of this page's own would delete the only part
- * the operator can act on — which link to go and repoint.
+ * The refusal is shown, and shown verbatim. The server's sentence is the only one
+ * with the link names in it, so a friendlier message of this page's own would
+ * delete the only part the operator can act on — which link to go and repoint.
  */
 test('a refused delete is shown with the links the server named', async () => {
   vi.mocked(deletePattern).mockRejectedValue(
@@ -134,10 +129,9 @@ test('a refused delete is shown with the links the server named', async () => {
 })
 
 /**
- * No CSS was added by this task, so a class this markup invents is a class that
- * styles nothing — and it fails silently: the card simply stops being a card,
- * in a viewport no unit test can see. The name form is opened first, because it
- * is the one part of the page that is not drawn on arrival.
+ * No CSS was added by this task, so a class this markup invents styles nothing,
+ * and fails silently: the card stops being a card, in a viewport no unit test can
+ * see. The name form is opened first, being the one part not drawn on arrival.
  */
 test('every class the page renders exists in kairos.css', async () => {
   const css = readFileSync(stylesheet, 'utf8')

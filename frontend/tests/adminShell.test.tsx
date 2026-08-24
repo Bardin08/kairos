@@ -28,9 +28,8 @@ const settings: Settings = {
   overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
 }
 
-// Same file the running app loads, read the same way stylesheet.test.ts reads
-// it. It is the authority on which class names exist — Part C adds exactly one
-// rule to it, for the tab bar's secondary destination, and no new class.
+// Same file the running app loads, and the authority on which class names exist.
+// Part C adds exactly one rule to it, for the tab bar's secondary destination.
 const stylesheet = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kairos.css')
 
 const ADMIN_BASE = '/admin'
@@ -61,11 +60,9 @@ afterEach(cleanup)
 
 /**
  * The comp's identity block, restored now that OIDC supplies the claim it needs.
- *
- * The name is whatever the identity provider called this operator and null when
- * it called them nothing — and null draws no block at all. A subject identifier
- * or an email address presented as a person's name would be worse than the gap
- * Task 2 left here on purpose.
+ * The name is whatever the provider called this operator and null when it called
+ * them nothing, and null draws no block: a subject identifier or an email address
+ * presented as a person's name would be worse than the gap Task 2 left here.
  */
 test('the rail foot names the signed-in operator when the claims carry a name', async () => {
   renderShell('/admin/links')
@@ -112,8 +109,7 @@ test('the current destination is marked in both the rail and the tab bar', () =>
 
   // Twice: once in the rail, once in the tab bar. `aria-current` is the single
   // hook both of kairos.css's channels hang off — the rail's inset fill and
-  // heavier weight, the tab bar's accent and 2px edge bar — so losing it here
-  // is losing every mark on the current destination at once.
+  // heavier weight, the tab bar's accent and 2px edge bar.
   expect(marked).toEqual(['Availability', 'Availability'])
 })
 
@@ -139,10 +135,9 @@ test('every class the shell renders exists in kairos.css', () => {
     [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),
   )
 
-  // The task adds no CSS, so a class this markup invents is a class that styles
-  // nothing — and the failure it produces is silent: the rail simply stops
-  // collapsing, or a cell stops keeping its column name, in a viewport no unit
-  // test can see.
+  // The task adds no CSS, so a class this markup invents styles nothing, and
+  // fails silently: the rail stops collapsing, or a cell stops keeping its
+  // column name, in a viewport no unit test can see.
   const missing = [...used].filter((name) => !css.includes(`.${name}`))
   expect(missing).toEqual([])
 })

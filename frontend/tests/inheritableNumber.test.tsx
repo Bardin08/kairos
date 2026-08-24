@@ -28,7 +28,7 @@ const HELP = 'Kept clear on both sides of every booking.'
 
 /** For the one test that renders the component directly and never checks what it emits. */
 function noop() {
-  // Intentionally empty — see the doc comment above.
+  // Intentionally empty.
 }
 
 const FIELD = 'Margin between meetings'
@@ -37,14 +37,10 @@ const INHERIT = `Use global ${FIELD}`
 const INHERITED = 'inherit'
 
 /**
- * The component plus the value it last emitted, since what leaves it is the
- * thing under test. `inherit` and `0` are printed differently on purpose: a
- * harness that stringified null as "" would hide exactly the confusion these
- * tests exist to catch.
- *
- * `min` and `globalValue` default to the values every original test used, so
- * this stays a no-op change for them; the clamp test is the only caller that
- * overrides either.
+ * The component plus the value it last emitted, since what leaves it is the thing
+ * under test. `inherit` and `0` are printed differently on purpose: a harness that
+ * stringified null as "" would hide exactly the confusion these tests exist to
+ * catch. Only the clamp test overrides `min` or `globalValue`.
  */
 function Harness({
   start,
@@ -99,9 +95,8 @@ afterEach(cleanup)
 test('while inherited the global is stated as a fact and null is what leaves', () => {
   render(<Harness start={null} />)
 
-  // Not a disabled input showing a number nobody typed. The value is read-only
-  // prose with the word Global beside it, so the state is legible without
-  // colour and without having to try the field to discover it is dead.
+  // Not a disabled input showing a number nobody typed: read-only prose with the
+  // word Global beside it, legible without colour and without probing the field.
   expect(screen.queryByLabelText(FIELD)).toBeNull()
   expect(screen.getByText('Global')).toBeTruthy()
   expect(screen.getByText(String(GLOBAL), { exact: false })).toBeTruthy()
@@ -167,10 +162,9 @@ test('pressing use global returns focus to the button that replaced the field', 
 test("the override button's description states the global and that it is global", () => {
   render(<Harness start={null} />)
 
-  // A screen-reader user who navigates by interactive element skips the
-  // static prose entirely and lands straight on this button. Without the
-  // description they hear only "Override Margin between meetings" and never
-  // learn what they are about to override.
+  // A screen-reader user who navigates by interactive element skips the static
+  // prose and lands straight on this button; without the description they hear
+  // only "Override Margin between meetings" and never learn what they override.
   expect(overrideDescription()).toContain(String(GLOBAL))
   expect(overrideDescription()).toContain('Global')
 })
@@ -194,9 +188,8 @@ test('typing an ordinary value leaves the component exactly as typed', () => {
   fireEvent.click(screen.getByRole('button', { name: OVERRIDE }))
   fireEvent.change(box(), { target: { value: String(TYPED_VALUE) } })
 
-  // Every other test in this file types either nothing or the zero the
-  // component treats specially. This is the ordinary path: an ordinary number
-  // goes in and the same number comes out unchanged.
+  // Every other test types either nothing or the zero the component treats
+  // specially; this is the ordinary path.
   expect(sent()).toBe(String(TYPED_VALUE))
 })
 

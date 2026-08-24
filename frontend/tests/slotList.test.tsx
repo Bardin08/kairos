@@ -12,11 +12,8 @@ import {
 } from '../src/lib/api'
 import Book from '../src/pages/Book'
 
-// The invitee's zone, which every rendered time is in. Fixed here so an
-// assertion means the same thing on a laptop in Warsaw and in CI.
-// jsdom builds its DOMException in another realm, which is exactly the
-// condition the guard has to survive; this is the shape a real aborted fetch
-// rejects with.
+// jsdom builds its DOMException in another realm, which is exactly the condition
+// the guard has to survive; this is the shape a real aborted fetch rejects with.
 function abortError(): Error {
   const error = new Error('The operation was aborted.')
   error.name = 'AbortError'
@@ -31,6 +28,8 @@ function failureOf(promise: Promise<unknown>): Promise<ApiError | null> {
   )
 }
 
+// The invitee's zone, which every rendered time is in. Fixed here so an assertion
+// means the same thing on a laptop in Warsaw and in CI.
 const INVITEE_ZONE = 'UTC'
 process.env.TZ = INVITEE_ZONE
 
@@ -407,10 +406,9 @@ test('the month opens on the organizer calendar, not the invitee one', async () 
 })
 
 // C2, the other direction. An invitee BEHIND the organizer is where the two
-// implementations diverge: measured against the invitee's calendar, Previous
-// comes back enabled and lets them page into a month the organizer has already
-// spent. The test above passes either way, so this is the one that holds the
-// floor honest.
+// implementations diverge: measured against the invitee's calendar, Previous comes
+// back enabled and lets them page into a month the organizer has already spent.
+// The test above passes either way, so this is the one holding the floor honest.
 test('the month floor is the organizer today for an invitee behind them', async () => {
   // 05:00Z on 1 September is still 19:00 on 31 August in Honolulu.
   vi.setSystemTime(new Date('2026-09-01T05:00:00Z'))

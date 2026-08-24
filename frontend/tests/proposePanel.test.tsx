@@ -9,11 +9,10 @@ import { ApiError, getSlots } from '../src/lib/api'
 import { proposeMeeting } from '../src/routes/admin/adminMeetings'
 import type { Meeting } from '../src/routes/admin/adminMeetings'
 
-// The slot read is the PUBLIC one, in lib/api rather than beside the admin
-// calls: an operator picking a time and an invitee picking one are the same act
-// against the same generator, and a second endpoint for the operator would be a
-// second answer to what a link offers. ApiError stays real — `Failure` reads a
-// rejection through `asApiError`, which branches on `instanceof`.
+// The slot read is the PUBLIC one, in lib/api rather than beside the admin calls:
+// an operator picking a time and an invitee picking one are the same act against
+// the same generator, and a second endpoint would be a second answer to what a
+// link offers. ApiError stays real — `asApiError` branches on `instanceof`.
 vi.mock('../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/api')>()),
   getSlots: vi.fn(),
@@ -200,9 +199,9 @@ describe('ProposePanel', () => {
       [...container.querySelectorAll('[class]')].flatMap((element) => [...element.classList]),
     )
 
-    // This task adds no CSS, so a class this markup invents is a class that
-    // styles nothing — and the failure is silent: the picker simply stops
-    // keeping its shape, in a viewport no unit test can see.
+    // This task adds no CSS, so a class this markup invents styles nothing, and
+    // fails silently: the picker stops keeping its shape, in a viewport no unit
+    // test can see.
     expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
   })
 })

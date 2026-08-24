@@ -14,21 +14,16 @@ Object.defineProperty(globalThis, 'localStorage', {
 
 // jsdom 30 ships `<dialog>` as an element and none of its behaviour: reading
 // `showModal` gives undefined and calling it throws. Verified against 30.0.1,
-// which is what this project pins.
-//
-// What this shim buys is that the cancel dialog's own logic stays testable —
-// what opens it, what closes it, what it renders, what it calls and with which
-// argument, and where focus goes. What it deliberately does NOT buy, and what
-// no test in this suite may be read as proving:
+// the pinned version. The shim makes the cancel dialog's own logic testable;
+// four things it does not provide, and no test here may be read as proving:
 //
 //   - the focus trap. Tab here walks the whole document, as it always did.
 //   - the inertness of the page behind a modal.
 //   - Escape closing the dialog, which is the UA's behaviour and not React's.
 //   - the backdrop, and therefore anything about clicking it.
 //
-// Those four are pinned in a real browser instead, by the `cancel-dialog` check
-// in scripts/measure-ui.mjs. A test here that appears to cover one of them is
-// covering this shim.
+// Those four are pinned in a real browser by the `cancel-dialog` check in
+// scripts/measure-ui.mjs; a test here that appears to cover one covers the shim.
 if (typeof HTMLDialogElement !== 'undefined' && HTMLDialogElement.prototype.showModal === undefined) {
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
     this.open = true
