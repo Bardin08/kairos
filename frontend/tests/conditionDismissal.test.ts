@@ -26,12 +26,10 @@ afterEach(() => {
 })
 
 /**
- * A storage that refuses everything, in place of the real one.
- *
- * Spying on `Storage.prototype` was tried first and silently did nothing: jsdom's
+ * A storage that refuses everything, in place of the real one. Spying on
+ * `Storage.prototype` was tried first and silently did nothing: jsdom's
  * localStorage does not dispatch through that prototype, so the spy applied, the
  * test passed, and removing the try/catch it was meant to cover changed nothing.
- * Replacing the global is what actually reaches the code under test.
  */
 function denyStorage(): void {
   vi.stubGlobal('localStorage', {

@@ -4,8 +4,7 @@ import type { AdminLink } from '../src/routes/admin/adminLinks'
 import { changedCount, draftOf, unsavedLabel, type EditorDraft } from '../src/routes/admin/editorDraft'
 
 // A link that offers a short call and a long one, overrides its margin, and
-// inherits the other three. Named rather than inlined so a reader of an
-// assertion below knows which value moved and why it matters.
+// inherits the other three.
 const SHORT_CALL = 25
 const LONG_CALL = 50
 const QUARTER_HOUR = 15
@@ -50,26 +49,22 @@ test('the durations count once however many of them changed', () => {
   expect(changedCount(BASE, { ...BASE, durations: replaced })).toBe(ONE_FIELD)
 })
 
-// sameDurations is a length check followed by an element check. The element
-// check alone (`baseline.every((minutes, index) => minutes === draft[index])`)
-// only visits the indices the shorter array has, so when the baseline is a
-// strict prefix of the draft, every index it looks at matches and nothing
-// notices the extra elements. The test above does not isolate this: it changes
-// both the length and the contents, so it cannot tell "the length check caught
-// it" apart from "the element check happened to fail first." This one isolates
-// the length check — delete it from the implementation and this test fails.
+// sameDurations is a length check followed by an element check. The element check
+// alone (`baseline.every((minutes, index) => minutes === draft[index])`) visits
+// only the indices the shorter array has, so a baseline that is a strict prefix of
+// the draft matches at every index it looks at and nothing notices the extra
+// elements. The test above changes both length and contents, so it cannot isolate
+// the length check; this one does — delete it and this test fails.
 test('a baseline durations array that is a strict prefix of the draft is still a change', () => {
   const prefixBaseline = { ...BASE, durations: [SHORT_CALL] }
   expect(changedCount(prefixBaseline, BASE)).toBe(ONE_FIELD)
 })
 
-// The reverse prefix direction, pinned for symmetry with the case above. Unlike
-// that one, this direction does not actually exercise the length check: with the
-// baseline as the longer array, `every` walks past the end of the draft and
-// compares a real number against `undefined`, which already fails the element
-// check on its own. Verified by deleting the length check from a scratch copy —
-// this case still returns the right answer without it. Kept anyway because the
-// behaviour — a truncated draft is a change — is real and worth pinning.
+// The reverse prefix direction, pinned for symmetry with the case above. It does
+// not exercise the length check: with the baseline the longer array, `every` walks
+// past the end of the draft and compares a real number against `undefined`, which
+// fails the element check on its own — verified by deleting the length check from
+// a scratch copy. Kept because a truncated draft being a change is real behaviour.
 test('a draft durations array that is a strict prefix of the baseline is also a change', () => {
   const shortDraft = { ...BASE, durations: [SHORT_CALL] }
   expect(changedCount(BASE, shortDraft)).toBe(ONE_FIELD)

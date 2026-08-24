@@ -31,10 +31,9 @@ test('every cell keeps its column name, and the identity cell keeps none', () =>
   )
 
   // Below 760px the heading row is display:none and each cell reprints this
-  // attribute in front of its value. A missing one is invisible on a laptop and
-  // an orphaned number on a phone, which is the whole failure this asserts
-  // against. The identity cell carries "" on purpose: it is the record's title,
-  // and kairos.css has a selector for exactly that.
+  // attribute in front of its value, so a missing one is invisible on a laptop and
+  // an orphaned number on a phone. The identity cell carries "" on purpose: it is
+  // the record's title, and kairos.css has a selector for exactly that.
   expect(cells(container)).toEqual([
     { column: '', numeric: false },
     { column: 'Margin', numeric: true },

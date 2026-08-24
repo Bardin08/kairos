@@ -5,9 +5,9 @@ import { afterEach, expect, test } from 'vitest'
 import DurationEditor from '../src/components/DurationEditor'
 
 /**
- * Mirrors DurationEditor's own preset list (`PRESETS = [15, 30, 45, 60]`),
- * which the component keeps private — named here so an assertion reads as
- * "the standard preset", not as a bare 30.
+ * Mirrors DurationEditor's own preset list (`PRESETS = [15, 30, 45, 60]`), which
+ * the component keeps private — named here so an assertion reads as "the standard
+ * preset", not as a bare 30.
  */
 const SHORT_PRESET = 15
 const STANDARD_PRESET = 30
@@ -76,11 +76,10 @@ function sent(): number[] {
   return JSON.parse(screen.getByRole('status').textContent ?? '[]')
 }
 
-// A chip's remove button is the only element in the tree named "Remove N
-// minutes" — unlike a text query for "N min", it can't collide with the
-// matching preset <option> or with a refusal message that happens to contain
-// the same digits, and it needs no class to find (the classes on this
-// component changed under us once already).
+// A chip's remove button is the only element in the tree named "Remove N minutes"
+// — unlike a text query for "N min", it cannot collide with the matching preset
+// <option> or with a refusal message carrying the same digits, and it needs no
+// class to find (the classes on this component changed under us once already).
 function chip(minutes: number) {
   return screen.queryByRole('button', { name: removeLabel(minutes) })
 }
