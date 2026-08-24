@@ -11,10 +11,9 @@
 #
 # Both build stages are pinned to $BUILDPLATFORM and cross-publish to $TARGETARCH
 # rather than running under emulation. Without that, a multi-architecture build
-# runs npm and the whole .NET SDK through QEMU once per architecture that is not
-# the runner's own — to arrive at byte-for-byte what cross-publishing produces,
-# because nothing here is compiled to native code. What is left emulated is the
-# runtime stage, which has no RUN in it and so emulates nothing.
+# puts npm and the whole .NET SDK through QEMU once per foreign architecture to
+# produce byte-for-byte what cross-publishing already produces, since nothing here
+# compiles to native code. Only the runtime stage stays emulated, and it has no RUN.
 
 # ---- the single page --------------------------------------------------------
 # Node 26.5.0, which is NODE_VERSION in .github/workflows/ci.yml. A different
@@ -38,15 +37,13 @@ RUN npm ci
 COPY frontend/ ./
 
 # vite.config.ts writes into ../backend/src/Kairos.Api/wwwroot with
-# emptyOutDir: false, because the vendored kairos.css lives in that directory
-# and is not the build's to delete. Here the directory does not exist until Vite
-# creates it, so what comes out is exactly this build's page, bundles and fonts.
+# emptyOutDir: false, because the vendored kairos.css lives there and is not the
+# build's to delete. Here that directory does not exist until Vite creates it, so
+# what comes out is exactly this build's page, bundles and fonts.
 #
-# The manifest Vite also writes for scripts/bundle-budget.sh is not deleted here
-# and does not need to be: `dotnet publish` skips dot-prefixed entries under
-# wwwroot, so .vite/ never reaches the runtime stage. Measured on an image built
-# without this note, not assumed — a line removing what is already gone is a line
-# somebody later reads as load-bearing.
+# The manifest Vite also writes for scripts/bundle-budget.sh is left in place:
+# `dotnet publish` skips dot-prefixed entries under wwwroot, so .vite/ never
+# reaches the runtime stage — measured on a built image, not assumed.
 RUN npm run build
 
 # ---- the API ----------------------------------------------------------------
@@ -68,15 +65,14 @@ ARG TARGETARCH
 COPY backend/global.json backend/NuGet.config backend/Directory.Build.props backend/Directory.Packages.props ./
 COPY backend/src/Kairos.Api/Kairos.Api.csproj src/Kairos.Api/
 
-# Docker spells the 64-bit Intel architecture amd64 and .NET spells it x64, so
-# the two are reconciled once and the answer written down for the publish step
-# rather than worked out twice. An architecture neither branch knows stops the
-# build, because the alternative is an image that runs the wrong binaries and
-# says nothing until it is started.
+# Docker spells the 64-bit Intel architecture amd64 and .NET spells it x64, so the
+# two are reconciled once here rather than worked out twice. An architecture
+# neither branch knows stops the build, because the alternative is an image that
+# runs the wrong binaries and says nothing until it is started.
 #
-# Restoring FOR a runtime identifier is what makes the publish below able to pick
-# one set of native assets; without it the restore graph has no RID in it and
-# --no-restore would fail on the first RID-specific reference.
+# Restoring FOR a runtime identifier is what lets the publish below pick one set of
+# native assets; with no RID in the restore graph, --no-restore fails on the first
+# RID-specific reference.
 RUN case "$TARGETARCH" in \
       amd64) echo linux-x64 > /rid ;; \
       arm64) echo linux-arm64 > /rid ;; \
@@ -102,15 +98,15 @@ RUN dotnet publish src/Kairos.Api/Kairos.Api.csproj \
       -c Release -r "$(cat /rid)" --no-self-contained --no-restore -o /app
 
 # ---- what ships -------------------------------------------------------------
-# The chiselled ASP.NET runtime: no shell, no package manager, no ICU, and
-# already non-root — its USER is 1654. Nothing here can be exec'd into, which is
-# the point, and the reason every line below has to do its work at build time.
+# The chiselled ASP.NET runtime: no shell, no package manager, no ICU, and already
+# non-root — its USER is 1654. Nothing here can be exec'd into, so every line below
+# has to do its work at build time.
 #
-# No ICU is affordable because nothing in this application asks for it: there is
-# no TimeZoneInfo anywhere in backend/src — every zone comes from NodaTime's
-# bundled TZDB via DateTimeZoneProviders.Tzdb — and every CultureInfo and every
-# NodaTime pattern in it is the invariant one. backend/Directory.Build.props
-# sets InvariantGlobalization=true to match, and this base image sets
+# No ICU is affordable because nothing in this application asks for it: there is no
+# TimeZoneInfo anywhere in backend/src — every zone comes from NodaTime's bundled
+# TZDB via DateTimeZoneProviders.Tzdb — and every CultureInfo and NodaTime pattern
+# is the invariant one. backend/Directory.Build.props sets
+# InvariantGlobalization=true to match, and this base image sets
 # DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true whether it does or not.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.11-noble-chiseled@sha256:0839314d08bb65da369135389a5d8291f75ace587fbb0488f469eb92c62eef68 AS runtime
 
@@ -121,21 +117,20 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0.11-noble-chiseled@sha256:0839314d08bb6
 # the process only reads it.
 COPY --from=backend /app /app
 
-# The data, outside the image. SQLite in WAL mode writes kairos.db and its -wal
-# and -shm siblings, so what has to be writable is the DIRECTORY and not just
-# the file — and the three of them together are the whole of what a redeploy
-# must not lose and a backup has to take.
+# The data, outside the image. SQLite in WAL mode writes kairos.db and its -wal and
+# -shm siblings, so what has to be writable is the DIRECTORY and not just the file
+# — and those three together are the whole of what a redeploy must not lose and a
+# backup has to take.
 #
-# Created with WORKDIR rather than declared by VOLUME alone, and that is exactly
-# the ownership rule above used the other way round: WORKDIR gives this one to
-# 1654, and Docker copies a fresh volume's ownership from the directory it is
-# mounted over. Left to VOLUME on a path that is not in the image, the volume
-# would come up owned by root and this process could not create its database.
+# Created with WORKDIR rather than declared by VOLUME alone: WORKDIR gives the
+# directory to 1654, and Docker copies a fresh volume's ownership from the
+# directory it is mounted over. Left to VOLUME on a path that is not in the image,
+# the volume would come up owned by root and this process could not create its
+# database.
 WORKDIR /var/lib/kairos
 VOLUME ["/var/lib/kairos"]
 
-# Where the entrypoint's assembly is. /app already exists and belongs to root, so
-# this only moves into it.
+# /app already exists and belongs to root, so this only moves into it.
 WORKDIR /app
 
 # The one value this image supplies, supplied the way every other setting is:

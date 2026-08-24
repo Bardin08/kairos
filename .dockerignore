@@ -23,11 +23,10 @@
 # The SPA's build output, mirroring .gitignore: everything in wwwroot except the
 # vendored stylesheet, which is a committed source file rather than a build's.
 #
-# This is not tidiness. `npm run build` on a laptop leaves hashed bundles in
-# assets/, their names are unique per build, and nothing in the image build
-# overwrites or deletes them — so a stale one would be copied in and served
-# alongside the bundles this image actually built. The image builds the SPA
-# itself, from source, every time.
+# Not tidiness: `npm run build` on a laptop leaves hashed bundles in assets/ whose
+# names are unique per build, and nothing in the image build overwrites or deletes
+# them — so a stale one would be copied in and served alongside the bundles this
+# image actually built.
 backend/src/Kairos.Api/wwwroot/*
 !backend/src/Kairos.Api/wwwroot/kairos.css
 

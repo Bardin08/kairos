@@ -1,18 +1,15 @@
 # A verification harness, and nothing anybody should deploy.
 #
-# This file exists to make two decisions observable that are invisible anywhere
-# else. Kairos is written to sit behind a TLS-terminating reverse proxy: the
-# session cookie is issued Secure unconditionally, and HSTS is sent only on a
-# request that arrived over HTTPS — which, behind such a proxy, is a fact that
-# lives entirely in X-Forwarded-Proto. Run the container on its own and every
-# request is plaintext, so neither decision can be told from its opposite. Put a
-# real proxy holding a real certificate in front of it and both can. That is the
-# whole job of this file.
+# It makes two decisions observable that are invisible anywhere else. Kairos is
+# written to sit behind a TLS-terminating reverse proxy: the session cookie is
+# issued Secure unconditionally, and HSTS is sent only on a request that arrived
+# over HTTPS — behind a proxy, a fact living entirely in X-Forwarded-Proto. Run the
+# container alone and every request is plaintext, so neither decision can be told
+# from its opposite; put a real proxy with a real certificate in front and both can.
 #
-# It is NOT compose.yaml. It publishes the container's own port beside the
-# proxy's so a check can bypass the hop, it carries a committed key, and it
-# trusts a proxy at a hard-coded address on a hard-coded subnet. A deployment
-# gets its own compose file; this one is a test fixture with a YAML extension.
+# It is NOT compose.yaml. It publishes the container's own port beside the proxy's
+# so a check can bypass the hop, it carries a committed key, and it trusts a proxy
+# at a hard-coded address on a hard-coded subnet. A deployment gets its own file.
 #
 # Run it:
 #   docker compose -f compose.proxy.yaml up -d --build
@@ -22,13 +19,12 @@
 #     http://localhost:8080/healthz
 #   docker compose -f compose.proxy.yaml down -v
 #
-# The SAME path both ways, and that is the whole design of the check. The two
-# requests must differ in one thing only — whether a trusted proxy forwarded a
-# scheme — so that the header that appears in one and not the other can only be
-# explained by that. An earlier version of this file used /api/v1/links/whatever
-# for the direct leg, which is a DomainException route, and at the time those
-# answered without HSTS over TLS as well; the check passed and would have gone on
-# passing with the proto gate torn out. Two hostnames, one path: vary one thing.
+# The SAME path both ways. The two requests must differ in one thing only —
+# whether a trusted proxy forwarded a scheme — so the header that appears in one
+# and not the other can only be explained by that. An earlier version used
+# /api/v1/links/whatever for the direct leg, which is a DomainException route, and
+# at the time those answered without HSTS over TLS as well; the check passed and
+# would have gone on passing with the proto gate torn out.
 #
 # It also only works on one machine at a time. The subnet below is fixed, so a
 # second copy of this harness — another worktree, a colleague's clone — fails to
@@ -41,12 +37,11 @@ services:
     build: .
     environment:
       # PUBLIC, in the same sense as the key in appsettings.Development.json:
-      # committed, in every clone and every fork, and never to be set outside a
-      # harness. It is here rather than left to that file because this container
-      # runs in Production, where the file is not read — and running the harness
-      # in Development to borrow the key would relax the one thing Program.cs
-      # branches on for the environment, which is not a thing to relax under a
-      # check that exists to prove production behaviour.
+      # committed, in every clone and every fork, never to be set outside a harness.
+      # It is here rather than in that file because this container runs in
+      # Production, where the file is not read — and switching to Development to
+      # borrow the key would relax the one thing Program.cs branches on for the
+      # environment, under a check meant to prove production behaviour.
       Security__SecretKey: aGFybmVzcy1rZXktcHVibGljLW5vdC1zZWNyZXQhISE=
 
       # Never contacted. Nothing in this harness starts a sign-in — a challenge
