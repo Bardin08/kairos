@@ -75,11 +75,10 @@ function renderActions(
 }
 
 describe('MeetingActions', () => {
-  // Cleared after the test rather than reset before it, which is what
-  // meetings.test.tsx does and is not a stylistic choice: mockReset drops the
-  // recorded results, and vitest reads a rejected result it no longer has a
-  // record of being awaited as an unhandled rejection — so every test here that
-  // exercises a failure would fail on the failure it is asserting.
+  // Cleared after the test rather than reset before it, unlike meetings.test.tsx:
+  // mockReset drops the recorded results, and vitest reads a rejected result it no
+  // longer has a record of being awaited as an unhandled rejection — so every
+  // failure test here would fail on the failure it is asserting.
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -196,10 +195,9 @@ describe('MeetingActions', () => {
   test('an open hold replaces Propose, and never the ability to call the meeting off', () => {
     renderActions(openProposal)
 
-    // Every confirmed row could be cancelled before this feature existed. An
-    // open hold is a reason not to offer a SECOND suggestion — the server
-    // answers proposal_open — and no reason at all to make the operator
-    // withdraw one before they can call the meeting off.
+    // Every confirmed row could be cancelled before this feature existed. An open
+    // hold is a reason not to offer a SECOND suggestion — the server answers
+    // proposal_open — and no reason to make the operator withdraw one first.
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
 
     expect(screen.queryByLabelText(/why/i)).not.toBeNull()
