@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 // config typechecks without a triple-slash reference.
 import { defineConfig, type Plugin } from 'vitest/config'
 
-// The SPA is built into the API's wwwroot and served from there as static files.
+// The API serves this directory as static files.
 const outDir = '../backend/src/Kairos.Api/wwwroot'
 // Resolved here rather than left to Vite: these two need the same directory
 // Vite is writing to, so if outDir ever moves, all three move together.

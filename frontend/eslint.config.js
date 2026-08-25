@@ -3,23 +3,22 @@ import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
-// Inline styles are forbidden: everything visual belongs in kairos.css, and a
-// violation should surface while typing rather than in review.
+// Inline styles are forbidden: everything visual belongs in kairos.css.
 //
-// There is exactly one sanctioned exception, and it is not configurable — the
-// rule matches on the prop name and cannot see the object's contents, so a
-// style that only sets a CSS custom property looks identical to a style that
-// hardcodes a colour. DESIGN.md's one authored motion moment needs such a
-// property: the slot list staggers on `animation-delay: calc(var(--i) * …)`,
-// which means each item carries its own `--i`. At that site, and nowhere else:
+// The one sanctioned exception cannot be encoded in config — the rule matches on
+// the prop name and cannot see the object's contents, so a style setting only a
+// CSS custom property looks identical to one hardcoding a colour. DESIGN.md's one
+// authored motion moment needs such a property: the slot list staggers on
+// `animation-delay: calc(var(--i) * …)`, so each item carries its own `--i`. At
+// that site, and nowhere else:
 //
 //   // eslint-disable-next-line react/forbid-dom-props -- DESIGN.md stagger: --i is per-item
 //   <li style={{ '--i': index } as CSSProperties}>
 //
-// The disable is deliberately per-line and carries its reason. ESLint reports
-// an unused disable directive as a warning, and `--max-warnings 0` turns that
-// into a failure, so a disable left behind after its markup changes fails the
-// build rather than quietly widening the exception.
+// The disable is per-line and carries its reason. ESLint reports an unused disable
+// directive as a warning and `--max-warnings 0` turns that into a failure, so one
+// left behind after its markup changes fails the build rather than quietly widening
+// the exception.
 const inlineStyleMessage =
   'Inline styles are forbidden — style it in kairos.css. The one exception is a CSS custom property the stylesheet consumes, e.g. the DESIGN.md stagger\'s style={{ "--i": i }}; disable this rule on that line with a reason.'
 
