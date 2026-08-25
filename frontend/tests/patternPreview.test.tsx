@@ -46,8 +46,8 @@ const FIVE_PM = 17 * MINUTES_PER_HOUR
 // ISO-8601: 1 is Monday, 7 is Sunday.
 const TUESDAY = 2
 
-// Noon UTC, so the operator's own date is 15 August 2026 in every zone this
-// suite could be run in — the preview opens on the month it finds today in.
+// Noon UTC, so the operator's own date is 15 August 2026 at every offset from
+// UTC-12 to UTC+11:59 — the preview opens on the month it finds today in.
 const TODAY = '2026-08-15T12:00:00Z'
 // August 2026: the 18th and the 25th are Tuesdays, the 23rd a Sunday.
 const A_TUESDAY = '2026-08-18'

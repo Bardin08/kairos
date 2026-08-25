@@ -30,8 +30,8 @@ const EXPIRES_TIME = '11:30'
 const LAPSE_DAY = /11 Sep/
 
 // The meeting the dialog restates. Its clock times are deliberately unlike the
-// proposal's below — 09:30Z is 11:30 in Warsaw, which is EXPIRES_TIME, and an
-// assertion on the lapse would have matched the restated meeting instead.
+// proposal's below — 07:00 and 07:45 in Warsaw, not the 11:30 EXPIRES_AT holds,
+// or an assertion on the lapse would have matched the restated meeting instead.
 const SUBJECT = {
   participantName: 'Ada Lovelace',
   linkName: 'Consulting call',

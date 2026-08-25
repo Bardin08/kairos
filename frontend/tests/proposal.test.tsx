@@ -95,7 +95,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-test('shows what is being left and what is being offered, both in the organizer zone', async () => {
+test('shows what is being left and what is being offered, both in the invitee zone', async () => {
   renderProposal()
 
   expect(await screen.findByText(LINK_NAME)).toBeDefined()
