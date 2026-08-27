@@ -4,6 +4,7 @@ using Kairos.Api.Availability;
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Integrations;
+using Kairos.Api.Features.Invites;
 using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Integrations;
@@ -213,6 +214,8 @@ builder.Services.AddScoped<BookingWriter>();
 builder.Services.AddScoped<BookingCanceller>();
 builder.Services.AddScoped<BookingMover>();
 builder.Services.AddScoped<ProposalWriter>();
+builder.Services.AddScoped<InviteWriter>();
+builder.Services.AddScoped<InviteReader>();
 
 // One adapter resolved through three interfaces, one instance per request rather than three:
 // registering the class separately and handing the same instance to each role keeps a single Google
