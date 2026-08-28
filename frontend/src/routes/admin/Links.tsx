@@ -168,8 +168,7 @@ export default function Links() {
           empty={
             <div className="empty">
               <p>
-                No links yet. A link is the address you send someone — it names the meeting, the
-                lengths it runs for, and the hours it may be booked in.
+                No links yet. A link is the address you send someone — it names the meeting, the lengths it runs for, and the hours it may be booked in.
               </p>
             </div>
           }

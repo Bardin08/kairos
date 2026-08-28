@@ -338,17 +338,13 @@ export default function Invites() {
         // because it names both recoveries and the reader knows which is theirs.
         <div className="empty">
           <p>
-            No live link to invite anyone to yet. A personal link is an invitation on one of
-            your links, borrowing its hours and its lengths — so make one, or restore one you
-            have archived.
+            No live link to invite anyone to yet. A personal link is an invitation on one of your links, borrowing its hours and its lengths — so make one, or restore one you have archived.
           </p>
         </div>
       ) : (
         <section className="card card-pad stack">
           <p className="prose t-sm">
-            A personal link is one of your links with an invitation on it: the same hours, the
-            same lengths, and a booking form that arrives filled in. It books once and is then
-            spent.
+            A personal link is one of your links with an invitation on it: the same hours, the same lengths, and a booking form that arrives filled in. It books once and is then spent.
           </p>
 
           <div className="field">
@@ -393,8 +389,7 @@ export default function Invites() {
             {/* The zone is said here rather than over the column below: it is the
                 same sentence for both, and this is where an operator decides. */}
             <p className="fine">
-              After it, the URL stops working and the times go back on offer. Deadlines are set
-              and shown in your own zone, {zone}.
+              After it, the URL stops working and the times go back on offer. Deadlines are set and shown in your own zone, {zone}.
             </p>
             <select
               id="invite-deadline"
@@ -450,8 +445,7 @@ export default function Invites() {
                 </button>
               </div>
               <p className="fine">
-                Copy it now. It is shown once and cannot be read back — if it is lost, regenerate
-                the invite for a new one.
+                Copy it now. It is shown once and cannot be read back — if it is lost, regenerate the invite for a new one.
               </p>
               <input
                 id="invite-url"
