@@ -38,6 +38,7 @@ const NO_HOLD = '0'
 const settings: OperatorSettings = {
   timeZone: UTC,
   signedInAs: 'Vlad Bardin',
+  publicBaseUrl: null,
   marginMinutes: 15,
   minNoticeMinutes: 120,
   dailyCap: 4,

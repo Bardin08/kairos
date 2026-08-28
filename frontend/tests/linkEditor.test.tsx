@@ -68,13 +68,14 @@ const ARCHIVED_LINK: AdminLink = {
 
 function show(
   link: AdminLink | null = LINK,
-  options: { onSaved?: () => void; onCancel?: () => void } = {},
+  options: { onSaved?: () => void; onCancel?: () => void; publicBaseUrl?: string | null } = {},
 ) {
   return render(
     <LinkEditor
       link={link}
       patterns={PATTERNS}
       globals={GLOBALS}
+      publicBaseUrl={options.publicBaseUrl ?? null}
       onSaved={options.onSaved ?? vi.fn()}
       onCancel={options.onCancel ?? vi.fn()}
     />,
@@ -192,6 +193,42 @@ test('the copied address keeps its scheme even though the display drops it', () 
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
     `${window.location.origin}/book/${LINK.slug}`,
   )
+})
+
+/**
+ * jsdom serves this suite from http://localhost:3000. PUBLIC_ORIGIN is deliberately a
+ * different host: the two origins differing IS the bug under test, and a fixture where
+ * they match would pass against the old code that read the browser's origin.
+ */
+const PUBLIC_ORIGIN = 'https://kairos.example.test'
+const PUBLIC_HOST = 'kairos.example.test'
+
+test('the copied address uses the configured public origin, not the browser origin', () => {
+  show(LINK, { publicBaseUrl: PUBLIC_ORIGIN })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
+
+  expect(PUBLIC_ORIGIN).not.toBe(window.location.origin)
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    `${PUBLIC_ORIGIN}/book/${LINK.slug}`,
+  )
+})
+
+test('the slug prefix shows the configured public host', () => {
+  show(LINK, { publicBaseUrl: PUBLIC_ORIGIN })
+
+  expect(screen.getByText(`${PUBLIC_HOST}/book/`)).toBeTruthy()
+})
+
+test('with no public origin configured both fall back to the browser', () => {
+  show(LINK, { publicBaseUrl: null })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Copy link address' }))
+
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    `${window.location.origin}/book/${LINK.slug}`,
+  )
+  expect(screen.getByText(`${window.location.host}/book/`)).toBeTruthy()
 })
 
 test('archiving states its consequence before the button, not after the fact', () => {

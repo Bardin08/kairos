@@ -31,6 +31,13 @@ export type Settings = {
   /** IANA id. Every time the API returns is derived from it. */
   timeZone: string
   signedInAs: string | null
+  /**
+   * Where invitees reach this deployment, or null when the operator has configured
+   * nothing. Null means "use the browser's origin", which is the right answer for a
+   * deployment served under a single hostname and the wrong one for a deployment that
+   * keeps its workbench off the public internet.
+   */
+  publicBaseUrl: string | null
   marginMinutes: number
   minNoticeMinutes: number
   dailyCap: number

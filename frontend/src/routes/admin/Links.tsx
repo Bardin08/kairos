@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import RecordTable, { type RecordColumn } from '../../components/RecordTable'
 import { listLinks, type AdminLink, type GlobalLimits, type LinksPage } from './adminLinks'
+import { getSettings } from './adminSettings'
 import Failure from './Failure'
 import LinkEditor from './LinkEditor'
 import SectionNav from './SectionNav'
@@ -46,9 +47,21 @@ export default function Links() {
   // copy, because the server decides the slug, the order and what a limit
   // actually ended up as — and a local patch is where those two drift apart.
   const [reload, setReload] = useState(0)
+  // Read separately from the links, and allowed to fail on its own: it decides
+  // which origin the editor offers to copy, and null is a working answer — the
+  // browser's own origin, which is what the editor used before this existed. A
+  // links table that refused to render because a settings read failed would be a
+  // worse page than one whose copy button falls back.
+  const [publicBaseUrl, setPublicBaseUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
+
+    getSettings(controller.signal)
+      .then((settings) => setPublicBaseUrl(settings.publicBaseUrl))
+      .catch(() => {
+        // Silent on purpose. See the state's own note above.
+      })
 
     listLinks(controller.signal)
       .then((read) => {
@@ -75,6 +88,7 @@ export default function Links() {
         link={editing.link}
         patterns={page.patterns}
         globals={page.globals}
+        publicBaseUrl={publicBaseUrl}
         onSaved={done}
         onCancel={() => setEditing(null)}
       />

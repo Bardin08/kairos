@@ -35,12 +35,15 @@ export default function LinkEditor({
   link,
   patterns,
   globals,
+  publicBaseUrl,
   onSaved,
   onCancel,
 }: {
   link: AdminLink | null
   patterns: AdminPattern[]
   globals: GlobalLimits
+  /** Where invitees reach this deployment, or null when nothing is configured. */
+  publicBaseUrl: string | null
   onSaved: () => void
   onCancel: () => void
 }) {
@@ -61,7 +64,14 @@ export default function LinkEditor({
   // second ago resolves to nothing. The field below still shows `draft.slug`:
   // what is being typed is what the operator is deciding about, and what is
   // copied is what currently works.
-  const address = window.location.origin + BOOK_PATH + (link?.slug ?? draft.slug)
+  //
+  // The CONFIGURED origin, not the browser's. They are the same on a deployment served
+  // under one hostname and different on one that keeps its operator off the public
+  // internet — and there the browser's origin is an address no invitee can open. Null
+  // means nothing is configured, which is the single-hostname case, so the browser's
+  // origin is then the right answer rather than a fallback in the apologetic sense.
+  const origin = publicBaseUrl ?? window.location.origin
+  const address = origin + BOOK_PATH + (link?.slug ?? draft.slug)
 
   function set<K extends keyof EditorDraft>(key: K, value: EditorDraft[K]) {
     setDraft({ ...draft, [key]: value })
@@ -180,7 +190,10 @@ export default function LinkEditor({
                 so the pair ends flush with Name rather than stopping at ctl-md's
                 288px partway through the column. */}
             <span className="prefix">
-              <span className="prefix-static">{window.location.host + BOOK_PATH}</span>
+              <span className="prefix-static">
+                {(publicBaseUrl === null ? window.location.host : new URL(publicBaseUrl).host) +
+                  BOOK_PATH}
+              </span>
               <input
                 id="link-slug"
                 className="input"

@@ -128,6 +128,7 @@ beforeEach(() => {
   vi.mocked(getSettings).mockResolvedValue({
     timeZone: 'Europe/Warsaw',
     signedInAs: null,
+  publicBaseUrl: null,
     marginMinutes: 0,
     minNoticeMinutes: 0,
     dailyCap: 0,

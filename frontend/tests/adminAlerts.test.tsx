@@ -43,6 +43,7 @@ const outbox: Alert = {
 const settings: Settings = {
   timeZone: 'UTC',
   signedInAs: 'Vlad Bardin',
+  publicBaseUrl: null,
   marginMinutes: 15,
   minNoticeMinutes: 120,
   dailyCap: 4,
