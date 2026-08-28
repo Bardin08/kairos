@@ -262,6 +262,13 @@
        both the floor and the cap, so the two can never drift apart into a
        shorter-then-taller version of the bug they exist to close. */
     --slots-h: 300px;
+    /* The slot panel's header — the date and the count — as a fixed box, gap
+       included: one line of --text-sm at --leading-tight is about 16px and the
+       gap below it is --space-3, so 32px holds both with the slack acting as
+       the gap. Stated as one number rather than a height plus a margin because
+       the frame below is composed from it, and a margin outside the sum would
+       make the composition wrong by exactly 12px. */
+    --slots-head-h: 32px;
     --measure: 68ch;        /* body copy never runs wider */
     /* An admin form column. Controls inside it are sized to their longest
        plausible value rather than stretched to the card, so a two-digit
@@ -1130,7 +1137,9 @@
     align-items: baseline;
     justify-content: space-between;
     gap: var(--space-3);
-    margin-bottom: var(--space-3);
+    /* The gap below the header is this box's own slack rather than a margin, so
+       `--slots-h + --slots-head-h` is the panel's true height. */
+    height: var(--slots-head-h);
   }
   .slots-date { font-size: var(--text-sm); font-weight: var(--weight-semi); }
 
@@ -1140,6 +1149,28 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   @media (min-width: 861px) {
+    /* THE FRAME EVERY STATE OF THE PANEL SHARES.
+       The floor on `.slots` below stopped the card moving between DAYS and could
+       not stop it moving between MONTHS, because `.slots` lives inside SlotList
+       and SlotList is one of four branches in this element. Changing month sets
+       `slots` to null while the fetch is in flight, so the panel became the
+       single line `Finding open times…` and sprang back when the times arrived —
+       the floor never applied, because the element carrying it was not mounted.
+       Composed from the two heights rather than given a third number, so the
+       frame cannot drift from what it frames. */
+    .slot-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: calc(var(--slots-h) + var(--slots-head-h));
+    }
+    /* The short states — loading, no times, the error — centre in the frame. A
+       one line message pinned to the top of a 332px box reads as a fragment;
+       centred, it reads as the panel's current state. SlotList is the `section`
+       and is excluded: it already fills the frame, so it has nothing to centre. */
+    .slot-panel > :not(section) {
+      margin-block: auto;
+    }
+
     .slots {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       /* Floor equal to the cap: a short day's column is padded out to the

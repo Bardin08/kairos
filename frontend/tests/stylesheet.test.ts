@@ -176,3 +176,21 @@ test('a page header is the tap-floor tall whether or not it carries an action', 
 
   expect(css).toContain('min-height: var(--tap);\n    margin-bottom: var(--space-5);')
 })
+
+// jsdom performs no layout, so nothing here can assert a rendered height: a test that
+// mounted Book and read offsetHeight would report 0 against any stylesheet at all. What
+// is assertable is that the declarations exist, and these three are load-bearing — the
+// booking panel's four states share one frame only because they agree.
+//
+// The bug they close: the floor used to live on `.slots`, inside SlotList, and SlotList
+// is one of four branches. Changing month sets `slots` to null while the fetch is in
+// flight, so the panel collapsed to the single line `Finding open times…` and sprang
+// back when the times arrived — the floor never applied, because the element carrying it
+// was not mounted.
+test('the booking panel frame is composed from the head height and the slot height', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('--slots-head-h:')
+  expect(css).toContain('min-height: calc(var(--slots-h) + var(--slots-head-h))')
+  expect(css).toContain('height: var(--slots-head-h)')
+})

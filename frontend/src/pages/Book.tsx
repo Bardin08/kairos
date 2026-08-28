@@ -599,7 +599,12 @@ export default function Book() {
               onSelect={chooseDay}
             />
 
-            <div>
+            {/* Every state of the panel lives in here, and the frame is on THIS
+                element rather than on `.slots` inside SlotList: three of the four
+                branches below never render SlotList, and the one that does is
+                unmounted while a month is being fetched. A floor on the inner
+                element therefore applied exactly when it was not needed. */}
+            <div className="slot-panel">
               {slotsError !== null ? (
                 <div className="empty">
                   <p>{slotsError.message}</p>
