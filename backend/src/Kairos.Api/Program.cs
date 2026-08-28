@@ -192,7 +192,7 @@ builder.Services.AddScoped<IntegrationCredentialStore>();
 // than a query the endpoint runs itself.
 builder.Services.AddScoped<IOperatorAlertSource, IntegrationAlertSource>();
 
-builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddPublicBaseUrl(builder.Configuration);
 
 // Stateless, every one of them, and holding nothing per request: the builders render text, the
 // sender opens a connection per message, and the mailers only compose. The HTML renderer holds
@@ -454,8 +454,9 @@ if (!app.Services.GetRequiredService<IOptions<EmailOptions>>().Value.IsConfigure
 {
     app.Logger.LogWarning(
         "{Section} is not configured: bookings will be written and nobody will be emailed. Set "
-        + $"{EmailOptions.SectionName}:Host, {EmailOptions.SectionName}:From and "
-        + $"{EmailOptions.SectionName}:PublicBaseUrl to turn confirmations on.",
+        + $"{EmailOptions.SectionName}:Host, {EmailOptions.SectionName}:From, and a public base "
+        + $"URL — {AppOptions.SectionName}:PublicBaseUrl, or {EmailOptions.SectionName}:PublicBaseUrl "
+        + "to override it for mail alone — to turn confirmations on.",
         EmailOptions.SectionName);
 }
 
