@@ -50,15 +50,19 @@ public class InvitesAdminTests
     /// <summary>The key present and holding null, which a typed request instance cannot express.</summary>
     private const string NullPrefillBody = """{"prefill":null}""";
 
+    /// <summary>A body that parses and asks for nothing, for a request that must never be read.</summary>
+    private const string EmptyJsonBody = "{}";
+
     /// <summary>The lower-cased <see cref="InviteState"/> names, which is what a row carries.</summary>
     private const string OpenState = "open";
     private const string RevokedState = "revoked";
 
     /// <summary>
-    /// The frontend's booking route and the key it reads the token off — <c>/book/:slug</c> in
-    /// <c>App.tsx</c>. Written out here the way <see cref="Integrations.BookingMailerTests"/>
-    /// writes <c>/manage/</c>: the production constants are private, and a test that imported them
-    /// would pin the URL against itself rather than against the page that has to answer it.
+    /// The booking route the frontend router publishes — <c>/book/:slug</c> — and the key it reads
+    /// the token off. Written out here the way <see cref="Integrations.BookingMailerTests"/> writes
+    /// <c>/manage/</c> rather than reaching for <c>BookingMailer.ManagePath</c>: the production
+    /// constants are private, and a test that imported them would pin the URL against itself rather
+    /// than against the page that has to answer it.
     /// </summary>
     private const string BookingPath = "book";
 
@@ -89,6 +93,20 @@ public class InvitesAdminTests
 
     private static readonly string InvitesPath =
         $"{ApiVersions.V1}/admin/links/{LinkId}/invites";
+
+    /// <summary>
+    /// Every route <see cref="InvitesAdminEndpoints.MapInvitesAdmin"/> maps, as a verb and a path.
+    /// The two that take an invite name one that was never issued: the gate has to answer before
+    /// the row is read, so a 404 from either would be a route querying the database on behalf of
+    /// an anonymous caller.
+    /// </summary>
+    public static TheoryData<string, string> OperatorRoutes => new()
+    {
+        { HttpMethod.Get.Method, InvitesPath },
+        { HttpMethod.Post.Method, InvitesPath },
+        { HttpMethod.Post.Method, $"{InvitesPath}/{MissingInviteId}/revoke" },
+        { HttpMethod.Post.Method, $"{InvitesPath}/{MissingInviteId}/regenerate" },
+    };
 
     /// <summary>
     /// The 201 is the only place a URL ever exists, so the list has to be checked for the token
@@ -506,16 +524,35 @@ public class InvitesAdminTests
     /// <summary>
     /// 401 and not 302. These routes are reached with fetch, and a fetch cannot follow a redirect
     /// to the identity provider's origin — it fails as an opaque CORS error saying nothing about
-    /// the session having expired. It is also the assertion that dies if these routes are ever
-    /// mapped onto the anonymous group instead of <see cref="AdminGroup.MapAdmin"/>.
+    /// the session having expired. It is also the assertion that dies if any of these routes is
+    /// ever mapped onto the anonymous group instead of <see cref="AdminGroup.MapAdmin"/>.
     /// </summary>
-    [Fact]
-    public async Task List_WithoutASession_IsUnauthorizedRatherThanARedirect()
+    /// <remarks>
+    /// One row per route rather than one case for the list and an inference for the other three:
+    /// <see cref="EndpointPolicySweepTests"/> proves every route under the admin prefix carries the
+    /// policy, which is the stronger statement about routes nobody has written a case for, but it
+    /// says nothing about what a caller holding no session is actually answered.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(OperatorRoutes))]
+    public async Task EveryOperatorRoute_WithoutASession_IsUnauthorizedRatherThanARedirect(
+        string method,
+        string path)
     {
         using var app = Seeded();
 
-        var response = await app.Client.GetAsync(
-            InvitesPath, TestContext.Current.CancellationToken);
+        using var request = new HttpRequestMessage(new HttpMethod(method), path);
+        if (request.Method != HttpMethod.Get)
+        {
+            // A body, because the request has to be one routing will match at all. A POST carrying
+            // no content misses the route that declares it consumes JSON and is answered by the
+            // API's catch-all 404 instead — measured, and it says nothing about the gate. The gate
+            // still answers before anything reads this, which is why the content is empty.
+            request.Content = new StringContent(
+                EmptyJsonBody, Encoding.UTF8, MediaTypeNames.Application.Json);
+        }
+
+        var response = await app.Client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
