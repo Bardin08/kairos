@@ -8,10 +8,13 @@ import MonthGrid from '../components/MonthGrid'
 import SlotList from '../components/SlotList'
 import {
   asApiError,
+  getInvite,
   getLink,
   getSlots,
   type ApiError,
   type Booking,
+  type Invite,
+  type InviteState,
   type Link,
 } from '../lib/api'
 import {
@@ -28,6 +31,7 @@ import {
   zonedDate,
   zonedTime,
 } from '../lib/time'
+import { applyPrefill, FILLABLE, type Details } from './bookPrefill'
 
 // One corrupt stored availability rule kills every range containing that
 // weekday, so there is no day to mark and no month to page to. It is the whole
@@ -39,6 +43,27 @@ const CORRUPT_AVAILABILITY = 'pattern_invalid'
 // the title is prose the server may reword at any release, the code is the
 // contract it keeps.
 const NO_SUCH_LINK = 'not_found'
+
+// The one invite state that fills a form in, and the only one that is still
+// worth spending. The other three are stale rather than broken.
+const INVITE_OPEN = 'open'
+
+// The query key an invite URL carries its token on, matching what the operator's
+// Copy button builds — InvitesAdminEndpoints.TokenQueryKey.
+const INVITE_TOKEN_KEY = 'i'
+
+// The one state that names a date. "Expired" on its own leaves the reader unable
+// to tell whether they missed it by an hour or by a month.
+const INVITE_EXPIRED = 'expired'
+
+// One clause per state that closed the invitation, because "this did not work"
+// is not something a reader can do anything with. What follows the clause is the
+// same for all three, so it is written once below rather than three times here.
+const STALE_INVITE: Record<Exclude<InviteState, typeof INVITE_OPEN>, string> = {
+  consumed: 'has already been used',
+  revoked: 'was withdrawn',
+  expired: 'expired',
+}
 
 const NEXT_MONTH = 1
 const PREVIOUS_MONTH = -1
@@ -71,6 +96,13 @@ export default function Book() {
   // every time on screen out from under a selection already made.
   const [zone] = useState(localZone)
 
+  // Read once too, and off `window` rather than the router: wouter parses the
+  // path, and an invite arrives in the query string, which it does not.
+  const [token] = useState(
+    () => new URLSearchParams(window.location.search).get(INVITE_TOKEN_KEY),
+  )
+  const [invite, setInvite] = useState<Invite | null>(null)
+
   const [link, setLink] = useState<Link | null>(null)
   const [linkError, setLinkError] = useState<ApiError | null>(null)
 
@@ -97,7 +129,13 @@ export default function Book() {
   // Lives here, not in the form. A 409 sends the invitee back to the times to
   // choose again, which unmounts the form — and losing a typed name and email to
   // a race they did not cause is a worse outcome than the lost slot.
-  const [details, setDetails] = useState({ name: '', email: '', notes: '' })
+  const [details, setDetails] = useState<Details>({ name: '', email: '', notes: '' })
+
+  // Which fields the invitee has been in. A ref rather than state because
+  // nothing on screen changes when a field is first touched, and because the
+  // invite read below has to see the set as it stands the moment it resolves
+  // rather than one captured by the render that started the request.
+  const touched = useRef(new Set<string>())
 
   const listRef = useRef<HTMLElement>(null)
   const wantFocus = useRef(false)
@@ -127,6 +165,37 @@ export default function Book() {
 
     return () => controller.abort()
   }, [slug])
+
+  useEffect(() => {
+    if (token === null) return
+
+    const controller = new AbortController()
+
+    getInvite(token, controller.signal)
+      .then((found) => {
+        if (controller.signal.aborted) return
+        setInvite(found)
+        // Seeded here rather than from a second effect watching `invite`, which
+        // is what makes "exactly once" a property of where the code sits rather
+        // than of a flag guarding it: this runs when the read lands, and the
+        // read happens once. `touched` is consulted at that moment, so a field
+        // the invitee typed into while the request was in flight keeps what they
+        // typed — the race this whole one-shot exists for.
+        if (found.state === INVITE_OPEN) {
+          setDetails((current) => applyPrefill(current, found.prefill, touched.current))
+        }
+      })
+      .catch(() => {
+        // A token nobody issued is not an error this page reports, and neither
+        // is a read that never arrived. There is still a link, still a month of
+        // times, and the ordinary booking form is exactly what a null invite
+        // draws. The 404 is deliberately indistinguishable from the rest here:
+        // telling a guesser that a token was merely wrong is a question about a
+        // row they have no business reading.
+      })
+
+    return () => controller.abort()
+  }, [token])
 
   useEffect(() => {
     if (link === null || duration === null || month === null) return
@@ -246,6 +315,49 @@ export default function Book() {
     setStep('choose')
   }
 
+  // The form hands back the whole object rather than the field that moved, so
+  // what the invitee has been in is worked out by comparing the two. Marked on
+  // the first keystroke and never unmarked: clearing a field is a decision the
+  // operator's guess does not get to overrule either.
+  function changeDetails(next: Details) {
+    for (const field of FILLABLE) {
+      if (next[field] !== details[field]) touched.current.add(field)
+    }
+    setDetails(next)
+  }
+
+  // In the INVITEE's zone, like every other time this page draws: the organizer's
+  // calendar is not something the reader of this line holds. Null when the invite
+  // never lapses, which is the ordinary invite.
+  const deadline =
+    invite === null || invite.expiresAt === null
+      ? null
+      : `${longDate(zonedDate(invite.expiresAt, zone))}, ${zonedTime(invite.expiresAt, zone)}`
+
+  const expiredOn =
+    invite !== null && invite.state === INVITE_EXPIRED && deadline !== null
+      ? ` on ${deadline}`
+      : ''
+
+  const staleInvite =
+    invite === null || invite.state === INVITE_OPEN
+      ? null
+      : `This personal invitation ${STALE_INVITE[invite.state]}${expiredOn}, so nothing was filled in for you. Every time below is still open to book.`
+
+  // The other end of the same field, and why the API answers it whatever the
+  // state: a time-limited offer whose limit the invitee cannot see is not one.
+  const goodUntil = invite !== null && invite.state === INVITE_OPEN ? deadline : null
+
+  // Dropped only where the read POSITIVELY reported a state other than open: the
+  // write refuses that token, so sending it buys an alarming sentence and nothing
+  // else. A read that FAILED reports nothing — a blip, a timeout, a rate limit on
+  // a reloaded page — and dropping the token there would book the meeting and
+  // leave the operator's single-use link still spendable, which is the one thing
+  // this feature exists to hold. So it still goes; if it does turn out to be
+  // spent, BookingForm's own refusal path clears it and the next press books
+  // without it.
+  const spendable = invite !== null && invite.state !== INVITE_OPEN ? null : token
+
   const chosen =
     activeDay !== null && activeStart !== null && duration !== null
       ? {
@@ -314,7 +426,8 @@ export default function Book() {
           durationMinutes={duration}
           zone={zone}
           details={details}
-          onDetails={setDetails}
+          inviteToken={spendable}
+          onDetails={changeDetails}
           onBack={() => setStep('choose')}
           onBooked={(booking) => {
             setBooked(booking)
@@ -595,7 +708,32 @@ export default function Book() {
           </span>
         </header>
 
-        <main>{body()}</main>
+        <main>
+          {/* The region is in the document from the first render even when it
+              holds nothing. A live region inserted at the same moment as its
+              text is announced unevenly across screen readers; one that was
+              already there announces every time. Polite and never assertive:
+              the times are all still bookable, so there is nothing here worth
+              interrupting somebody mid-sentence for. */}
+          <div role="status" aria-live="polite">
+            {step !== 'done' && staleInvite !== null && (
+              // `.empty` is the stylesheet's own reason-and-recovery box —
+              // sunken, dashed, no tint — and it is already what this page says
+              // a closed month in. Nothing in kairos.css needed adding.
+              <div className="empty mb-5">
+                <p className="numeric">{staleInvite}</p>
+              </div>
+            )}
+
+            {step !== 'done' && goodUntil !== null && (
+              <p className="prose numeric mb-5">
+                This personal invitation is good until {goodUntil}, in {zone}.
+              </p>
+            )}
+          </div>
+
+          {body()}
+        </main>
 
         <footer className="fine page-foot">Scheduled with Kairos</footer>
       </div>

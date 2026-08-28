@@ -242,6 +242,12 @@ export function createBooking(
     /** The BOOKER's IANA zone — the one they read the times in. */
     timeZone: string
     notes: string
+    /**
+     * The token off a personal invite's URL, absent for an ordinary booking. The
+     * invite is spent by this write, inside the transaction that takes the slot,
+     * so a token is never remembered server-side between the read and this call.
+     */
+    inviteToken?: string
   },
   signal?: AbortSignal,
 ): Promise<Booking> {
@@ -250,6 +256,37 @@ export function createBooking(
 
 export function getBooking(token: string, signal?: AbortSignal): Promise<Booking> {
   return request<Booking>(`/bookings/${encodeURIComponent(token)}`, { signal })
+}
+
+/**
+ * The invitation this URL carries could not be spent: nobody was issued that
+ * token, or it has already been used, or the operator took it back, or its
+ * deadline passed, or it belongs to another link. One code for all five, and the
+ * recovery is the same for all five — book without it. A 409, but NOT a lost
+ * slot: nothing was written and the time is still free.
+ */
+export const INVITE_SPENT = 'invite_spent'
+
+/** Where a personal invite stands. Only `open` still fills a form in. */
+export type InviteState = 'open' | 'consumed' | 'revoked' | 'expired'
+
+/** One personal invite, as the booking page needs it before it draws a form. */
+export type Invite = {
+  slug: string
+  state: InviteState
+  /** ISO instant, or null when the invite never lapses. */
+  expiresAt: string | null
+  /** Keyed by the booking payload's own field names — `notes`, not `Notes`. */
+  prefill: Record<string, string>
+}
+
+/**
+ * 404 only for a token no invite has. Consumed, revoked and expired all answer
+ * 200 carrying their state, because a stale invite is still a booking page
+ * somebody should be able to use.
+ */
+export function getInvite(token: string, signal?: AbortSignal): Promise<Invite> {
+  return request<Invite>(`/invites/${encodeURIComponent(token)}`, { signal })
 }
 
 /** Idempotent: cancelling an already-cancelled booking answers 200, not 404. */
