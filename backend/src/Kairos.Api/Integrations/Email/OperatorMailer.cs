@@ -12,7 +12,7 @@ using NodaTime;
 namespace Kairos.Api.Integrations.Email;
 
 /// <summary>
-/// What the organizer is told about their own suggestions. Plain text, no calendar part, no token.
+/// What the organizer is told about their own suggestions. Both halves, no calendar part, no token.
 /// </summary>
 /// <remarks>
 /// A second class rather than a branch in <see cref="BookingMailer"/>, because nothing about the
@@ -26,6 +26,7 @@ namespace Kairos.Api.Integrations.Email;
 /// </remarks>
 public sealed class OperatorMailer(
     EmailSender sender,
+    MailHtmlRenderer html,
     IOptions<EmailOptions> options,
     ILogger<OperatorMailer> logger)
 {
@@ -35,6 +36,8 @@ public sealed class OperatorMailer(
     /// <see cref="BookingMailer"/> builds, which are keyed by a token instead.
     /// </summary>
     private const string MeetingsPath = "admin/meetings";
+
+    private const string AlternativeSubtype = "alternative";
 
     /// <summary>
     /// Sends, or does not, and either way returns — rule 14 at the only place it can be enforced.
@@ -71,7 +74,7 @@ public sealed class OperatorMailer(
 
         try
         {
-            var message = Compose(booking, proposal, notice, timeZoneId);
+            var message = await ComposeAsync(booking, proposal, notice, timeZoneId, cancellationToken);
             var response = await sender.SendAsync(message, cancellationToken);
             logger.LogInformation(
                 "{Notice} for proposal {Proposal} accepted by the relay as {MessageId}: {Response}",
@@ -97,20 +100,27 @@ public sealed class OperatorMailer(
     /// <see cref="BookingMailer"/> follows in the other direction. Passed in rather than read here
     /// because this is a singleton with no database of its own.
     /// </param>
-    public MimeMessage Compose(
+    /// <remarks>
+    /// A two-part alternative and nothing else. Neither notice changes an event — the meeting is
+    /// where it was and the hold is closed — so there is no calendar part to carry and none wanted.
+    /// </remarks>
+    public async Task<MimeMessage> ComposeAsync(
         Booking booking,
         BookingProposal proposal,
         OperatorNotice notice,
-        string timeZoneId)
+        string timeZoneId,
+        CancellationToken cancellationToken)
     {
         var settings = options.Value;
         var organizer = MailboxAddress.Parse(settings.From!);
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
         var zone = DateTimeZoneProviders.Tzdb[timeZoneId];
         var proposed = Instant.FromUnixTimeSeconds(proposal.StartUtc).InZone(zone);
-        var current = Instant.FromUnixTimeSeconds(booking.StartUtc).InZone(zone);
+        var start = Instant.FromUnixTimeSeconds(booking.StartUtc).InZone(zone);
+        var end = Instant.FromUnixTimeSeconds(booking.EndUtc).InZone(zone);
 
-        var headline = notice == OperatorNotice.Declined
+        var declined = notice == OperatorNotice.Declined;
+        var headline = declined
             ? $"{booker.Name} declined the new time for {booking.Link.Name}."
             : $"{booker.Name} did not answer the new time for {booking.Link.Name}.";
 
@@ -118,27 +128,42 @@ public sealed class OperatorMailer(
         // row already Expired can reach the operator about a meeting they themselves cancelled —
         // where telling them it stays put would be the one sentence here that is flatly untrue.
         var standing = booking.Status == BookingStatus.Confirmed
-            ? $"The meeting stays where it is: {When(current)}."
-            : $"The meeting has since been cancelled; it was {When(current)}.";
+            ? "The meeting stays where it is. Nothing has moved and no calendar was touched."
+            : "The meeting has since been cancelled; the time above is where it was.";
 
-        var body = new TextPart(TextFormat.Plain);
-        body.SetText(Encoding.UTF8, $"""
-            {headline}
+        var mail = new MailBody
+        {
+            Headline = headline,
 
-            You suggested {When(proposed)}.
+            // The MEETING's hour, not the one that was suggested: the suggestion is what lapsed,
+            // and the block is where the operator reads what they still have.
+            Fact = new MailFact(
+                $"{OutgoingMail.Time(start)}-{OutgoingMail.Time(end)}",
+                OutgoingMail.Date(start),
+                zone.Id,
+                Was: null),
+            Sentence = standing,
+            Action = new MailAction(
+                declined ? "Open Meetings" : "Suggest another time",
+                OutgoingMail.Url(settings.PublicBaseUrl!, MeetingsPath)),
+            Details =
+            [
+                new MailDetail("Invitee", booker.Name),
+                new MailDetail("Link", booking.Link.Name),
+                new MailDetail(
+                    "You suggested",
+                    $"{OutgoingMail.Date(proposed)}, {OutgoingMail.Time(proposed)}"),
+            ],
+            Footer = "Sent because you suggested a new time.",
+        };
 
-            {standing}
+        var text = new TextPart(TextFormat.Plain);
+        text.SetText(Encoding.UTF8, MailTextRenderer.Render(mail));
 
-            {OutgoingMail.Url(settings.PublicBaseUrl!, MeetingsPath)}
-            """);
+        var markup = new TextPart(TextFormat.Html);
+        markup.SetText(Encoding.UTF8, await html.RenderAsync(mail, cancellationToken));
 
-        return OutgoingMail.Envelope(headline, body, organizer, organizer);
+        return OutgoingMail.Envelope(
+            headline, new Multipart(AlternativeSubtype) { text, markup }, organizer, organizer);
     }
-
-    /// <summary>
-    /// A day and an hour in one phrase, because every instant in this message is read against
-    /// another one and a column of half-written times is how a call gets missed.
-    /// </summary>
-    private static string When(ZonedDateTime value) =>
-        $"{OutgoingMail.Date(value)} at {OutgoingMail.Time(value)} ({value.Zone.Id})";
 }

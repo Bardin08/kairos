@@ -1,6 +1,8 @@
 using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence.Entities;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using MimeKit;
@@ -46,7 +48,7 @@ public class OperatorMailerTests
 
     private const string DeclinedHeadline = $"{BookerName} declined the new time for {LinkName}.";
     private const string ExpiredHeadline = $"{BookerName} did not answer the new time for {LinkName}.";
-    private const string StandsWhereItWas = "The meeting stays where it is:";
+    private const string StandsWhereItWas = "The meeting stays where it is.";
     private const string SinceCancelled = "The meeting has since been cancelled";
 
     /// <summary>The proposal's hour in Tokyo. 11:00Z is 20:00 there and 13:00 in Warsaw.</summary>
@@ -54,6 +56,9 @@ public class OperatorMailerTests
 
     /// <summary>And the meeting's own. 07:00Z is 16:00 in Tokyo and 09:00 in Warsaw.</summary>
     private const string CurrentInTokyo = "16:00";
+
+    /// <summary>The plain half and the rendered half. Nothing else belongs in this message.</summary>
+    private const int AlternativeParts = 2;
 
     private static readonly Duration MeetingLength = Duration.FromMinutes(DurationMinutes);
 
@@ -70,12 +75,12 @@ public class OperatorMailerTests
     /// address is the one Kairos sends from, the only operator mailbox it has.
     /// </summary>
     [Fact]
-    public void Compose_ADeclinedProposal_GoesToTheSendingAddressWithNoCalendarPart()
+    public async Task Compose_ADeclinedProposal_GoesToTheSendingAddressWithNoCalendarPart()
     {
-        var message = Compose(OperatorNotice.Declined);
+        var message = await Compose(OperatorNotice.Declined);
 
         message.To.Mailboxes.Single().Address.ShouldBe(FromAddress);
-        message.BodyParts.OfType<TextPart>().ShouldHaveSingleItem();
+        message.BodyParts.ShouldNotContain(part => part.ContentType.IsMimeType("text", "calendar"));
         message.Attachments.ShouldBeEmpty();
     }
 
@@ -84,9 +89,9 @@ public class OperatorMailerTests
     /// anywhere in it — the link the invitee held is spent.
     /// </summary>
     [Fact]
-    public void Compose_ADeclinedProposal_SaysSoAndPointsAtTheWorkbench()
+    public async Task Compose_ADeclinedProposal_SaysSoAndPointsAtTheWorkbench()
     {
-        var body = Plain(Compose(OperatorNotice.Declined));
+        var body = Plain(await Compose(OperatorNotice.Declined));
 
         body.ShouldContain(DeclinedHeadline);
         body.ShouldContain($"{BaseUrl}/admin/meetings");
@@ -97,9 +102,9 @@ public class OperatorMailerTests
     /// no. Both end on the sentence that makes the mail actionable — the meeting has not moved.
     /// </summary>
     [Fact]
-    public void Compose_AnExpiredProposal_SaysNobodyAnsweredAndTheMeetingStandsWhereItWas()
+    public async Task Compose_AnExpiredProposal_SaysNobodyAnsweredAndTheMeetingStandsWhereItWas()
     {
-        var body = Plain(Compose(OperatorNotice.Expired));
+        var body = Plain(await Compose(OperatorNotice.Expired));
 
         body.ShouldContain(ExpiredHeadline);
         body.ShouldContain(StandsWhereItWas);
@@ -111,9 +116,9 @@ public class OperatorMailerTests
     /// up would otherwise tell the operator a meeting they cancelled stays where it is.
     /// </summary>
     [Fact]
-    public void Compose_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
+    public async Task Compose_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
     {
-        var body = Plain(Compose(OperatorNotice.Expired, BookingStatus.Cancelled));
+        var body = Plain(await Compose(OperatorNotice.Expired, BookingStatus.Cancelled));
 
         body.ShouldNotContain(StandsWhereItWas);
         body.ShouldContain(SinceCancelled);
@@ -125,13 +130,32 @@ public class OperatorMailerTests
     /// zone is a missed call.
     /// </summary>
     [Fact]
-    public void Compose_Always_RendersBothTimesInTheOrganizersOwnZone()
+    public async Task Compose_Always_RendersBothTimesInTheOrganizersOwnZone()
     {
-        var body = Plain(Compose(OperatorNotice.Expired));
+        var body = Plain(await Compose(OperatorNotice.Expired));
 
         body.ShouldContain(ProposedInTokyo);
         body.ShouldContain(CurrentInTokyo);
         body.ShouldContain(OrganizerZone);
+    }
+
+    /// <summary>
+    /// No calendar part here and none wanted: nothing about a declined or lapsed suggestion
+    /// changes an event, so a two-part alternative is the whole message.
+    /// </summary>
+    [Theory]
+    [InlineData(OperatorNotice.Declined)]
+    [InlineData(OperatorNotice.Expired)]
+    public async Task ComposeAsync_EachNotice_IsPlainAndHtmlAndNothingElse(OperatorNotice notice)
+    {
+        var message = await Compose(notice);
+        var alternative = Alternative(message);
+
+        alternative.ContentType.MimeType.ShouldBe("multipart/alternative");
+        alternative.Count.ShouldBe(AlternativeParts);
+        alternative[0].ContentType.MimeType.ShouldBe("text/plain");
+        alternative[1].ContentType.MimeType.ShouldBe("text/html");
+        message.BodyParts.ShouldNotContain(part => part.ContentType.IsMimeType("text", "calendar"));
     }
 
     /// <summary>
@@ -170,18 +194,31 @@ public class OperatorMailerTests
     }
 
     /// <summary>Composed, written and parsed back, so what is read is what a relay would hand on.</summary>
-    private static MimeMessage Compose(
+    private static async Task<MimeMessage> Compose(
         OperatorNotice notice,
         BookingStatus status = BookingStatus.Confirmed)
     {
+        var message = await Mailer(Options()).ComposeAsync(
+            Booking(status), Proposal(), notice, OrganizerZone, TestContext.Current.CancellationToken);
+
         using var stream = new MemoryStream();
-        Mailer(Options()).Compose(Booking(status), Proposal(), notice, OrganizerZone).WriteTo(stream);
+        message.WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }
 
+    /// <summary>
+    /// The alternative, reached down the tree rather than off <see cref="MimeMessage.BodyParts"/>:
+    /// that enumeration flattens the tree to its leaves, so the container this test is about is
+    /// the one thing it never yields. Assignable rather than exact, because a written and parsed
+    /// multipart/alternative comes back as <c>MultipartAlternative</c>.
+    /// </summary>
+    private static Multipart Alternative(MimeMessage message) =>
+        message.Body.ShouldBeAssignableTo<Multipart>()!;
+
     private static string Plain(MimeMessage message) =>
-        message.BodyParts.OfType<TextPart>().Single().Text;
+        message.BodyParts.OfType<TextPart>()
+            .Single(part => part.ContentType.IsMimeType("text", "plain")).Text;
 
     private static EmailOptions Options() =>
         new()
@@ -196,7 +233,12 @@ public class OperatorMailerTests
     private static OperatorMailer Mailer(EmailOptions options)
     {
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
-        return new OperatorMailer(new EmailSender(wrapped), wrapped, NullLogger<OperatorMailer>.Instance);
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        return new OperatorMailer(
+            new EmailSender(wrapped),
+            new MailHtmlRenderer(services, services.GetRequiredService<ILoggerFactory>()),
+            wrapped,
+            NullLogger<OperatorMailer>.Instance);
     }
 
     private static Booking Booking(BookingStatus status = BookingStatus.Confirmed)
