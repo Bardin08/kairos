@@ -36,7 +36,7 @@ const VIEWS: View[] = [
  * page as a pressed toggle. `.segmented` paints all three in one rule.
  *
  * No heading: both pages own a `page-header` with an `<h1>` already, and this
- * sits under it.
+ * sits inside it, beside that page's primary action.
  *
  * Sized to its labels, and separated from the Open/All filter below by position
  * rather than by scale. It once wore `.segmented-equal` and spanned the content

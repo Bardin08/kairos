@@ -143,29 +143,34 @@ export default function Links() {
 
   return (
     <>
+      {/* Heading alone on the left; the switch and the primary action grouped on
+          the right. `.page-header` is `space-between`, so a third direct child
+          would space out evenly instead of grouping — the `.row` is what keeps
+          the two controls together against the right edge. */}
       <div className="page-header">
         <h1 className="title-page">Links</h1>
-        <button
-          className="btn btn-primary"
-          type="button"
-          disabled={page === null}
-          onClick={() => setEditing({ link: null })}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            aria-hidden="true"
+        <div className="row gap-2">
+          <SectionNav />
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={page === null}
+            onClick={() => setEditing({ link: null })}
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          New link
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            New link
+          </button>
+        </div>
       </div>
-
-      <SectionNav />
 
       <Failure error={failure} className="mb-5" />
 
