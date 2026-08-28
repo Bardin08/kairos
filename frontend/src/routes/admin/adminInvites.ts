@@ -27,6 +27,10 @@ export type AdminInviteState = 'open' | 'consumed' | 'revoked' | 'expired'
  */
 export type AdminInvite = {
   id: string
+  /** The link this invite is on. The row's own actions are routed per link. */
+  linkId: string
+  /** Its name, not its slug — a column headed Link is read by whoever named it. */
+  linkName: string
   state: AdminInviteState
   /** Keyed by the booking payload's own field names — `name`, `email`, `notes`. */
   prefill: Record<string, string>
@@ -60,9 +64,9 @@ function inviteOf(linkId: string, inviteId: string): string {
   return `${invitesOf(linkId)}/${encodeURIComponent(inviteId)}`
 }
 
-/** One link's invites, newest first. 404 rather than an empty list for a link that is gone. */
-export function listInvites(linkId: string, signal?: AbortSignal): Promise<AdminInvite[]> {
-  return adminRequest<AdminInvite[]>(invitesOf(linkId), { signal })
+/** Every invite on every link, newest first. */
+export function listAllInvites(signal?: AbortSignal): Promise<AdminInvite[]> {
+  return adminRequest<AdminInvite[]>('/admin/invites', { signal })
 }
 
 export function createInvite(linkId: string, draft: InviteDraft): Promise<IssuedInvite> {

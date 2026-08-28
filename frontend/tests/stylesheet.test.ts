@@ -94,15 +94,40 @@ test('the slot column has a floor equal to its cap, so the card is the same heig
   expect(css).toContain('max-height: var(--slots-h);')
 })
 
-// .segmented's selected style was written for aria-pressed (the duration picker)
-// before the date-state radio group needed the same look for aria-checked. One
-// rule extended to both selectors rather than a second block copied beside it,
+// .segmented's selected style was written for aria-pressed (the duration picker),
+// then extended to aria-checked (the date-state radio group), then to
+// aria-current (the Links section nav, whose options are pages and therefore
+// links). One rule extended to all three rather than blocks copied beside it,
 // matched through the closing brace so dropping a declaration fails here too.
-test('the segmented selected style covers both toggle and radio semantics in one rule', () => {
+test('the segmented selected style covers toggle, radio and page semantics in one rule', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
   expect(css).toContain(
-    '.segmented button[aria-pressed="true"],\n  .segmented button[aria-checked="true"] {\n    background: var(--surface-raised);\n    color: var(--text-primary);\n    font-weight: var(--weight-semi);\n    box-shadow: var(--shadow-1);\n  }',
+    '.segmented button[aria-pressed="true"],\n  .segmented button[aria-checked="true"],\n  .segmented a[aria-current="page"] {\n    background: var(--surface-raised);\n    color: var(--text-primary);\n    font-weight: var(--weight-semi);\n    box-shadow: var(--shadow-1);\n  }',
+  )
+})
+
+// The one thing that can go wrong silently here: a section nav that renders
+// `aria-current="page"` against a stylesheet that only paints `aria-pressed` and
+// `aria-checked` looks like a control with nothing selected, and no rendered test
+// can see it. jsdom has no cascade, so this is the only place it is pinned.
+test('a section nav link is painted by aria-current, not by a toggle attribute', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.segmented a[aria-current="page"]')
+})
+
+// An <a> is not a <button>: the UA centres a button's label inside the box
+// min-height gives it and gives an anchor an underline instead. Measured one
+// declaration at a time against the running page, each of the four moves
+// something — the label to the box's top-left corner, to its top edge, to its
+// left edge, or into an underline. Not the colour: the shared rule above sets
+// that, and it outranks the base `a` tint by layer rather than by this block.
+test('a segmented option that is a link is centred and unadorned like the buttons beside it', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    '.segmented a {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-decoration: none;\n  }',
   )
 })
 
@@ -120,9 +145,22 @@ test('a selected segmented option can carry a danger fill instead of the neutral
 // A measurement against the running app found .segmented buttons rendering at
 // 36px, under DESIGN.md's tap floor (44px minimum, every viewport, no exceptions
 // clause). Fixed at the base rule with the --tap token rather than a literal, so
-// the duration picker and the date-state control share one height.
-test('the segmented button height is the tap-floor token, not a literal', () => {
+// the duration picker, the date-state control and the section nav share one
+// height — the nav's options are links, and the floor binds them the same way.
+test('the segmented option height is the tap-floor token, not a literal, for links too', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
-  expect(css).toContain('.segmented button {\n    min-height: var(--tap);')
+  expect(css).toContain('.segmented button,\n  .segmented a {\n    min-height: var(--tap);')
+})
+
+// `.admin-main` is the admin surface's only scroll container, and this is the
+// declaration that keeps that true. `.visually-hidden` is absolutely positioned,
+// so with the pane static a control column's hidden heading resolves against the
+// initial containing block instead: it escapes the overflow clip and stretches
+// the document to 2073px against a 900px viewport, a second scrollbar nothing in
+// the app scrolls back. No rendered test can guard it — jsdom has no layout.
+test('the admin pane is a containing block, so a hidden heading cannot escape its scroll clip', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.admin-main { position: relative;')
 })

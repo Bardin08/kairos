@@ -609,7 +609,14 @@
   /* The only scroll container on the admin surface. The shell is exactly one
      viewport tall, so the rail beside it cannot travel off the top however long
      the table inside here gets. */
-  .admin-main { min-width: 0; overflow-y: auto; padding: var(--space-6); }
+  /* `position: relative` is load-bearing, not tidiness. `.visually-hidden` is
+     absolutely positioned, and control-column headings carry one — from
+     `RecordTable`, and by hand in `Integrations.tsx`. With this pane static
+     that span resolves against the initial containing block, escapes the clip
+     declared here, and stretches the document to its own static position:
+     measured 2073px against a 900px viewport on the link editor, a second
+     scrollbar nothing here ever scrolls back. */
+  .admin-main { position: relative; min-width: 0; overflow-y: auto; padding: var(--space-6); }
   /* Below the breakpoint the tab bar is fixed over the foot of this pane, so
      the pane reserves its measured height and keeps a page margin under the
      last row rather than ending flush against the bar. */
@@ -887,12 +894,17 @@
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
   }
-  .segmented button {
+  /* A <button> in here is a toggle (duration picker) or a radio option
+     (date-state control). An <a> is a section nav, where an option is a page
+     with its own URL rather than a state — so it stays a link, and middle-click,
+     cmd-click, open-in-new-tab and copy-link-address keep working. */
+  .segmented button,
+  .segmented a {
     min-height: var(--tap); /* DESIGN.md's tap floor: 44px minimum on every
                                viewport, no exceptions clause. Fixed at the
-                               base rule so the duration picker and the
-                               date-state control share one height rather
-                               than drifting apart by modifier. */
+                               base rule so the duration picker, the date-state
+                               control and the section nav share one height
+                               rather than drifting apart by modifier. */
     padding-inline: var(--space-3);
     border-radius: var(--radius-sm);
     font-size: var(--text-sm);
@@ -902,11 +914,32 @@
     transition: background var(--dur-instant) var(--ease-standard),
                 color var(--dur-instant) var(--ease-standard);
   }
+  /* What a <button> gets from the UA stylesheet and an <a> does not. Measured
+     against the running page one declaration at a time: without `display` the
+     anchor is a block and its label sits at the top-left corner; without
+     `align-items` the label keeps the top edge; without `justify-content` it
+     keeps the left edge, which bites only because the section nav wears
+     `.segmented-equal` and its option is far wider than its label; without
+     `text-decoration` it is underlined.
+
+     Not here: the colour. The shared rule above sets it, and that rule is in
+     this layer while `a { color: var(--accent-text) }` is in `@layer base`, so
+     the later layer already wins outright and the accent tint never reached
+     these anchors to be undone. Deleting this whole block leaves them computing
+     the same two neutrals. */
+  .segmented a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+  }
   /* aria-pressed selects a toggle button (duration picker); aria-checked
-     selects a radio option (date-state control). Same look, one rule kept
-     in step rather than two that could drift. */
+     selects a radio option (date-state control); aria-current selects the page
+     a section nav is on. Same look, one rule kept in step rather than three
+     that could drift. */
   .segmented button[aria-pressed="true"],
-  .segmented button[aria-checked="true"] {
+  .segmented button[aria-checked="true"],
+  .segmented a[aria-current="page"] {
     background: var(--surface-raised);
     color: var(--text-primary);
     font-weight: var(--weight-semi);
@@ -925,7 +958,8 @@
     color: var(--status-danger-fg);
   }
   @media (hover: hover) {
-    .segmented button:hover:not([aria-pressed="true"]):not([aria-checked="true"]) { color: var(--text-primary); }
+    .segmented button:hover:not([aria-pressed="true"]):not([aria-checked="true"]),
+    .segmented a:hover:not([aria-current="page"]) { color: var(--text-primary); }
   }
   .fact strong { color: var(--text-primary); font-weight: var(--weight-medium); }
 

@@ -14,7 +14,6 @@ import {
   type LinkLimits,
 } from './adminLinks'
 import Failure from './Failure'
-import InviteList from './InviteList'
 import { CLEAN, changedCount, draftOf, unsavedLabel, type EditorDraft } from './editorDraft'
 import { LIMIT_COPY, LIMIT_KEYS } from './limitCopy'
 
@@ -289,16 +288,6 @@ export default function LinkEditor({
           </button>
         </div>
       </form>
-
-      {/* Outside the form above rather than below its Limits card, and implicit
-          submission is the reason: an <input> inside a form submits that form on
-          Enter, so typing an invitee's name and pressing Enter would have fired
-          Save link. Nothing else here would have — InviteList renders no form of
-          its own and its Generate is a type="button".
-
-          An unsaved link has no id, and every invite route hangs off one, so
-          this is drawn only for a link that exists. */}
-      {link !== null && <InviteList linkId={link.id} />}
 
       {link !== null && (
         <div className="card card-pad mt-5">

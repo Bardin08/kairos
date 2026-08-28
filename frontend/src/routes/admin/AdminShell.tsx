@@ -7,6 +7,7 @@ import { dismissedFor, forget, remember } from './conditionDismissal'
 import ConditionBanner from './ConditionBanner'
 import ConditionRow from './ConditionRow'
 import Availability from './Availability'
+import Invites from './Invites'
 import Links from './Links'
 import Locked from './Locked'
 import Meetings from './Meetings'
@@ -299,9 +300,16 @@ export default function AdminShell() {
             <ConditionBanner alerts={dismissed ? [] : alerts} onDismiss={collapse} />
           </div>
           <Switch>
+            {/* The specific path first, by convention rather than by need:
+                measured against wouter 3.10, a route path matches in full, so
+                neither of these two swallows the other from either position.
+                What would make the order matter is `nest` or a wildcard, and
+                `the invites path renders the personal links` catches that. */}
+            <Route path="/links/invites" component={Invites} />
             <Route path="/links" component={Links} />
-            {/* Ahead of the list route: `<Switch>` renders the first match, so
-                the more specific path is the one it has to try first. */}
+            {/* Ahead of the list route by the same convention, and for the same
+                reason it is only a convention: `/availability` does not match
+                `/availability/<id>` either. */}
             <Route path="/availability/:patternId" component={PatternEditor} />
             <Route path="/availability" component={Availability} />
             <Route path="/meetings" component={Meetings} />

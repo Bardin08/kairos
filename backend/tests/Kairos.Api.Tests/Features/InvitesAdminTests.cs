@@ -78,13 +78,14 @@ public class InvitesAdminTests
     /// <summary>Never seeded, so the link lookup has to refuse it.</summary>
     private static readonly Guid MissingLinkId = Guid.CreateVersion7();
 
-    /// <summary>Enough to cross a millisecond boundary, so two v7 ids order on their timestamps
-    /// rather than on the random bits under them. Thread.Sleep never returns early — the reasoning
-    /// <see cref="Persistence.KeyGenerationTests"/> states for the same sleep.</summary>
-    private const int MillisecondsBetweenIds = 2;
-
     /// <summary>Any gap putting two rows in different seconds. An hour, so neither reads as adjacent.</summary>
     private const long SecondsApart = 3600;
+
+    /// <summary>
+    /// 2035-01-01T00:00:00Z — past any clock this suite runs under, so an invite carrying it stays
+    /// open, and on a whole second, which is the resolution the column stores.
+    /// </summary>
+    private static readonly DateTimeOffset FarAhead = new(2035, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>2020-01-01T00:00:00Z — comfortably before any clock this suite runs under.</summary>
     private static readonly DateTimeOffset LongAgo = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -94,6 +95,12 @@ public class InvitesAdminTests
     private static readonly string InvitesPath =
         $"{ApiVersions.V1}/admin/links/{LinkId}/invites";
 
+    private static readonly string OtherInvitesPath =
+        $"{ApiVersions.V1}/admin/links/{OtherLinkId}/invites";
+
+    /// <summary>The cross-link list, which names no link and so takes no id.</summary>
+    private const string AllInvitesPath = $"{ApiVersions.V1}/admin/invites";
+
     /// <summary>
     /// Every route <see cref="InvitesAdminEndpoints.MapInvitesAdmin"/> maps, as a verb and a path.
     /// The two that take an invite name one that was never issued: the gate has to answer before
@@ -102,7 +109,7 @@ public class InvitesAdminTests
     /// </summary>
     public static TheoryData<string, string> OperatorRoutes => new()
     {
-        { HttpMethod.Get.Method, InvitesPath },
+        { HttpMethod.Get.Method, AllInvitesPath },
         { HttpMethod.Post.Method, InvitesPath },
         { HttpMethod.Post.Method, $"{InvitesPath}/{MissingInviteId}/revoke" },
         { HttpMethod.Post.Method, $"{InvitesPath}/{MissingInviteId}/regenerate" },
@@ -136,7 +143,7 @@ public class InvitesAdminTests
         app.Read(context => context.PersonalInvites.AsNoTracking().Single().TokenHash)
             .ShouldBe(BookingWriter.Hash(token));
 
-        var list = await client.GetAsync(InvitesPath, TestContext.Current.CancellationToken);
+        var list = await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken);
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         var body = await list.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -215,7 +222,7 @@ public class InvitesAdminTests
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
 
         var rows = await ReadRowsAsync(
-            await client.GetAsync(InvitesPath, TestContext.Current.CancellationToken));
+            await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken));
 
         rows.ShouldHaveSingleItem().Prefill.ShouldBeEmpty();
     }
@@ -308,7 +315,7 @@ public class InvitesAdminTests
         // The order the list route promises, over the pair that always ties on CreatedAt: the
         // replacement on top, the row it replaced directly under it.
         var rows = await ReadRowsAsync(
-            await client.GetAsync(InvitesPath, TestContext.Current.CancellationToken));
+            await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken));
 
         rows.Select(row => row.Id).ShouldBe([replacement.Id, original.Id]);
         rows[0].State.ShouldBe(OpenState);
@@ -448,77 +455,83 @@ public class InvitesAdminTests
     }
 
     /// <summary>
-    /// Newest first on the stamp, which is the clause a pair sharing a second never reaches. Both
-    /// halves of the ordering need their own case: with the rows tied, ascending and descending
-    /// return the same list and the sort under test says nothing.
+    /// Newest first on the stamp, over the wire: the reader's order is what the response array
+    /// carries, rather than something a serializer is free to reshuffle — and the stamp each row
+    /// comes back holding is the one it was written with.
     /// </summary>
+    /// <remarks>
+    /// The stamp is asserted here rather than on an invite issued through the route, because this
+    /// is the only fixture that chooses it: nothing overrides the app's clock, so a row created
+    /// over HTTP can be checked against a window and never against a value.
+    ///
+    /// The other half of the ordering — a pair sharing a second, which the CreatedAt clause cannot
+    /// separate — is pinned by
+    /// <see cref="InviteReaderTests.AllAsync_TwoInvitesTiedOnTheSecond_OrdersOnTheIdRatherThanOnStorageOrder"/>.
+    /// It belongs there rather than here: a fixture at this level would have to disagree with every
+    /// incidental order the query plan can fall back on, and the link ids the join walks are seeded
+    /// once for the whole class.
+    /// </remarks>
     [Fact]
-    public async Task List_TwoInvitesFromDifferentSeconds_IsNewestFirst()
+    public async Task ListAll_TwoInvitesFromDifferentSeconds_AreNewestFirstAndCarryTheirStamp()
     {
         using var app = Seeded();
         using var client = app.CreateOperatorClient();
 
+        // Minted back to back, and deliberately not spaced: the stamps are an hour apart, so the
+        // ids never reach the tiebreak and nothing here may depend on the order they were minted in.
         var older = Guid.CreateVersion7();
-        Thread.Sleep(MillisecondsBetweenIds);
         var newer = Guid.CreateVersion7();
 
         SeedInvite(app, older, LongAgoSeconds);
         SeedInvite(app, newer, LongAgoSeconds + SecondsApart);
 
         var rows = await ReadRowsAsync(
-            await client.GetAsync(InvitesPath, TestContext.Current.CancellationToken));
+            await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken));
 
         rows.Select(row => row.Id).ShouldBe([newer, older]);
+        rows.Select(row => row.CreatedAt).ShouldBe([LongAgo.AddSeconds(SecondsApart), LongAgo]);
     }
 
     /// <summary>
-    /// Newest first, and on the id rather than on however the rows happen to be stored. CreatedAt
-    /// is stamped in unix SECONDS, so a regenerate — one row revoked and its replacement added —
-    /// reliably produces a pair the CreatedAt ordering cannot separate, and what comes back for a
-    /// tie is otherwise whatever the scan walked into.
+    /// Why the cross-link route exists: one call answers the invites on every link, and each row
+    /// carries the link's own name — a list spanning links is unreadable without it, and the link
+    /// id alone is not what the operator called it.
+    ///
+    /// One of the two is issued with a deadline and the other with none, which is the whole of what
+    /// the deadline column can say: the operator reads an expiry off this row or reads that it
+    /// never lapses, and a null answered as a date would draw a deadline nobody set.
     /// </summary>
     /// <remarks>
-    /// Seeded rather than issued through the route, and stored newest-FIRST on purpose. Issued
-    /// through the route the ids ascend in step with the storage order, so the guaranteed answer
-    /// and the incidental one agree and neither is being tested — measured: with the tiebreak
-    /// deleted, a test written that way still passed. Written in the opposite order the two
-    /// disagree, and only the id gives the right one.
-    ///
-    /// The ids are UUIDv7 and reach SQLite as canonical hyphenated TEXT, which sorts
-    /// lexicographically and therefore chronologically. That is what
-    /// <see cref="Persistence.KeyGenerationTests"/> pins end to end — the sleep included, since v7
-    /// orders on a millisecond and fills the rest with random bits rather than a counter.
+    /// Nothing here asserts an order, and this fixture could not pin one honestly. The two invites
+    /// are issued milliseconds apart onto a CreatedAt stamped in unix SECONDS, so they tie there
+    /// and the invite ids decide — and two v7 ids minted across two back-to-back HTTP calls can
+    /// land inside one millisecond, where the random tail under the timestamp decides. The
+    /// ordering guarantee is pinned by <see cref="InviteReaderTests"/>, whose ids are minted a
+    /// millisecond apart on purpose.
     /// </remarks>
     [Fact]
-    public async Task List_TwoInvitesStampedInTheSameSecond_OrdersOnTheIdRatherThanOnStorageOrder()
+    public async Task ListAll_InvitesOnTwoLinks_ComeBackTogetherEachNamingItsLinkAndDeadline()
     {
         using var app = Seeded();
         using var client = app.CreateOperatorClient();
 
-        var older = Guid.CreateVersion7();
-        Thread.Sleep(MillisecondsBetweenIds);
-        var newer = Guid.CreateVersion7();
-
-        SeedInvite(app, newer, LongAgoSeconds);
-        SeedInvite(app, older, LongAgoSeconds);
+        var issuedHere = await IssueAsync(client, new CreateInviteRequest { ExpiresAt = FarAhead });
+        var issuedThere = await IssueAsync(client, OtherInvitesPath, new CreateInviteRequest());
 
         var rows = await ReadRowsAsync(
-            await client.GetAsync(InvitesPath, TestContext.Current.CancellationToken));
+            await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken));
 
-        rows.Select(row => row.Id).ShouldBe([newer, older]);
-    }
+        rows.Select(row => row.Id).ShouldBe([issuedHere.Id, issuedThere.Id], ignoreOrder: true);
 
-    [Fact]
-    public async Task List_ForALinkThatDoesNotExist_IsNotFound()
-    {
-        using var app = Seeded();
-        using var client = app.CreateOperatorClient();
+        var here = rows.Single(row => row.Id == issuedHere.Id);
+        here.LinkId.ShouldBe(LinkId);
+        here.LinkName.ShouldBe(LinkName);
+        here.ExpiresAt.ShouldBe(FarAhead);
 
-        var response = await client.GetAsync(
-            $"{ApiVersions.V1}/admin/links/{MissingLinkId}/invites",
-            TestContext.Current.CancellationToken);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        var there = rows.Single(row => row.Id == issuedThere.Id);
+        there.LinkId.ShouldBe(OtherLinkId);
+        there.LinkName.ShouldBe(OtherLinkName);
+        there.ExpiresAt.ShouldBeNull();
     }
 
     /// <summary>
@@ -582,11 +595,15 @@ public class InvitesAdminTests
         return problem;
     }
 
+    private static Task<InviteCreatedResponse> IssueAsync(
+        HttpClient client, CreateInviteRequest request) =>
+        IssueAsync(client, InvitesPath, request);
+
     private static async Task<InviteCreatedResponse> IssueAsync(
-        HttpClient client, CreateInviteRequest request)
+        HttpClient client, string path, CreateInviteRequest request)
     {
         var response = await client.PostAsJsonAsync(
-            InvitesPath, request, TestContext.Current.CancellationToken);
+            path, request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
 
@@ -607,10 +624,9 @@ public class InvitesAdminTests
     }
 
     /// <summary>
-    /// One invite written straight to its row, so the test chooses both its id and the order it is
-    /// stored in — neither of which is the route's to give away. Every field but the id is the
-    /// same, the tie being the whole point; the hash is derived from the id because that column is
-    /// uniquely indexed.
+    /// One invite written straight to its row, so the test chooses both its id and its stamp —
+    /// neither of which is the route's to give away, and the stamp is what the ordering reads. The
+    /// hash is derived from the id because that column is uniquely indexed.
     /// </summary>
     private static void SeedInvite(KairosApp app, Guid id, long createdAt) => app.Seed(context =>
         context.PersonalInvites.Add(new PersonalInvite

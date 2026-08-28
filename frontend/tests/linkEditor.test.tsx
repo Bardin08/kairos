@@ -1,10 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import { ApiError } from '../src/lib/api'
 import * as adminLinks from '../src/routes/admin/adminLinks'
 import type { AdminLink, AdminPattern, GlobalLimits } from '../src/routes/admin/adminLinks'
-import { listInvites } from '../src/routes/admin/adminInvites'
 import LinkEditor from '../src/routes/admin/LinkEditor'
 
 vi.mock('../src/routes/admin/adminLinks', async (importOriginal) => {
@@ -17,16 +16,6 @@ vi.mock('../src/routes/admin/adminLinks', async (importOriginal) => {
     archiveLink: vi.fn(),
     restoreLink: vi.fn(),
   }
-})
-
-// The editor mounts InviteList for a link that exists, and `show()` defaults to
-// one — so without this, most of the tests below reach the real client and fire
-// a fetch at the invites route. Every one of them would pass anyway, because the
-// rejection lands in InviteList's own catch, which is exactly why it would go
-// unnoticed until it did not.
-vi.mock('../src/routes/admin/adminInvites', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/routes/admin/adminInvites')>()
-  return { ...actual, listInvites: vi.fn() }
 })
 
 const GLOBAL_MARGIN = 15
@@ -91,12 +80,6 @@ function show(
     />,
   )
 }
-
-// `resetAllMocks` below strips implementations as well as calls, so the list has
-// to be handed back its answer for every test rather than once at the mock.
-beforeEach(() => {
-  vi.mocked(listInvites).mockResolvedValue([])
-})
 
 afterEach(() => {
   cleanup()
