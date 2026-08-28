@@ -102,7 +102,7 @@ public class BookingMailerTests
     private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 7, 17, 0);
 
     [Fact]
-    public async Task Compose_Always_AttachesTheIcsAsACalendarRequest()
+    public async Task ComposeAsync_Always_AttachesTheIcsAsACalendarRequest()
     {
         var calendar = CalendarPart(await Compose());
 
@@ -117,7 +117,7 @@ public class BookingMailerTests
     /// disagree it drops the update without a word, exactly as it does for a stale SEQUENCE.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_MakesTheMimeMethodAgreeWithTheIcsMethod()
+    public async Task ComposeAsync_Always_MakesTheMimeMethodAgreeWithTheIcsMethod()
     {
         var message = await Compose();
 
@@ -134,7 +134,7 @@ public class BookingMailerTests
     /// is reported — the update is dropped and the invitee arrives at the old hour.
     /// </remarks>
     [Fact]
-    public async Task Compose_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
+    public async Task ComposeAsync_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
     {
         var booking = Booking(sequence: 1);
 
@@ -154,7 +154,7 @@ public class BookingMailerTests
     /// marked CONFIRMED — and a CANCEL body in a part labelled REQUEST is discarded silently.
     /// </summary>
     [Fact]
-    public async Task Compose_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
+    public async Task ComposeAsync_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
     {
         var booking = Booking(sequence: 2);
 
@@ -175,7 +175,7 @@ public class BookingMailerTests
     /// REQUEST at the advanced SEQUENCE that moves the event in their calendar.
     /// </summary>
     [Fact]
-    public async Task Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
+    public async Task ComposeAsync_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
     {
         var booking = Booking(sequence: 1);
 
@@ -198,7 +198,7 @@ public class BookingMailerTests
     /// URL alone, and reads as a mail with something missing.
     /// </remarks>
     [Fact]
-    public async Task Compose_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
+    public async Task ComposeAsync_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
     {
         var message = await Compose(manageToken: null, notice: BookingNotice.Cancellation);
         var body = Plain(message);
@@ -221,7 +221,7 @@ public class BookingMailerTests
     /// why — which the workbench promises them is read, on the panel that collects it.
     /// </summary>
     [Fact]
-    public async Task Compose_ACancellationCarryingAReason_PrintsItUnderTheHeadline()
+    public async Task ComposeAsync_ACancellationCarryingAReason_PrintsItUnderTheHeadline()
     {
         var booking = Booking();
         booking.CancellationReason = CancellationReason;
@@ -238,7 +238,7 @@ public class BookingMailerTests
     /// optional block produces, read by the person least able to ask what was meant.
     /// </summary>
     [Fact]
-    public async Task Compose_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
+    public async Task ComposeAsync_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
     {
         var body = Plain(await Compose(notice: BookingNotice.Cancellation));
 
@@ -251,7 +251,7 @@ public class BookingMailerTests
     /// frontend routes — the raw token in the path, and nothing else keyed alongside it.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_CarriesTheManageLinkInThePlainTextBody() =>
+    public async Task ComposeAsync_Always_CarriesTheManageLinkInThePlainTextBody() =>
         PlainPart(await Compose()).Text.ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
@@ -259,7 +259,7 @@ public class BookingMailerTests
     /// their way back.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_CarriesTheManageLinkInTheCalendarDescription() =>
+    public async Task ComposeAsync_Always_CarriesTheManageLinkInTheCalendarDescription() =>
         Unfold(Ics(await Compose())).ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
@@ -267,7 +267,7 @@ public class BookingMailerTests
     /// through the unfold because a longer link folds and a raw read would then miss it.
     /// </summary>
     [Fact]
-    public async Task Compose_AConfirmationForAMeetingWithAConference_PutsTheJoinUrlInTheCalendarLocation() =>
+    public async Task ComposeAsync_AConfirmationForAMeetingWithAConference_PutsTheJoinUrlInTheCalendarLocation() =>
         Unfold(Ics(await Compose(joinUrl: JoinUrl))).ShouldContain($"LOCATION:{JoinUrl}");
 
     /// <summary>
@@ -275,7 +275,7 @@ public class BookingMailerTests
     /// — a blank one reads as a meeting whose place is unknown.
     /// </summary>
     [Fact]
-    public async Task Compose_AMeetingWithNoConference_WritesNoLocationInTheCalendarPart() =>
+    public async Task ComposeAsync_AMeetingWithNoConference_WritesNoLocationInTheCalendarPart() =>
         Ics(await Compose(joinUrl: null)).ShouldNotContain("LOCATION");
 
     /// <summary>
@@ -283,7 +283,7 @@ public class BookingMailerTests
     /// the double slash it would otherwise produce is enough for some clients to stop linkifying.
     /// </summary>
     [Fact]
-    public async Task Compose_BaseUrlWithATrailingSlash_DoesNotProduceADoubleSlash() =>
+    public async Task ComposeAsync_BaseUrlWithATrailingSlash_DoesNotProduceADoubleSlash() =>
         PlainPart(await Compose(options: Options($"{BaseUrl}/"))).Text
             .ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
@@ -293,7 +293,7 @@ public class BookingMailerTests
     /// normalises whitespace or line endings leaves a file no client will parse.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_KeepsTheFoldedIcsIntactThroughTheTransferEncoding()
+    public async Task ComposeAsync_Always_KeepsTheFoldedIcsIntactThroughTheTransferEncoding()
     {
         var ics = Ics(await Compose());
 
@@ -311,7 +311,7 @@ public class BookingMailerTests
     /// bytes, because dropping either costs the accept/decline control on some client.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_OffersTheInvitationBothAsAnAlternativeAndAsAnAttachment()
+    public async Task ComposeAsync_Always_OffersTheInvitationBothAsAnAlternativeAndAsAnAttachment()
     {
         var message = await Compose();
 
@@ -383,7 +383,7 @@ public class BookingMailerTests
     /// a display name still yields a bare mailto.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_NamesTheSenderAsOrganizerAndTheBookerAsAttendee()
+    public async Task ComposeAsync_Always_NamesTheSenderAsOrganizerAndTheBookerAsAttendee()
     {
         var message = await Compose(options: Options(BaseUrl, from: $"Kairos <{OrganizerAddress}>"));
         var ics = Unfold(Ics(message));
@@ -400,7 +400,7 @@ public class BookingMailerTests
     /// feature is judged on inbox placement rather than on a 250.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_StampsTheMessageIdWithTheSendingDomain() =>
+    public async Task ComposeAsync_Always_StampsTheMessageIdWithTheSendingDomain() =>
         (await Compose()).MessageId.ShouldEndWith("@example.com");
 
     /// <summary>
@@ -409,7 +409,7 @@ public class BookingMailerTests
     /// entirely plausible.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_RendersTheTimesInTheBookersOwnZone()
+    public async Task ComposeAsync_Always_RendersTheTimesInTheBookersOwnZone()
     {
         var message = await Compose();
         var subject = message.Subject!;
@@ -425,7 +425,7 @@ public class BookingMailerTests
     /// apply it, and the meeting would have moved without anybody agreeing to it.
     /// </summary>
     [Fact]
-    public async Task ComposeProposal_Always_CarriesNoCalendarPartAndTheDecisionLink()
+    public async Task ComposeProposalAsync_Always_CarriesNoCalendarPartAndTheDecisionLink()
     {
         var message = await ComposeProposal();
 
@@ -441,7 +441,7 @@ public class BookingMailerTests
     /// invitee is asked to agree to is the one thing on the page they act on.
     /// </summary>
     [Fact]
-    public async Task ComposeProposal_Always_RendersTheProposedTimesInTheBookersOwnZone()
+    public async Task ComposeProposalAsync_Always_RendersTheProposedTimesInTheBookersOwnZone()
     {
         var body = Plain(await ComposeProposal());
 
@@ -455,7 +455,7 @@ public class BookingMailerTests
     /// meeting stays put if they do nothing.
     /// </summary>
     [Fact]
-    public async Task ComposeProposal_Always_SaysWhenTheOfferLapses() =>
+    public async Task ComposeProposalAsync_Always_SaysWhenTheOfferLapses() =>
         Plain(await ComposeProposal()).ShouldContain(Deadline);
 
     /// <summary>

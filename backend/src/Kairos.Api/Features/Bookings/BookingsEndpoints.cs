@@ -101,8 +101,10 @@ public sealed record RescheduleBookingRequest
 /// carrying the organizer's account address, and an invitee's manage token can read this response.
 /// </param>
 /// <param name="ConferenceUrl">
-/// Where to join, or null if this meeting has no second channel. The invitee already has it in
-/// their invitation; it is here so a page can show it without one.
+/// Where to join, or null if this meeting has no second channel. The invitee has it in their
+/// invitation too — the confirmation and every reschedule carry it as a Where row and as the
+/// calendar entry's LOCATION; it is here so a page can show it without one. That sentence was
+/// false from the day it was written until the mail identity task made it true.
 /// </param>
 public sealed record BookingResponse(
     Guid Id,

@@ -75,7 +75,7 @@ public class OperatorMailerTests
     /// address is the one Kairos sends from, the only operator mailbox it has.
     /// </summary>
     [Fact]
-    public async Task Compose_ADeclinedProposal_GoesToTheSendingAddressWithNoCalendarPart()
+    public async Task ComposeAsync_ADeclinedProposal_GoesToTheSendingAddressWithNoCalendarPart()
     {
         var message = await Compose(OperatorNotice.Declined);
 
@@ -89,7 +89,7 @@ public class OperatorMailerTests
     /// anywhere in it — the link the invitee held is spent.
     /// </summary>
     [Fact]
-    public async Task Compose_ADeclinedProposal_SaysSoAndPointsAtTheWorkbench()
+    public async Task ComposeAsync_ADeclinedProposal_SaysSoAndPointsAtTheWorkbench()
     {
         var body = Plain(await Compose(OperatorNotice.Declined));
 
@@ -102,7 +102,7 @@ public class OperatorMailerTests
     /// no. Both end on the sentence that makes the mail actionable — the meeting has not moved.
     /// </summary>
     [Fact]
-    public async Task Compose_AnExpiredProposal_SaysNobodyAnsweredAndTheMeetingStandsWhereItWas()
+    public async Task ComposeAsync_AnExpiredProposal_SaysNobodyAnsweredAndTheMeetingStandsWhereItWas()
     {
         var body = Plain(await Compose(OperatorNotice.Expired));
 
@@ -116,7 +116,7 @@ public class OperatorMailerTests
     /// up would otherwise tell the operator a meeting they cancelled stays where it is.
     /// </summary>
     [Fact]
-    public async Task Compose_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
+    public async Task ComposeAsync_AProposalOnAMeetingSinceCancelled_DoesNotSayItStandsWhereItWas()
     {
         var body = Plain(await Compose(OperatorNotice.Expired, BookingStatus.Cancelled));
 
@@ -130,7 +130,7 @@ public class OperatorMailerTests
     /// zone is a missed call.
     /// </summary>
     [Fact]
-    public async Task Compose_Always_RendersBothTimesInTheOrganizersOwnZone()
+    public async Task ComposeAsync_Always_RendersBothTimesInTheOrganizersOwnZone()
     {
         var body = Plain(await Compose(OperatorNotice.Expired));
 
