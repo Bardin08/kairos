@@ -92,7 +92,8 @@ public static class InvitesAdminEndpoints
 
     public static RouteGroupBuilder MapInvitesAdmin(this RouteGroupBuilder group)
     {
-        group.MapGet("/links/{id:guid}/invites", ListAsync).WithName("ListInvites");
+        group.MapGet("/invites", ListAllAsync).WithName("ListInvites");
+        group.MapGet("/links/{id:guid}/invites", ListAsync).WithName("ListLinkInvites");
         group.MapPost("/links/{id:guid}/invites", CreateAsync).WithName("CreateInvite");
         group.MapPost("/links/{id:guid}/invites/{inviteId:guid}/revoke", RevokeAsync)
             .WithName("RevokeInvite");
@@ -100,6 +101,18 @@ public static class InvitesAdminEndpoints
             .WithName("RegenerateInvite");
         return group;
     }
+
+    /// <summary>
+    /// Every invite the operator holds, on every link, newest first and never a URL. No link is
+    /// resolved first because none is named, so an empty list here means there are no invites at
+    /// all. <see cref="ListAsync"/> cannot say that much: an empty list there is a link that
+    /// exists and holds nothing, which is why a link that is not there is answered 404 instead —
+    /// an operator on a stale page is told to reload.
+    /// </summary>
+    private static Task<InviteView[]> ListAllAsync(
+        InviteReader reader,
+        CancellationToken cancellationToken) =>
+        reader.AllAsync(cancellationToken);
 
     /// <summary>
     /// One link's invites, newest first, and never a URL. 404 rather than an empty list on a link

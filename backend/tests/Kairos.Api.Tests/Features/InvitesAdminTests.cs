@@ -17,7 +17,7 @@ using Shouldly;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The operator's four invite routes, and the two properties the whole feature rests on: the URL
+/// The operator's five invite routes, and the two properties the whole feature rests on: the URL
 /// exists in exactly one response and never again, and an invite is reachable only under the link
 /// it was issued on.
 /// </summary>
@@ -94,6 +94,12 @@ public class InvitesAdminTests
     private static readonly string InvitesPath =
         $"{ApiVersions.V1}/admin/links/{LinkId}/invites";
 
+    private static readonly string OtherInvitesPath =
+        $"{ApiVersions.V1}/admin/links/{OtherLinkId}/invites";
+
+    /// <summary>The cross-link list, which names no link and so takes no id.</summary>
+    private const string AllInvitesPath = $"{ApiVersions.V1}/admin/invites";
+
     /// <summary>
     /// Every route <see cref="InvitesAdminEndpoints.MapInvitesAdmin"/> maps, as a verb and a path.
     /// The two that take an invite name one that was never issued: the gate has to answer before
@@ -102,6 +108,7 @@ public class InvitesAdminTests
     /// </summary>
     public static TheoryData<string, string> OperatorRoutes => new()
     {
+        { HttpMethod.Get.Method, AllInvitesPath },
         { HttpMethod.Get.Method, InvitesPath },
         { HttpMethod.Post.Method, InvitesPath },
         { HttpMethod.Post.Method, $"{InvitesPath}/{MissingInviteId}/revoke" },
@@ -529,6 +536,42 @@ public class InvitesAdminTests
     }
 
     /// <summary>
+    /// Why the cross-link route exists: one call answers the invites on every link, and each row
+    /// carries the link's own name — a list spanning links is unreadable without it, and the link
+    /// id alone is not what the operator called it.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here asserts an order, and this fixture could not pin one honestly. The two invites
+    /// are issued milliseconds apart onto a CreatedAt stamped in unix SECONDS, so they tie there
+    /// and the invite ids decide — and two v7 ids minted across two back-to-back HTTP calls can
+    /// land inside one millisecond, where the random tail under the timestamp decides. The
+    /// ordering guarantee is pinned by <see cref="InviteReaderTests"/>, whose ids are minted a
+    /// millisecond apart on purpose.
+    /// </remarks>
+    [Fact]
+    public async Task ListAll_InvitesOnTwoLinks_ComeBackTogetherEachNamingItsLink()
+    {
+        using var app = Seeded();
+        using var client = app.CreateOperatorClient();
+
+        var issuedHere = await IssueAsync(client, new CreateInviteRequest());
+        var issuedThere = await IssueAsync(client, OtherInvitesPath, new CreateInviteRequest());
+
+        var rows = await ReadRowsAsync(
+            await client.GetAsync(AllInvitesPath, TestContext.Current.CancellationToken));
+
+        rows.Select(row => row.Id).ShouldBe([issuedHere.Id, issuedThere.Id], ignoreOrder: true);
+
+        var here = rows.Single(row => row.Id == issuedHere.Id);
+        here.LinkId.ShouldBe(LinkId);
+        here.LinkName.ShouldBe(LinkName);
+
+        var there = rows.Single(row => row.Id == issuedThere.Id);
+        there.LinkId.ShouldBe(OtherLinkId);
+        there.LinkName.ShouldBe(OtherLinkName);
+    }
+
+    /// <summary>
     /// 401 and not 302. These routes are reached with fetch, and a fetch cannot follow a redirect
     /// to the identity provider's origin — it fails as an opaque CORS error saying nothing about
     /// the session having expired. It is also the assertion that dies if any of these routes is
@@ -589,11 +632,15 @@ public class InvitesAdminTests
         return problem;
     }
 
+    private static Task<InviteCreatedResponse> IssueAsync(
+        HttpClient client, CreateInviteRequest request) =>
+        IssueAsync(client, InvitesPath, request);
+
     private static async Task<InviteCreatedResponse> IssueAsync(
-        HttpClient client, CreateInviteRequest request)
+        HttpClient client, string path, CreateInviteRequest request)
     {
         var response = await client.PostAsJsonAsync(
-            InvitesPath, request, TestContext.Current.CancellationToken);
+            path, request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
 
