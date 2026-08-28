@@ -96,6 +96,8 @@ const REGENERATE = 'Regenerate'
 const NEW_INVITE = 'New personal link'
 const CANCEL = 'Cancel'
 const EXPANDED = 'aria-expanded'
+const PRIMARY = 'btn-primary'
+const GHOST = 'btn-ghost'
 
 /** Same file the running app loads, and the authority on which class names exist. */
 const STYLESHEET = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kairos.css')
@@ -658,6 +660,26 @@ test('the form is not on the page until the button asks for it', async () => {
   expect(screen.queryByLabelText(NAME_FIELD)).toBeNull()
   expect(screen.queryByRole('button', { name: GENERATE })).toBeNull()
   expect(open.getAttribute(EXPANDED)).toBe('false')
+})
+
+/**
+ * DESIGN.md allows one primary per view and gives retreats the ghost treatment.
+ * Open, the panel owns the primary — Generate is what commits — and the header
+ * button is the way back out.
+ */
+test('the panel owns the only primary while it is open, and Cancel is a retreat', async () => {
+  render(<Invites />)
+
+  const open = await screen.findByRole('button', { name: NEW_INVITE })
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false))
+  expect(open.className).toContain(PRIMARY)
+
+  fireEvent.click(open)
+
+  const close = screen.getByRole('button', { name: CANCEL })
+  expect(close.className).not.toContain(PRIMARY)
+  expect(close.className).toContain(GHOST)
+  expect(screen.getByRole('button', { name: GENERATE }).className).toContain(PRIMARY)
 })
 
 test('the button that opens the panel is the button that closes it', async () => {

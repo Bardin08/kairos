@@ -363,7 +363,7 @@ export default function Invites() {
               first. With every link archived the empty state below says so
               instead, and this button is dead for the same reason. */}
           <button
-            className="btn btn-primary"
+            className={panelOpen ? 'btn btn-ghost' : 'btn btn-primary'}
             type="button"
             aria-expanded={panelOpen}
             aria-controls={PANEL_ID}
@@ -463,9 +463,9 @@ export default function Invites() {
 
             {/* `btn-primary`, where the editor's copy of this form was a plain
                 `btn`. DESIGN.md allows one primary per view, and in the editor
-                that one was Save link in the savebar below. There is no savebar
-                here and nothing else on the page commits anything, so the ceiling
-                this button was under is gone. */}
+                that one was Save link in the savebar below. Here Generate is the
+                only thing that commits, and the header button steps down to a
+                ghost while the panel is open so it stays that way. */}
             {/* Dead until the picker holds a link, which covers two states that
                 look alike: the window before the links land, and a links read that
                 failed outright. In both `linkId` is still NO_LINK, and generating
