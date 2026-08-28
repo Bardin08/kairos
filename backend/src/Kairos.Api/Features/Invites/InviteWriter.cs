@@ -41,6 +41,14 @@ public sealed class InviteWriter(KairosDbContext context, IClock clock)
     /// second and neither side of it is anybody's. An invite's deadline arrives whole, as an
     /// instant rather than a length of time, so the second in it was picked, and an invite is good
     /// through the second it was given.
+    ///
+    /// This fold has one twin it cannot share code with. The conditional UPDATE that spends an
+    /// invite inside <see cref="BookingWriter.TryCreate"/> asks the same question of a row a
+    /// database is holding a lock on, and a database cannot call a C# method, so the deadline
+    /// comparison is written a second time there in SQL — as <c>ExpiresAt &gt;= now</c>, exactly
+    /// the negation of the <c>&lt;</c> below. Features.InviteConsumptionTests reads its expectation
+    /// for the deadline second off this method rather than writing it down, so neither side can
+    /// move without the other going red.
     /// </remarks>
     public static InviteState StateAt(PersonalInvite invite, Instant now)
     {

@@ -4,6 +4,7 @@ using System.Text.Json;
 
 using Kairos.Api.Availability;
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Features.Invites;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
@@ -125,6 +126,49 @@ public class EndpointTests
         var response = await app.Client.GetAsync(SlotsUrl(day, day), TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
+
+    /// <summary>
+    /// The wiring an invite's own tests cannot reach: <c>InviteToken</c> has to arrive at the
+    /// writer's last argument, and the refusal it answers with has to become a 409 carrying the
+    /// code a page branches on. The second booking asks for a slot nothing has taken, so the
+    /// invite is the only thing that can explain the conflict.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_TheSameInviteTwice_BooksOnceAndThenConflicts()
+    {
+        using var app = NewApp();
+        var day = Day();
+        var token = SeedInvite(app);
+
+        var first = await CreateAsync(app, day + FirstSlotTime, token);
+        first.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var booked = BookingIdOf(await ReadJsonAsync(first));
+
+        var second = await CreateAsync(app, day + ThirdSlotTime, token);
+
+        second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(second)).ShouldBe(BookingWriter.InviteSpentReason);
+        app.Read(context => context.Bookings.Count()).ShouldBe(1);
+        app.Read(context => context.PersonalInvites.AsNoTracking().Single().BookingId).ShouldBe(booked);
+    }
+
+    /// <summary>
+    /// An unfilled form field arrives as <c>""</c>, which is how <c>Notes</c> already reaches this
+    /// endpoint. Empty has to mean no invite rather than a token that matches nothing, or a page
+    /// that renders the invite field for everyone turns every ordinary booking into a 409.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_AnEmptyInviteToken_IsAnOrdinaryBooking()
+    {
+        using var app = NewApp();
+        SeedInvite(app);
+
+        var response = await CreateAsync(app, Day() + FirstSlotTime, string.Empty);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        app.Read(context => context.Bookings.Count()).ShouldBe(1);
+        app.Read(context => context.PersonalInvites.AsNoTracking().Single().ConsumedAt).ShouldBeNull();
     }
 
     /// <summary>
@@ -759,7 +803,12 @@ public class EndpointTests
     private static string SlotsUrl(string from, string to) =>
         $"{ApiVersions.V1}/links/{Slug}/slots?from={from}&to={to}&duration={DurationMinutes}";
 
-    private static Task<HttpResponseMessage> CreateAsync(KairosApp app, string start) =>
+    /// <param name="inviteToken">
+    /// Sent on every call, null where the case is not about invites: a payload naming the field
+    /// and leaving it null is what an ordinary booking from the real page looks like.
+    /// </param>
+    private static Task<HttpResponseMessage> CreateAsync(
+        KairosApp app, string start, string? inviteToken = null) =>
         app.Client.PostAsJsonAsync(
             $"{ApiVersions.V1}/bookings",
             new
@@ -770,8 +819,30 @@ public class EndpointTests
                 name = "Vlad",
                 email = "vlad@example.com",
                 timeZone = "Europe/Warsaw",
+                inviteToken,
             },
             TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// One open invite on the seeded link, the token minted beside it so the stored hash is the
+    /// one the write will look that token up by — the shape <see cref="InviteEndpointTests"/>
+    /// seeds. Nothing on this path reads the prefill or the creation stamp.
+    /// </summary>
+    private static string SeedInvite(KairosApp app)
+    {
+        var (token, hash) = InviteWriter.NewToken();
+
+        app.Seed(context => context.PersonalInvites.Add(new PersonalInvite
+        {
+            Id = Guid.CreateVersion7(),
+            LinkId = LinkId,
+            TokenHash = hash,
+            Prefill = InvitePrefill.Empty,
+            CreatedAt = SystemClock.Instance.GetCurrentInstant().ToUnixTimeSeconds(),
+        }));
+
+        return token;
+    }
 
     private static async Task<string?> CodeOfAsync(HttpResponseMessage response) =>
         (await ReadJsonAsync(response)).GetProperty("code").GetString();

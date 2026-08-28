@@ -38,6 +38,13 @@ public sealed class PersonalInvite
     /// the clock by every reader, the way <see cref="BookingProposal.ExpiresAt"/> is: an invite
     /// past its deadline stops being open at that instant, whether or not anything has run to
     /// notice.
+    /// <para>
+    /// Two readers exist and they have to agree on the same second, so a third one belongs beside
+    /// them rather than beside a fresh comparison. <c>InviteWriter.StateAt</c> folds this into the
+    /// state every surface renders, and the conditional UPDATE in <c>BookingWriter.TryCreate</c>
+    /// spends the invite — the same comparison a second time in SQL, because the database holding
+    /// the lock cannot call the fold.
+    /// </para>
     /// </summary>
     public long? ExpiresAt { get; set; }
 

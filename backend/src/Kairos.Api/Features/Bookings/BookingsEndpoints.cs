@@ -50,9 +50,20 @@ public sealed record CreateBookingRequest
     [StringLength(MaxNotesLength)]
     public string Notes { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The token from a personal invite's URL, or absent for an ordinary booking. Sent back rather
+    /// than remembered server-side, because the invite is spent by the write itself — inside the
+    /// transaction that checks the slot, in <see cref="BookingWriter.TryCreate"/>.
+    /// </summary>
+    [StringLength(MaxTokenLength)]
+    public string? InviteToken { get; init; }
+
     private const int MinDurationMinutes = 1;
     private const int MaxDurationMinutes = 1440;
     private const int MaxTimeZoneLength = 64;
+
+    /// <summary>Thirty-two bytes of hex, which is what <see cref="Invites.InviteWriter.NewToken"/> mints.</summary>
+    private const int MaxTokenLength = 64;
 
     /// <summary>
     /// The three the operator may fill in on the invitee's behalf, and therefore the three
@@ -208,12 +219,19 @@ public static class BookingsEndpoints
             Duration.FromMinutes(request.DurationMinutes),
             new BookerDetails(request.Name, request.Email, bookerZone),
             request.Notes,
-            offered.Limits.MarginMinutes);
+            offered.Limits.MarginMinutes,
+            request.InviteToken);
 
         if (!result.Success)
         {
-            throw DomainException.Conflict(
-                BookingWriter.SlotTakenReason, "That time was taken while this booking was being made.");
+            // One exit, and the reason chooses the sentence. Reading the reason before knowing the
+            // call failed would be a second decision beside this one, correct today only because
+            // a successful result carries no reason.
+            throw result.Reason == BookingWriter.InviteSpentReason
+                ? DomainException.Conflict(
+                    BookingWriter.InviteSpentReason, "That personal invitation cannot be used any more.")
+                : DomainException.Conflict(
+                    BookingWriter.SlotTakenReason, "That time was taken while this booking was being made.");
         }
 
         var booking = await LoadAsync(context, result.Id, cancellationToken);
