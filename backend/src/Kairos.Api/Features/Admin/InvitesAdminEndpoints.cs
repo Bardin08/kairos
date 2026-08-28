@@ -81,10 +81,10 @@ public static class InvitesAdminEndpoints
     private const string TokenQueryKey = "i";
 
     /// <summary>
-    /// What a 404 from these routes names. Both are reachable, by different paths: list and create
-    /// resolve the link first, so an unknown link id is answered as a missing link, while revoke
-    /// and regenerate go straight to the invite query — an unknown link id there is simply an
-    /// invite that is not under it, and is answered as a missing invite.
+    /// What a 404 from these routes names. Both are reachable, by different paths: create resolves
+    /// the link first, so an unknown link id is answered as a missing link, while revoke and
+    /// regenerate go straight to the invite query — an unknown link id there is simply an invite
+    /// that is not under it, and is answered as a missing invite.
     /// </summary>
     private const string InviteName = "Invite";
 
@@ -93,7 +93,6 @@ public static class InvitesAdminEndpoints
     public static RouteGroupBuilder MapInvitesAdmin(this RouteGroupBuilder group)
     {
         group.MapGet("/invites", ListAllAsync).WithName("ListInvites");
-        group.MapGet("/links/{id:guid}/invites", ListAsync).WithName("ListLinkInvites");
         group.MapPost("/links/{id:guid}/invites", CreateAsync).WithName("CreateInvite");
         group.MapPost("/links/{id:guid}/invites/{inviteId:guid}/revoke", RevokeAsync)
             .WithName("RevokeInvite");
@@ -105,33 +104,12 @@ public static class InvitesAdminEndpoints
     /// <summary>
     /// Every invite the operator holds, on every link, newest first and never a URL. No link is
     /// resolved first because none is named, so an empty list here means there are no invites at
-    /// all. <see cref="ListAsync"/> cannot say that much: an empty list there is a link that
-    /// exists and holds nothing, which is why a link that is not there is answered 404 instead —
-    /// an operator on a stale page is told to reload.
+    /// all rather than one link that happens to hold none.
     /// </summary>
     private static Task<InviteView[]> ListAllAsync(
         InviteReader reader,
         CancellationToken cancellationToken) =>
         reader.AllAsync(cancellationToken);
-
-    /// <summary>
-    /// One link's invites, newest first, and never a URL. 404 rather than an empty list on a link
-    /// that is not there: an operator on a stale page needs to be told to reload rather than shown
-    /// a link with nothing on it.
-    /// </summary>
-    private static async Task<InviteView[]> ListAsync(
-        Guid id,
-        KairosDbContext context,
-        InviteReader reader,
-        CancellationToken cancellationToken)
-    {
-        await RequireLinkAsync(context, id, cancellationToken);
-
-        // Temporary, and deleted with this route: the reader now answers across every link, and
-        // this route is retired in Task 7 of the invites-placement plan, in favour of the
-        // cross-link GET /admin/invites.
-        return [.. (await reader.AllAsync(cancellationToken)).Where(invite => invite.LinkId == id)];
-    }
 
     private static async Task<Created<InviteCreatedResponse>> CreateAsync(
         Guid id,
@@ -256,8 +234,8 @@ public static class InvitesAdminEndpoints
     };
 
     /// <summary>
-    /// The link, or a 404. It answers with the slug, which is what a URL needs, and the caller
-    /// that wants only the existence check discards it — the shape
+    /// The link, or a 404. It answers with the slug, which is what the minted URL needs, so the
+    /// existence check and the lookup are one query rather than two — the shape
     /// <see cref="Bookings.BookingMover.RequireOfferedAsync"/> already has, and the prefix
     /// <see cref="LinksAdminEndpoints"/> gives its own two resolve-or-throw helpers.
     /// </summary>
