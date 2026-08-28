@@ -25,6 +25,7 @@ const PATTERN_PATH = '/admin/availability/b0a5f0e2-0000-7000-8000-000000000001'
 const settings = {
   timeZone: 'UTC',
   signedInAs: 'Vlad Bardin',
+  publicBaseUrl: null,
   marginMinutes: 15,
   minNoticeMinutes: 120,
   dailyCap: 4,

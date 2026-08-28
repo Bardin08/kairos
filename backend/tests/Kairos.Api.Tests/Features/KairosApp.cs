@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 
 using Kairos.Api.Persistence;
 using Kairos.Api.Security;
+using Kairos.Api.Shared;
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,7 +29,8 @@ namespace Kairos.Api.Tests.Features;
 /// That is also why a test expecting a path NOT to be served asserts more than the status code:
 /// with a page present <c>MapFallbackToFile</c> answers 200 for any unmapped extensionless path.
 /// </param>
-public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<KairosDbContext>
+public sealed class KairosApp(string? webRoot = null, string? publicBaseUrl = null)
+    : WebApplicationFactory<KairosDbContext>
 {
     /// <summary>
     /// The identity provider the harness names. It resolves to nothing on purpose: the one test
@@ -102,6 +104,15 @@ public sealed class KairosApp(string? webRoot = null) : WebApplicationFactory<Ka
         // Same rule for Pocket ID: no issuer and client, no startup. Almost every test stays on
         // the anonymous side of the gate, and the one that challenges pins the handler's
         // configuration itself, so this address is never fetched from.
+        // Unset for almost every test, because almost nothing depends on it. The settings read
+        // reports it, and a deployment that serves its operator and its invitees on two hostnames
+        // is the reason it exists — so the tests that care name their own.
+        if (publicBaseUrl is not null)
+        {
+            builder.UseSetting(
+                $"{AppOptions.SectionName}:{nameof(AppOptions.PublicBaseUrl)}", publicBaseUrl);
+        }
+
         builder.UseSetting("Authentication:Authority", Authority);
         builder.UseSetting("Authentication:ClientId", "kairos-tests");
         builder.UseSetting("Authentication:ClientSecret", "kairos-tests");

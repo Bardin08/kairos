@@ -317,6 +317,36 @@ public class SettingsAdminTests
             + $"&duration={DurationMinutes}",
             TestContext.Current.CancellationToken)).ShouldNotBeNull();
 
+    /// <summary>
+    /// The one hostname an invitee can open. It reaches the admin surface through this read, which
+    /// is why the read reports it: the browser's own origin is the wrong answer on a deployment
+    /// that serves the operator somewhere the invitee cannot reach.
+    /// </summary>
+    private const string PublicBaseUrl = "https://kairos.example.test";
+
+    [Fact]
+    public async Task ReadSettings_WhenAPublicBaseUrlIsConfigured_ReportsIt()
+    {
+        using var app = new KairosApp(publicBaseUrl: PublicBaseUrl);
+        using var client = app.CreateOperatorClient();
+
+        (await ReadAsync(client)).PublicBaseUrl.ShouldBe(PublicBaseUrl);
+    }
+
+    /// <summary>
+    /// Null rather than an empty string, and the difference is load-bearing: the admin surface
+    /// branches on null to fall back to the browser's origin, and an empty string would be a
+    /// configured answer of "nowhere".
+    /// </summary>
+    [Fact]
+    public async Task ReadSettings_WhenNoPublicBaseUrlIsConfigured_ReportsNull()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        (await ReadAsync(client)).PublicBaseUrl.ShouldBeNull();
+    }
+
     private static async Task<SettingsResponse> ReadAsync(HttpClient client) =>
         (await client.GetFromJsonAsync<SettingsResponse>(
             SettingsPath, TestContext.Current.CancellationToken)).ShouldNotBeNull();

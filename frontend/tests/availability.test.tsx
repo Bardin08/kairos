@@ -53,6 +53,7 @@ const ORGANIZER_ZONE = 'Europe/Warsaw'
 const settings: Settings = {
   timeZone: ORGANIZER_ZONE,
   signedInAs: null,
+  publicBaseUrl: null,
   marginMinutes: 15,
   minNoticeMinutes: 120,
   dailyCap: 4,
