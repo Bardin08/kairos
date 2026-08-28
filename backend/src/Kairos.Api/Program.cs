@@ -194,10 +194,12 @@ builder.Services.AddScoped<IOperatorAlertSource, IntegrationAlertSource>();
 
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 
-// Stateless, every one of them, and holding nothing per request: the builder renders text, the
-// sender opens a connection per message, and the mailers only compose. Singletons, like
-// SlotGenerator.
+// Stateless, every one of them, and holding nothing per request: the builders render text, the
+// sender opens a connection per message, and the mailers only compose. The HTML renderer holds
+// only the root provider it renders components from, and builds a fresh HtmlRenderer per message.
+// Singletons, like SlotGenerator.
 builder.Services.AddSingleton<IcsBuilder>();
+builder.Services.AddSingleton<MailHtmlRenderer>();
 builder.Services.AddSingleton<EmailSender>();
 builder.Services.AddSingleton<BookingMailer>();
 builder.Services.AddSingleton<OperatorMailer>();

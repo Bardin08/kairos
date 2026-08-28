@@ -1,0 +1,159 @@
+@* A full document, not a fragment: the head is where the dark override and the
+   color-scheme hints live, and a fragment has nowhere to put them. *@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+@* Tells a client the message is legible either way, which is what stops some of
+   them force-inverting a design that already handled it. *@
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+  @@media (prefers-color-scheme: dark) {
+    .k-page { background: @Dark.Page !important; }
+    .k-card { background: @Dark.Card !important; border-color: @Dark.Line !important; }
+    .k-ink { color: @Dark.Ink !important; }
+    .k-muted { color: @Dark.Muted !important; }
+    .k-faint { color: @Dark.Faint !important; }
+    .k-wash { background: @Dark.Wash !important; }
+    .k-accent { background: @Dark.Accent !important; }
+    .k-on-accent { color: @Dark.OnAccent !important; }
+    .k-hair { border-color: @Dark.Hairline !important; }
+  }
+</style>
+</head>
+<body class="k-page" style="margin:0;padding:0;background:@Light.Page;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="k-page" style="background:@Light.Page;margin:0;padding:0;">
+ <tr><td align="center" style="padding:24px 12px;">
+
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="k-card" style="width:600px;max-width:100%;background:@Light.Card;border:1px solid @Light.Line;border-radius:16px;">
+
+   @* Wordmark. The accent's brand exemption: identity, not a control. *@
+   <tr><td style="padding:24px 32px 0 32px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+     <td class="k-accent" style="width:10px;height:10px;background:@Light.Accent;border-radius:3px;font-size:0;line-height:0;">&nbsp;</td>
+     <td class="k-ink" style="@(Cell)padding-left:8px;font-size:13px;font-weight:600;letter-spacing:0.14em;color:@Light.Ink;">KAIROS</td>
+    </tr></table>
+   </td></tr>
+
+   <tr><td class="k-ink" style="padding:24px 32px 0 32px;@(Cell)font-size:22px;line-height:1.2;font-weight:600;letter-spacing:-0.022em;color:@Light.Ink;">
+    @Body.Headline
+   </td></tr>
+
+   @* The fact block. Job one: the moment this message is about. *@
+   <tr><td style="padding:20px 32px 0 32px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="k-wash" style="background:@Light.Wash;border-radius:12px;">
+     <tr><td style="padding:20px 24px;">
+      <div class="k-ink" style="font-family:@(Mono);font-size:30px;line-height:1.1;font-weight:600;color:@Light.Ink;">@Body.Fact.Time</div>
+      <div class="k-muted" style="@(Cell)font-size:15px;line-height:1.5;color:@Light.Muted;padding-top:6px;">@Body.Fact.Date</div>
+      <div class="k-faint" style="font-family:@(Mono);font-size:12px;line-height:1.5;color:@Light.Faint;padding-top:2px;">@Body.Fact.Zone</div>
+     </td></tr>
+    </table>
+   </td></tr>
+
+   @if (Body.Fact.Was is { } was)
+   {
+   <tr><td class="k-faint" style="padding:12px 32px 0 32px;@(Cell)font-size:14px;line-height:1.5;color:@Light.Faint;">
+    <span style="text-decoration:line-through;">@was</span> &nbsp;previously
+   </td></tr>
+   }
+
+   <tr><td class="k-ink" style="padding:20px 32px 0 32px;@(Cell)font-size:16px;line-height:1.55;color:@Light.Ink;">
+    @Body.Sentence
+   </td></tr>
+
+   @* The operator's own words. No container: the label is the second channel, and the
+      system has no border wider than 1px to put down the side of one. *@
+   @if (Body.Reason is { } reason)
+   {
+   <tr><td style="padding:20px 32px 0 32px;@(Cell)">
+    <div class="k-faint" style="font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:@Light.Faint;">@ReasonHeading</div>
+    <div class="k-muted" style="font-size:15px;line-height:1.55;color:@Light.Muted;padding-top:6px;">@reason</div>
+   </td></tr>
+   }
+
+   @* Job two: the single action. 44px tall, and the only other accent on the page. *@
+   @if (Body.Action is { } action)
+   {
+   <tr><td style="padding:24px 32px 0 32px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+     <td class="k-accent" style="background:@Light.Accent;border-radius:8px;">
+      <a href="@action.Url" class="k-on-accent" style="@(Cell)display:inline-block;padding:0 20px;height:44px;line-height:44px;font-size:14px;font-weight:600;color:@Light.OnAccent;text-decoration:none;">@action.Label</a>
+     </td>
+    </tr></table>
+   </td></tr>
+   }
+
+   @if (Body.Secondary is { } secondary)
+   {
+   <tr><td style="padding:12px 32px 0 32px;@(Cell)font-size:14px;line-height:1.55;">
+    <a href="@secondary.Url" class="k-muted" style="color:@Light.Muted;text-decoration:underline;">@secondary.Label</a>
+   </td></tr>
+   }
+
+   @if (Body.Details.Count > 0)
+   {
+   <tr><td style="padding:28px 32px 0 32px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="k-hair" style="border-top:1px solid @Light.Hairline;">
+     @foreach (var detail in Body.Details)
+     {
+     <tr>
+      <td class="k-faint" style="@(Cell)padding:12px 0 0 0;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:@Light.Faint;width:34%;vertical-align:top;">@detail.Label</td>
+      <td class="k-ink" style="@(Cell)padding:12px 0 0 0;font-size:15px;line-height:1.5;color:@Light.Ink;">
+       @detail.Value
+       @if (detail.Url is { } url)
+       {
+        <br>
+        <a href="@url" style="color:inherit;">@Shorten(url)</a>
+       }
+      </td>
+     </tr>
+     }
+    </table>
+   </td></tr>
+   }
+
+   <tr><td style="padding:28px 32px 28px 32px;">
+    <div class="k-hair k-faint" style="border-top:1px solid @Light.Hairline;padding-top:16px;@(Cell)font-size:12px;line-height:1.6;color:@Light.Faint;">
+     Sent by Kairos for <span class="k-muted" style="color:@Light.Muted;">@Operator</span>.<br>
+     @(Body.Footer ?? DefaultFooter)
+    </div>
+   </td></tr>
+
+  </table>
+
+ </td></tr>
+</table>
+</body>
+</html>
+
+@code {
+    /// <summary>What the operator's own words are printed under. Disappears with them.</summary>
+    private const string ReasonHeading = "Why";
+
+    private const string Operator = "Vladyslav Bardin";
+
+    /// <summary>Why this message arrived, for the six of seven notices that do not say it better.</summary>
+    private const string DefaultFooter = "You are receiving this because you booked a time.";
+
+    private const string Sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+
+    /// <summary>The honest echo of Kairos Figures in a medium that cannot load a font file.</summary>
+    private const string Mono = "ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace";
+
+    /// <summary>Every cell that carries text opens with this. Inline, because a client may keep no head.</summary>
+    private const string Cell = $"font-family:{Sans};letter-spacing:-0.012em;";
+
+    /// <summary>Dropped from a link's visible text. The scheme is noise the invitee does not read.</summary>
+    private const string HttpsPrefix = "https://";
+
+    [Parameter, EditorRequired] public MailBody Body { get; set; } = null!;
+
+    private static MailPalette Light => MailPalette.Light;
+
+    private static MailPalette Dark => MailPalette.Dark;
+
+    private static string Shorten(string url) =>
+        url.StartsWith(HttpsPrefix, StringComparison.Ordinal) ? url[HttpsPrefix.Length..] : url;
+}
