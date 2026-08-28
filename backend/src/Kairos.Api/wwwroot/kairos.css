@@ -930,12 +930,18 @@
                 color var(--dur-instant) var(--ease-standard);
   }
   /* What a <button> gets from the UA stylesheet and an <a> does not. Measured
-     against the running page one declaration at a time: without `display` the
-     anchor is a block and its label sits at the top-left corner; without
-     `align-items` the label keeps the top edge; without `justify-content` it
-     keeps the left edge, which bites only because the section nav wears
-     `.segmented-equal` and its option is far wider than its label; without
+     against the running page one declaration at a time, on /admin/links and
+     /admin/links/invites at 1280px: without `display` the anchor is a block and
+     its label sits on the box's top edge, 11px above the centre; without
+     `align-items` the label lands in that same place, the anonymous text item
+     stretching to the full height rather than centring inside it; without
      `text-decoration` it is underlined.
+
+     No horizontal centring, because there is nothing to centre. `.segmented` is
+     an inline-flex container and an option is the width of its own label, so the
+     same measurement found `justify-content` moving no box by any fraction of a
+     pixel on either route. It would start mattering again the day an <a> lands
+     inside `.segmented-equal`, whose columns are wider than what they hold.
 
      Not here: the colour. The shared rule above sets it, and that rule is in
      this layer while `a { color: var(--accent-text) }` is in `@layer base`, so
@@ -945,7 +951,6 @@
   .segmented a {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
     text-decoration: none;
   }
   /* aria-pressed selects a toggle button (duration picker); aria-checked
