@@ -59,6 +59,18 @@ public sealed class InviteWriter(KairosDbContext context, IClock clock)
             : InviteState.Open;
     }
 
+    /// <summary>
+    /// The wire spelling of a state, in one place because two responses carry it — the invitee's
+    /// read and the operator's list — and a client keying on the string has no way to notice a
+    /// second spelling appearing beside the first. Beside the fold that produces it, a state and
+    /// the word for it being the same answer.
+    ///
+    /// <see cref="Admin.InvitesAdminEndpoints"/> also calls this, for a refusal sentence rather
+    /// than for a field. That is a site that happens to want the same word today, not a third
+    /// party to the contract: peel it off freely if the message ever wants its own.
+    /// </summary>
+    public static string NameOf(InviteState state) => state.ToString().ToLowerInvariant();
+
     /// <summary>The plaintext leaves this method and is never stored; only the hash beside it ever reaches a row.</summary>
     public static (string Token, string Hash) NewToken()
     {

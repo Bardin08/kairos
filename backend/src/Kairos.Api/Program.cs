@@ -396,6 +396,7 @@ var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
+v1.MapInvites();
 // Anonymous, and the whole reason it exists: the operator reading it has just been refused. It
 // answers one string — where to sign in — so the locked screen can draw a link without the URL
 // being baked into a bundle that is built once and deployed everywhere.

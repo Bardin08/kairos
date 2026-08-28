@@ -191,7 +191,7 @@ public static class InvitesAdminEndpoints
         {
             throw DomainException.Conflict(
                 InviteNotOpenCode,
-                $"That invite is {state.ToString().ToLowerInvariant()}. Only an invite that is "
+                $"That invite is {InviteWriter.NameOf(state)}. Only an invite that is "
                 + "still open can be replaced; issue a new one instead.");
         }
 

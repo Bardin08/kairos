@@ -34,7 +34,7 @@ public sealed class InviteReader(KairosDbContext context, IClock clock)
 
         return [.. invites.Select(invite => new InviteView(
             invite.Id,
-            InviteWriter.StateAt(invite, now).ToString().ToLowerInvariant(),
+            InviteWriter.NameOf(InviteWriter.StateAt(invite, now)),
             InvitePrefill.Read(invite.Prefill),
             invite.ExpiresAt is { } expires ? DateTimeOffset.FromUnixTimeSeconds(expires) : null,
             DateTimeOffset.FromUnixTimeSeconds(invite.CreatedAt)))];
