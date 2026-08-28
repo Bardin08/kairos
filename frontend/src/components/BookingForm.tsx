@@ -253,8 +253,7 @@ export default function BookingForm({
         )}
 
         <p className="fine">
-          The next screen carries the only link that can cancel or move this booking. It is shown
-          once.
+          The next screen carries the only link that can cancel or move this booking. It is shown once.
         </p>
       </form>
     </div>

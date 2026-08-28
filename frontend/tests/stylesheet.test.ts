@@ -164,3 +164,15 @@ test('the admin pane is a containing block, so a hidden heading cannot escape it
 
   expect(css).toContain('.admin-main { position: relative;')
 })
+
+// A page header is as tall as the action it carries, and 16px shorter when it
+// carries none — so moving between two views whose headers disagree makes every
+// row below them jump. Measured at 1440x900: 44px on Links, 28px on Personal
+// links, the switch landing at y=100 and y=84. The floor is the tap token rather
+// than a literal, because what it is matching is the button that sets the tall
+// case. No rendered test can guard it — jsdom has no layout.
+test('a page header is the tap-floor tall whether or not it carries an action', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('min-height: var(--tap);\n    margin-bottom: var(--space-5);')
+})

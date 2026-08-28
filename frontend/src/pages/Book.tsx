@@ -490,8 +490,7 @@ export default function Book() {
                   onFocus={(event) => event.currentTarget.select()}
                 />
                 <p className="fine">
-                  Save it now. It is shown on this screen and nowhere else, and the server keeps
-                  only a hash of it — it cannot be sent to you again.
+                  Save it now. It is shown on this screen and nowhere else, and the server keeps only a hash of it — it cannot be sent to you again.
                 </p>
               </div>
               <div className="row gap-2 wrap mt-5">
