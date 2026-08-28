@@ -599,12 +599,18 @@ export default function Book() {
               onSelect={chooseDay}
             />
 
-            {/* Every state of the panel lives in here, and the frame is on THIS
-                element rather than on `.slots` inside SlotList: three of the four
-                branches below never render SlotList, and the one that does is
-                unmounted while a month is being fetched. A floor on the inner
-                element therefore applied exactly when it was not needed. */}
-            <div className="slot-panel">
+            <div>
+              {/* THE FRAME, AND IT WRAPS THE FOUR BRANCHES AND NOTHING ELSE.
+                  Three of them never render SlotList and the one that does is
+                  unmounted while a month is being fetched, so a floor on
+                  `.slots` inside SlotList applies exactly when it is not needed.
+                  It does not belong on `.slot-panel` either: that also holds the
+                  zone line and the desktop CTA, so flooring it lets those two
+                  keep their 83px while the states area is squeezed by the same
+                  amount. Measured on the deployed page with the floor there:
+                  the panel held its 332px and still went 409 -> 332 -> 409
+                  across a month change. */}
+              <div className="slot-states">
               {slotsError !== null ? (
                 <div className="empty">
                   <p>{slotsError.message}</p>
@@ -645,7 +651,13 @@ export default function Book() {
                 />
               )}
 
-              {/* Beside the control that failed, at every width. A banner at
+              </div>
+
+              {/* Outside the frame: this reports a booking that was refused,
+                  not a month that is loading, and an error is allowed to make
+                  the panel taller.
+
+                  Beside the control that failed, at every width. A banner at
                   the top of the page would be nowhere near the times. */}
               {lost !== null && (
                 <p className="field-error mt-4" role="alert">

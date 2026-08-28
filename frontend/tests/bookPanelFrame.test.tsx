@@ -12,9 +12,10 @@ import Book from '../src/pages/Book'
 //
 // What this file protects: a later edit moving one of the four branches out of
 // the framed element. That is invisible in review and silently reintroduces the
-// jump this fix removed, because three of the four branches do not render
-// SlotList at all and so never carried the old floor.
-const FRAME = '.slot-panel'
+// jump this fix removed — and it has been reintroduced once already, by putting
+// the floor on the panel that also holds the zone line and the CTA, which held
+// the panel steady while squeezing the states area inside it.
+const FRAME = '.slot-states'
 
 const SLUG = 'consulting'
 const OK = 200

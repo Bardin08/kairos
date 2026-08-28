@@ -1149,16 +1149,19 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   @media (min-width: 861px) {
-    /* THE FRAME EVERY STATE OF THE PANEL SHARES.
-       The floor on `.slots` below stopped the card moving between DAYS and could
-       not stop it moving between MONTHS, because `.slots` lives inside SlotList
-       and SlotList is one of four branches in this element. Changing month sets
-       `slots` to null while the fetch is in flight, so the panel became the
-       single line `Finding open times…` and sprang back when the times arrived —
-       the floor never applied, because the element carrying it was not mounted.
-       Composed from the two heights rather than given a third number, so the
-       frame cannot drift from what it frames. */
-    .slot-panel {
+    /* THE FRAME EVERY STATE OF THE PANEL SHARES, and it wraps the four state
+       branches and nothing else.
+       Two earlier homes were wrong and both are worth recording. On `.slots`,
+       inside SlotList: three of the four branches never render SlotList, and
+       the one that does is unmounted while a month is being fetched, so the
+       floor applied exactly when it was not needed and the panel collapsed to
+       the single line `Finding open times…`. On `.slot-panel`: that element
+       also holds the zone line and the desktop CTA, together 83px, so the floor
+       held the PANEL at 332px while the states area inside it was squeezed by
+       that 83px — measured on the deployed page, 409 -> 332 -> 409 across a
+       month change. A 77px jump instead of a collapse is still a jump.
+       Here the floor sizes the thing that actually swaps. */
+    .slot-states {
       display: flex;
       flex-direction: column;
       min-height: calc(var(--slots-h) + var(--slots-head-h));
@@ -1167,7 +1170,7 @@
        one line message pinned to the top of a 332px box reads as a fragment;
        centred, it reads as the panel's current state. SlotList is the `section`
        and is excluded: it already fills the frame, so it has nothing to centre. */
-    .slot-panel > :not(section) {
+    .slot-states > :not(section) {
       margin-block: auto;
     }
 
