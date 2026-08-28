@@ -13,6 +13,7 @@ import { ApiError } from '../src/lib/api'
 import PatternEditor from '../src/routes/admin/PatternEditor'
 import {
   listPatterns,
+  renamePattern,
   replacePatternRules,
   type Pattern,
 } from '../src/routes/admin/patterns'
@@ -20,6 +21,7 @@ import {
 vi.mock('../src/routes/admin/patterns', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/patterns')>()),
   listPatterns: vi.fn(),
+  renamePattern: vi.fn(),
   replacePatternRules: vi.fn(),
 }))
 
@@ -274,4 +276,75 @@ test('a rule on a day of the week that does not exist drops rather than taking t
   renderEditor()
 
   expect(await screen.findByLabelText('Tuesday, window 1, opens at')).toBeDefined()
+})
+
+// --- renaming ---------------------------------------------------------------
+//
+// The name is edited HERE and not on the availability list. This page is where a
+// pattern is worked on, so its title is the name being read at the moment
+// somebody decides it is wrong; the list's job is to get you to the pattern.
+
+const RENAMED = 'Weekday mornings'
+
+/** Opens the editor on the page title. */
+async function openRenameEditor() {
+  fireEvent.click(await screen.findByRole('button', { name: weekdays.name }))
+  return screen.getByRole('textbox', { name: 'Pattern name' })
+}
+
+test('clicking the title opens an editor holding the current name', async () => {
+  renderEditor()
+
+  expect(await openRenameEditor()).toHaveProperty('value', weekdays.name)
+})
+
+test('saving renames the pattern and retitles the page', async () => {
+  vi.mocked(renamePattern).mockResolvedValue({ ...weekdays, name: RENAMED })
+  renderEditor()
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(vi.mocked(renamePattern)).toHaveBeenCalledWith(PATTERN_ID, RENAMED))
+  expect(await screen.findByRole('heading', { level: 1, name: RENAMED })).toBeDefined()
+})
+
+test('cancelling reverts the name and writes nothing', async () => {
+  renderEditor()
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(vi.mocked(renamePattern)).not.toHaveBeenCalled()
+  expect(await screen.findByRole('heading', { level: 1, name: weekdays.name })).toBeDefined()
+})
+
+// The property this editor has and a blur-to-save one does not. A stray click
+// elsewhere on the page must not commit a half-typed name, so blur neither saves
+// nor closes — the operator chooses, every time.
+test('clicking away neither saves nor closes the editor', async () => {
+  renderEditor()
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.blur(field)
+
+  expect(vi.mocked(renamePattern)).not.toHaveBeenCalled()
+  expect(screen.getByRole('textbox', { name: 'Pattern name' })).toHaveProperty('value', RENAMED)
+})
+
+test('a refused rename keeps the editor open and shows the reason', async () => {
+  vi.mocked(renamePattern).mockRejectedValue(
+    new ApiError(CONFLICT, 'pattern_name_taken', 'Another pattern is already called that.'),
+  )
+  renderEditor()
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('already called that')
+  expect(screen.getByRole('textbox', { name: 'Pattern name' })).toHaveProperty('value', RENAMED)
 })

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'wouter'
 
 import Failure from './Failure'
 import PatternPreview from './PatternPreview'
-import { listPatterns, type Pattern } from './patterns'
+import { listPatterns, renamePattern, type Pattern } from './patterns'
 import WeekEditor from './WeekEditor'
 
 /**
@@ -27,6 +27,13 @@ export default function PatternEditor({ params }: { params: { patternId: string 
   // The error itself, not a sentence made from it: `Failure` reads the status
   // off it, and a string has already thrown that away.
   const [failure, setFailure] = useState<unknown>(null)
+  // Whether the name is being edited, and the text in the field. The name is
+  // edited HERE rather than on the list: this page is where a pattern is worked
+  // on, and its title is the name being read at the moment somebody decides it
+  // is wrong.
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const [savingName, setSavingName] = useState(false)
 
   const { patternId } = params
 
@@ -52,10 +59,84 @@ export default function PatternEditor({ params }: { params: { patternId: string 
   // there is nothing here for `Failure` to report, because nothing failed.
   const missing = !loading && failure === null && pattern === null
 
+  /**
+   * Enter and Save both arrive here — it is the form's submit, so Enter needs no
+   * key handler of its own. An unchanged or blank name closes the editor without
+   * calling the server: the endpoint refuses both, and a refusal would tell the
+   * operator nothing the empty field has not already told them.
+   */
+  function commitRename(event: FormEvent) {
+    event.preventDefault()
+    if (pattern === null) return
+
+    const trimmed = draftName.trim()
+    if (trimmed === '' || trimmed === pattern.name) {
+      setRenaming(false)
+      return
+    }
+
+    setSavingName(true)
+    setFailure(null)
+
+    renamePattern(pattern.id, trimmed)
+      .then((renamed) => {
+        setPattern(renamed)
+        setRenaming(false)
+        setSavingName(false)
+      })
+      .catch((error: unknown) => {
+        setSavingName(false)
+        // Left open, with what was typed still in it. Closing the editor to show
+        // a message about the name would throw away the name.
+        setFailure(error)
+      })
+  }
+
   return (
     <>
       <div className="page-header">
-        <h1 className="title-page">{pattern === null ? 'Pattern' : pattern.name}</h1>
+        {renaming && pattern !== null ? (
+          <form className="row gap-2 grow" onSubmit={commitRename}>
+            <input
+              className="input grow"
+              aria-label="Pattern name"
+              value={draftName}
+              autoFocus
+              onChange={(event) => setDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setRenaming(false)
+              }}
+            />
+            <button className="btn btn-primary" type="submit" data-loading={savingName || undefined}>
+              Save
+            </button>
+            <button className="btn btn-ghost" type="button" onClick={() => setRenaming(false)}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <h1 className="title-page">
+            {pattern === null ? (
+              'Pattern'
+            ) : (
+              // A button inside the heading rather than a click handler on it: a
+              // heading is not focusable, and a control the keyboard cannot reach
+              // is not a control. `.name-button` strips the chrome so it still
+              // reads as the title it stands in for.
+              <button
+                className="name-button"
+                type="button"
+                onClick={() => {
+                  setRenaming(true)
+                  setDraftName(pattern.name)
+                  setFailure(null)
+                }}
+              >
+                {pattern.name}
+              </button>
+            )}
+          </h1>
+        )}
         {/* A link and not a Back button: this is an address now, and the
             browser's own back button, a middle click and a bookmark all have to
             work. `.btn-ghost` is the retreat action's style. */}
