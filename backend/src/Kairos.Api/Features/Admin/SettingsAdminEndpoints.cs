@@ -6,6 +6,7 @@ using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 using NodaTime;
 using NodaTime.Text;
@@ -46,7 +47,8 @@ public sealed record SettingsResponse(
     int DailyCap,
     int StartIncrementMinutes,
     int ProposalHoldHours,
-    OverrideCountsResponse Overrides);
+    OverrideCountsResponse Overrides,
+    string? PublicBaseUrl);
 
 /// <summary>
 /// One zone as the picker offers it. The offset is the zone's offset at this instant, a label
@@ -135,13 +137,15 @@ public static class SettingsAdminEndpoints
     private static Task<SettingsResponse> ReadAsync(
         ClaimsPrincipal user,
         KairosDbContext context,
+        IOptions<AppOptions> app,
         CancellationToken cancellationToken) =>
-        DescribeAsync(context, user, cancellationToken);
+        DescribeAsync(context, user, app, cancellationToken);
 
     private static async Task<SettingsResponse> SaveAsync(
         SaveSettingsRequest request,
         ClaimsPrincipal user,
         KairosDbContext context,
+        IOptions<AppOptions> app,
         CancellationToken cancellationToken)
     {
         if (DateTimeZoneProviders.Tzdb.GetZoneOrNull(request.TimeZoneId) is null)
@@ -164,7 +168,7 @@ public static class SettingsAdminEndpoints
 
         await context.SaveChangesAsync(cancellationToken);
 
-        return await DescribeAsync(context, user, cancellationToken);
+        return await DescribeAsync(context, user, app, cancellationToken);
     }
 
     private static IReadOnlyList<TimeZoneOptionResponse> ListTimeZones(IClock clock)
@@ -181,6 +185,7 @@ public static class SettingsAdminEndpoints
     private static async Task<SettingsResponse> DescribeAsync(
         KairosDbContext context,
         ClaimsPrincipal user,
+        IOptions<AppOptions> app,
         CancellationToken cancellationToken)
     {
         var settings = await context.Settings.AsNoTracking()
@@ -194,7 +199,8 @@ public static class SettingsAdminEndpoints
             settings.DailyCap,
             settings.StartIncrementMinutes,
             settings.ProposalHoldHours,
-            await CountOverridesAsync(context, cancellationToken));
+            await CountOverridesAsync(context, cancellationToken),
+            app.Value.PublicBaseUrl);
     }
 
     /// <summary>
