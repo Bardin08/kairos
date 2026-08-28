@@ -609,7 +609,14 @@
   /* The only scroll container on the admin surface. The shell is exactly one
      viewport tall, so the rail beside it cannot travel off the top however long
      the table inside here gets. */
-  .admin-main { min-width: 0; overflow-y: auto; padding: var(--space-6); }
+  /* `position: relative` is load-bearing, not tidiness. `.visually-hidden` is
+     absolutely positioned, and control-column headings carry one — from
+     `RecordTable`, and by hand in `Integrations.tsx`. With this pane static
+     that span resolves against the initial containing block, escapes the clip
+     declared here, and stretches the document to its own static position:
+     measured 2073px against a 900px viewport on the link editor, a second
+     scrollbar nothing here ever scrolls back. */
+  .admin-main { position: relative; min-width: 0; overflow-y: auto; padding: var(--space-6); }
   /* Below the breakpoint the tab bar is fixed over the foot of this pane, so
      the pane reserves its measured height and keeps a page margin under the
      last row rather than ending flush against the bar. */

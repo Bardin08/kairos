@@ -126,3 +126,15 @@ test('the segmented button height is the tap-floor token, not a literal', () => 
 
   expect(css).toContain('.segmented button {\n    min-height: var(--tap);')
 })
+
+// `.admin-main` is the admin surface's only scroll container, and this is the
+// declaration that keeps that true. `.visually-hidden` is absolutely positioned,
+// so with the pane static a control column's hidden heading resolves against the
+// initial containing block instead: it escapes the overflow clip and stretches
+// the document to 2073px against a 900px viewport, a second scrollbar nothing in
+// the app scrolls back. No rendered test can guard it — jsdom has no layout.
+test('the admin pane is a containing block, so a hidden heading cannot escape its scroll clip', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.admin-main { position: relative;')
+})
