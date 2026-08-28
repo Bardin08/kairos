@@ -13,6 +13,7 @@ import {
   createPattern,
   deletePattern,
   listPatterns,
+  renamePattern,
   type Pattern,
 } from '../src/routes/admin/patterns'
 import { getSettings, type Settings } from '../src/routes/admin/adminSettings'
@@ -22,6 +23,7 @@ vi.mock('../src/routes/admin/patterns', async (importOriginal) => ({
   listPatterns: vi.fn(),
   createPattern: vi.fn(),
   deletePattern: vi.fn(),
+  renamePattern: vi.fn(),
 }))
 
 vi.mock('../src/routes/admin/adminSettings', async (importOriginal) => ({
@@ -63,6 +65,10 @@ beforeEach(() => {
   vi.mocked(listPatterns).mockResolvedValue([weekdays])
   vi.mocked(createPattern).mockResolvedValue(weekdays)
   vi.mocked(getSettings).mockResolvedValue(settings)
+  // Reset rather than re-stubbed: the rename tests assert that it was NOT
+  // called, and nothing here clears call history between tests, so a call made
+  // by the test above would be read as a call made by the test below.
+  vi.mocked(renamePattern).mockReset()
 })
 
 afterEach(cleanup)
@@ -103,6 +109,78 @@ test('the header button opens a name field and creates from it', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Create pattern' }))
 
   await waitFor(() => expect(vi.mocked(createPattern)).toHaveBeenCalledWith('Evenings'))
+})
+
+const RENAMED = 'Weekday mornings'
+
+/** Opens the editor on the only card the fixture draws. */
+async function openRenameEditor() {
+  fireEvent.click(await screen.findByRole('button', { name: weekdays.name }))
+  return screen.getByRole('textbox', { name: 'Pattern name' })
+}
+
+test('clicking the name opens an editor holding the current name', async () => {
+  render(<Availability />)
+
+  expect(await openRenameEditor()).toHaveProperty('value', weekdays.name)
+})
+
+test('saving renames the pattern', async () => {
+  vi.mocked(renamePattern).mockResolvedValue({ ...weekdays, name: RENAMED })
+  render(<Availability />)
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(vi.mocked(renamePattern)).toHaveBeenCalledWith(weekdays.id, RENAMED))
+  expect(await screen.findByRole('button', { name: RENAMED })).toBeDefined()
+})
+
+test('cancelling reverts the name and writes nothing', async () => {
+  render(<Availability />)
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(vi.mocked(renamePattern)).not.toHaveBeenCalled()
+  expect(await screen.findByRole('button', { name: weekdays.name })).toBeDefined()
+})
+
+/**
+ * The property this editor has and a blur-to-save one does not. A stray click
+ * elsewhere on the page must not commit a half-typed name, so blur neither saves
+ * nor closes — the operator chooses, every time.
+ */
+test('clicking away neither saves nor closes the editor', async () => {
+  render(<Availability />)
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.blur(field)
+
+  expect(vi.mocked(renamePattern)).not.toHaveBeenCalled()
+  expect(screen.getByRole('textbox', { name: 'Pattern name' })).toHaveProperty('value', RENAMED)
+})
+
+/**
+ * A name the server refuses leaves the editor open with the typed name still in
+ * it. Closing it would throw away what the operator wrote to show them a message
+ * about it.
+ */
+test('a refused rename keeps the editor open and shows the reason', async () => {
+  vi.mocked(renamePattern).mockRejectedValue(
+    new ApiError(CONFLICT, 'pattern_name_taken', 'Another pattern is already called that.'),
+  )
+  render(<Availability />)
+
+  const field = await openRenameEditor()
+  fireEvent.change(field, { target: { value: RENAMED } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('already called that')
+  expect(screen.getByRole('textbox', { name: 'Pattern name' })).toHaveProperty('value', RENAMED)
 })
 
 /**

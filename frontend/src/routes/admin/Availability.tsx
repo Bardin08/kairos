@@ -8,6 +8,7 @@ import {
   createPattern,
   deletePattern,
   listPatterns,
+  renamePattern,
   type Pattern,
   type PatternRule,
 } from './patterns'
@@ -71,6 +72,12 @@ export default function Availability() {
   // status, and a string has already thrown that away.
   const [failure, setFailure] = useState<unknown>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  // The pattern whose name is being edited, and the text in its field. Null is
+  // "no editor open" — one at a time, because two open editors on one grid is
+  // two answers to the same question and neither is the card that was clicked.
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [savingName, setSavingName] = useState(false)
   // Kept per pattern: the refusal names that pattern's links, and means nothing
   // over the top of a grid of cards.
   const [refused, setRefused] = useState<{ patternId: string; error: unknown } | null>(null)
@@ -101,6 +108,48 @@ export default function Availability() {
 
     return () => controller.abort()
   }, [])
+
+  /**
+   * Enter and Save both arrive here — it is the form's submit, so Enter needs no
+   * key handler of its own. An unchanged or blank name closes the editor without
+   * calling the server: the endpoint refuses both, and a refusal would tell the
+   * operator nothing the empty field has not already told them.
+   */
+  function commitRename(event: FormEvent) {
+    event.preventDefault()
+
+    const current = patterns.find((pattern) => pattern.id === renaming)
+    if (current === undefined) return
+
+    const trimmed = draftName.trim()
+    if (trimmed === '' || trimmed === current.name) {
+      setRenaming(null)
+      return
+    }
+
+    setSavingName(true)
+    setRefused(null)
+
+    renamePattern(current.id, trimmed)
+      .then((renamed) => {
+        // Re-sorted, for the reason `create` gives: the list is kept in name
+        // order, and a card that stays put now and jumps on the next load reads
+        // as the page having lost it.
+        setPatterns((list) =>
+          [...list.filter((pattern) => pattern.id !== renamed.id), renamed].sort((left, right) =>
+            left.name.localeCompare(right.name),
+          ),
+        )
+        setRenaming(null)
+        setSavingName(false)
+      })
+      .catch((error: unknown) => {
+        setSavingName(false)
+        // Left open, with what was typed still in it. Closing the editor to show
+        // a message about the name would throw away the name.
+        setRefused({ patternId: current.id, error })
+      })
+  }
 
   function create(event: FormEvent) {
     event.preventDefault()
@@ -220,7 +269,52 @@ export default function Availability() {
         <div className="grid-cards">
           {patterns.map((pattern) => (
             <article className="card card-pad-sm" key={pattern.id}>
-              <h2 className="title-section mb-3">{pattern.name}</h2>
+              {renaming === pattern.id ? (
+                <form className="row gap-2 mb-3" onSubmit={commitRename}>
+                  <input
+                    className="input grow"
+                    aria-label="Pattern name"
+                    value={draftName}
+                    autoFocus
+                    onChange={(event) => setDraftName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setRenaming(null)
+                    }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    type="submit"
+                    data-loading={savingName || undefined}
+                  >
+                    Save
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => setRenaming(null)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                // A button inside the heading rather than a click handler on it:
+                // a heading is not focusable, and a control the keyboard cannot
+                // reach is not a control. `.name-button` strips the chrome so it
+                // still reads as the heading it stands in for.
+                <h2 className="title-section mb-3">
+                  <button
+                    className="name-button"
+                    type="button"
+                    onClick={() => {
+                      setRenaming(pattern.id)
+                      setDraftName(pattern.name)
+                      setRefused(null)
+                    }}
+                  >
+                    {pattern.name}
+                  </button>
+                </h2>
+              )}
 
               {/* A picture of the week, and only a picture: the line under it
                   names the same days in words, so nothing is carried by fill. */}

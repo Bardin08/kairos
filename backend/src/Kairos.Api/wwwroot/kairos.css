@@ -1107,6 +1107,24 @@
      which is the one thing an invitee can otherwise miss. Nothing else in
      Kairos animates on arrival. */
 
+  /* A heading that is also a control. Every scrap of button chrome removed and
+     the heading's own type inherited, so what says it is clickable is the
+     pointer and the focus ring rather than a border — the name is the obvious
+     thing to click to rename, and a bordered box around it would say so twice.
+     A button and not a click handler on the h2 itself, because a heading is not
+     focusable and a control the keyboard cannot reach is not a control. */
+  .name-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
   .slots-head {
     display: flex;
     align-items: baseline;
