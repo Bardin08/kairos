@@ -7,6 +7,10 @@ namespace Kairos.Api.Integrations.Email;
 /// reuses the previous number is an update Outlook drops on the floor, and the builder cannot
 /// know what the previous number was.
 /// </summary>
+/// <param name="Location">
+/// Where to join, or null when the meeting has no conference. Never an empty string: a client
+/// renders an empty LOCATION as a blank location field, which reads as a place nobody knows.
+/// </param>
 public sealed record IcsRequest(
     Guid BookingId,
     Instant Start,
@@ -16,4 +20,5 @@ public sealed record IcsRequest(
     string OrganizerEmail,
     string AttendeeEmail,
     int Sequence,
-    IcsMethod Method);
+    IcsMethod Method,
+    string? Location = null);
