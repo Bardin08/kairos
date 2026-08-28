@@ -4,6 +4,7 @@ using Kairos.Api.Availability;
 using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Integrations;
+using Kairos.Api.Features.Invites;
 using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Integrations;
@@ -213,6 +214,8 @@ builder.Services.AddScoped<BookingWriter>();
 builder.Services.AddScoped<BookingCanceller>();
 builder.Services.AddScoped<BookingMover>();
 builder.Services.AddScoped<ProposalWriter>();
+builder.Services.AddScoped<InviteWriter>();
+builder.Services.AddScoped<InviteReader>();
 
 // One adapter resolved through three interfaces, one instance per request rather than three:
 // registering the class separately and handing the same instance to each role keeps a single Google
@@ -393,6 +396,7 @@ var v1 = app.MapGroup(ApiVersions.V1);
 v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
+v1.MapInvites();
 // Anonymous, and the whole reason it exists: the operator reading it has just been refused. It
 // answers one string — where to sign in — so the locked screen can draw a link without the URL
 // being baked into a bundle that is built once and deployed everywhere.
@@ -408,6 +412,7 @@ v1.MapIntegrationCallback();
 // MapAdmin() would be a second place to read when asking what is public.
 app.MapAdmin()
     .MapLinksAdmin()
+    .MapInvitesAdmin()
     .MapMeetingsAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()

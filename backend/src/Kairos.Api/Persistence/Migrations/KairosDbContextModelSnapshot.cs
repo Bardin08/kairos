@@ -448,6 +448,48 @@ namespace Kairos.Api.Persistence.Migrations
                     b.ToTable("PatternRules");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.PersonalInvite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ConsumedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ExpiresAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LinkId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Prefill")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("RevokedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("LinkId", "CreatedAt");
+
+                    b.ToTable("PersonalInvites");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Settings", b =>
                 {
                     b.Property<int>("Id")
@@ -608,6 +650,17 @@ namespace Kairos.Api.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Pattern");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.PersonalInvite", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Link", "Link")
+                        .WithMany()
+                        .HasForeignKey("LinkId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Link");
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Booking", b =>

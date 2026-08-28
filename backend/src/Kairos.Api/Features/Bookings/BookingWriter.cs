@@ -25,6 +25,16 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     /// </summary>
     public const string SlotTakenReason = "slot_taken";
 
+    /// <summary>
+    /// The personal invite this booking was made with cannot be spent: no invite has that token,
+    /// or somebody already spent it, or the operator revoked it, or its deadline has passed, or it
+    /// was issued for another link. One code for all five, because the caller can do nothing
+    /// different about any of them — the URL is finished and the booking has to be made without it
+    /// — and because naming which would answer, for an anonymous caller holding a guessed token,
+    /// a question about a row they have no business reading.
+    /// </summary>
+    public const string InviteSpentReason = "invite_spent";
+
     private const int ManageTokenBytes = 32;
 
     private const int SecondsPerMinute = 60;
@@ -59,6 +69,10 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     /// resolved the link a moment ago, and a second read inside the write transaction would fetch
     /// the same fact twice.
     /// </param>
+    /// <param name="inviteToken">
+    /// The plaintext token from a personal invite's URL. Null or empty is an ordinary booking, and
+    /// the parameter is optional and last so that one is the call every caller already made.
+    /// </param>
     public CreateBookingResult TryCreate(
         Guid linkId,
         string slug,
@@ -66,7 +80,8 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
         Duration duration,
         BookerDetails booker,
         string notes,
-        int queryingMargin)
+        int queryingMargin,
+        string? inviteToken = null)
     {
         var startUtc = start.ToUnixTimeSeconds();
         var endUtc = (start + duration).ToUnixTimeSeconds();
@@ -147,10 +162,59 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
                 return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
             }
 
+            // Inside this BEGIN IMMEDIATE, as one conditional UPDATE rather than a read and then a
+            // write: a single-use token spent outside the transaction that checks the slot is a
+            // token two callers can spend, and a read-then-write is a guarantee two concurrent
+            // callers both pass. ExecuteUpdate issues a single UPDATE on this connection, so the
+            // database evaluates the predicate under the lock this transaction already holds —
+            // which is what makes the returned count the answer rather than a hint — and it goes
+            // round the change tracker, so nothing in memory can disagree with the row. Rolling
+            // back takes the spend back with it, so a booking that fails after this point does not
+            // leave a token nobody can use.
+            //
+            // The predicate is the SQL twin of InviteWriter.StateAt — unspent, unrevoked, inside
+            // its deadline — asked of the row that token names, on the link being booked. ExpiresAt
+            // is compared with >=, not >, because that fold calls the deadline second itself still
+            // open; > here would open one second in which the page offers an invite the write
+            // refuses. LinkId is not decoration either: without it an invite issued for one link
+            // is spendable on every other, with every remaining clause satisfied.
+            //
+            // Empty counts as absent, not as a token that will never match. CreateBookingRequest
+            // carries this straight off a form field, and a page sending "" for "no invite" would
+            // otherwise turn every ordinary booking into a refusal.
+            Guid? spentBy = null;
+            if (!string.IsNullOrEmpty(inviteToken))
+            {
+                // Generated before the UPDATE that records it and reused as the booking's own id
+                // below. The other order writes an invite pointing at a booking that does not
+                // exist, and PersonalInvite.BookingId carries no foreign key to catch it.
+                spentBy = Guid.CreateVersion7();
+
+                // Hash, not a fresh SHA256.HashData: it lower-cases first, and a digest minted any
+                // other way is one the unique index has never seen.
+                var inviteHash = Hash(inviteToken);
+                var spent = context.PersonalInvites
+                    .Where(invite =>
+                        (invite.TokenHash == inviteHash)
+                        && (invite.LinkId == linkId)
+                        && (invite.ConsumedAt == null)
+                        && (invite.RevokedAt == null)
+                        && ((invite.ExpiresAt == null) || (invite.ExpiresAt >= now)))
+                    .ExecuteUpdate(update => update
+                        .SetProperty(invite => invite.ConsumedAt, now)
+                        .SetProperty(invite => invite.BookingId, spentBy));
+
+                if (spent != 1)
+                {
+                    Abandon(started, pending, announcement);
+                    return new CreateBookingResult(false, Guid.Empty, null, InviteSpentReason);
+                }
+            }
+
             var manageToken = Convert.ToHexString(
                 RandomNumberGenerator.GetBytes(ManageTokenBytes)).ToLowerInvariant();
 
-            var bookingId = Guid.CreateVersion7();
+            var bookingId = spentBy ?? Guid.CreateVersion7();
             pending = new Booking
             {
                 Id = bookingId,

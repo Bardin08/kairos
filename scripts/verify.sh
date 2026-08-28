@@ -74,6 +74,20 @@ check "no razor pages"               bash -c '! find backend -name "*.cshtml" | 
 # every test project's bin/ name kairos.css, and a plain recursive grep reads
 # that as a test reaching for the UI.
 check "backend tests ignore the ui"  bash -c '! git grep -lE "\.tsx|kairos\.css|wwwroot" -- backend/tests | grep -q .'
+# vite.config.ts scopes Vitest to tests/**, so a *.test.ts written anywhere else
+# under frontend/ is never collected: not a failing test, no test at all, and
+# `npx vitest run` below stays green while saying nothing about it. That is the
+# one claim the frontend suite structurally cannot make about itself, which is
+# why it is a tree check here rather than a test in there.
+#
+# Tracked files only, like the check above: a file git has never seen is not
+# going to be pushed either, and this gate runs before a push.
+if [ "$FRONTEND_STATE" != absent ]; then
+  check "every frontend test is collected" \
+    bash -c '! git ls-files -- frontend ":(exclude)frontend/tests" | grep -qE "\.test\.tsx?$"'
+else
+  skip "every frontend test is collected" "$NO_FRONTEND_YET"
+fi
 # Asked for by path, not as .git/hooks/…: inside a git worktree .git is a file
 # pointing at the real git dir, so the literal path is "not a directory" and the
 # check fails on exactly the workflow the plan asks for.

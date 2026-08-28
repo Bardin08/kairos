@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 
 import {
   asApiError,
   createBooking,
   DATABASE_BUSY,
+  INVITE_SPENT,
   type Booking,
   type Link,
 } from '../lib/api'
@@ -36,6 +37,7 @@ export default function BookingForm({
   durationMinutes,
   zone,
   details,
+  inviteToken,
   onDetails,
   onBack,
   onBooked,
@@ -52,6 +54,12 @@ export default function BookingForm({
    * send the invitee back to the times without throwing away what they typed.
    */
   details: { name: string; email: string; notes: string }
+  /**
+   * The invite this booking is spending, or null for an ordinary one. Only ever
+   * a token the read said was open — the caller drops a stale one before it gets
+   * here, so a refusal below is a race and not the ordinary state of a page.
+   */
+  inviteToken: string | null
   onDetails: (next: { name: string; email: string; notes: string }) => void
   onBack: () => void
   onBooked: (booking: Booking) => void
@@ -62,6 +70,11 @@ export default function BookingForm({
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+
+  // Flipped by a refused invitation and never back. The failure that sets it
+  // tells the invitee to send the booking again, and a second press carrying the
+  // same token would be refused the same way — so the recovery has to be real.
+  const inviteSpent = useRef(false)
 
   const day = zonedDate(start, zone)
   const span = `${zonedTime(start, zone)}–${zonedTime(endOf(start, durationMinutes), zone)}`
@@ -98,10 +111,25 @@ export default function BookingForm({
           email: email.trim(),
           timeZone: zone,
           notes: notes.trim(),
+          // Omitted rather than sent as null: the server reads its absence as an
+          // ordinary booking, and a token it has already refused would only be
+          // refused again.
+          inviteToken: inviteSpent.current ? undefined : (inviteToken ?? undefined),
         }),
       )
     } catch (error: unknown) {
       const problem = asApiError(error)
+      // Before the status, because this is a 409 whose slot is still free.
+      // Routing it through onSlotLost would take a time away from somebody who
+      // can still have it — the same reasoning DATABASE_BUSY states below, for
+      // the same reason: nothing was written.
+      if (problem.code === INVITE_SPENT) {
+        inviteSpent.current = true
+        setFailure(
+          'That personal invitation cannot be used any more — it was used, withdrawn, or its deadline passed. This time is still free and everything you typed is still here: send it again to book it without the invitation.',
+        )
+        return
+      }
       if (problem.status === CONFLICT) {
         // Somebody else got it, or the calendar moved underneath. The slot has
         // to disappear from the list before the invitee is told, which is the
