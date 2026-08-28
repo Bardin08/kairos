@@ -39,15 +39,21 @@ const NO_LINK = ''
 /** What the header button controls, named so `aria-controls` can point at it. */
 const PANEL_ID = 'invite-panel'
 
+/** The pair of controls `Change` reveals, named so `aria-controls` can say so. */
+const SETTINGS_ID = 'invite-settings'
+
 /**
  * The deadlines on offer, held as durations and resolved to an instant at the
  * moment Generate is pressed — the wire carries a moment and never a duration,
  * and a preset resolved any earlier would be measured from the wrong clock read.
+ *
+ * Two words apiece, because the choice is read in two places: `label` starts an
+ * <option> and is capitalised for it, `settled` sits mid-sentence after a middot.
  */
 const DEADLINES = [
-  { hours: NO_DEADLINE, label: 'No deadline' },
-  { hours: String(HOURS_PER_DAY), label: 'In 24 hours' },
-  { hours: String(HOURS_PER_DAY * DAYS_PER_WEEK), label: 'In 7 days' },
+  { hours: NO_DEADLINE, label: 'No deadline', settled: 'no deadline' },
+  { hours: String(HOURS_PER_DAY), label: 'In 24 hours', settled: 'good for 24 hours' },
+  { hours: String(HOURS_PER_DAY * DAYS_PER_WEEK), label: 'In 7 days', settled: 'good for 7 days' },
 ]
 
 /**
@@ -146,6 +152,9 @@ export default function Invites() {
   // before anything is issued, and stays open on the URL after. Regenerate sets
   // both, because a URL minted from a row has nowhere else to be shown.
   const [panelOpen, setPanelOpen] = useState(false)
+  // Whether the link picker and the deadline are showing as controls rather than
+  // as the sentence that states them.
+  const [changing, setChanging] = useState(false)
   // Bumped after every write. The list re-reads rather than patching its own
   // copy, because the server decides the order and folds the clock into each
   // state — and a local patch is where those two drift apart.
@@ -348,6 +357,11 @@ export default function Invites() {
 
   const nothingToOffer = offered !== null && offered.length === 0
 
+  // What the sentence says, read off the same two pieces of state the controls
+  // write — so the settled line and the revealed controls can never disagree.
+  const chosenLink = (offered ?? []).find((link) => link.id === linkId)
+  const chosenDeadline = DEADLINES.find((deadline) => deadline.hours === hours)
+
   return (
     <>
       {/* The same grouping the links table uses, doing the same job: on Links the
@@ -403,63 +417,93 @@ export default function Invites() {
       ) : (
         panelOpen && (
           <section id={PANEL_ID} className="card card-pad stack">
-            <div className="field">
-              <label htmlFor="invite-link">Link</label>
-              <select
-                id="invite-link"
-                className="select ctl-md"
-                value={linkId}
-                onChange={(event) => setLinkId(event.target.value)}
+            {/* One thought, so one row: the operator reaching for this is thinking
+                about a person, not about four settings. */}
+            <div className="row gap-4 wrap">
+              <div className="field grow">
+                <label htmlFor="invite-name">Their name</label>
+                <input
+                  id="invite-name"
+                  className="input"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+
+              <div className="field grow">
+                <label htmlFor="invite-email">Their email</label>
+                <input
+                  id="invite-email"
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* The two decisions that are usually already right, stated rather than
+                asked. `.fact` and its `strong` are the stylesheet's existing "one
+                phrase at full strength in a quiet line" — and the link name is the
+                phrase that has to carry, because the picker is hidden and issuing
+                against the wrong link is not visible until the recipient books the
+                wrong meeting. */}
+            <p className="fact">
+              <span>
+                On <strong>{chosenLink?.name ?? ''}</strong> · <strong>{chosenDeadline?.settled ?? ''}</strong>
+              </span>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                aria-expanded={changing}
+                aria-controls={SETTINGS_ID}
+                onClick={() => setChanging((shown) => !shown)}
               >
-                {(offered ?? []).map((link) => (
-                  <option key={link.id} value={link.id}>
-                    {link.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                Change
+              </button>
+            </p>
 
-            <div className="field">
-              <label htmlFor="invite-name">Their name</label>
-              <input
-                id="invite-name"
-                className="input"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
+            {changing && (
+              <div id={SETTINGS_ID} className="stack">
+                <div className="field">
+                  <label htmlFor="invite-link">Link</label>
+                  <select
+                    id="invite-link"
+                    className="select ctl-md"
+                    value={linkId}
+                    onChange={(event) => setLinkId(event.target.value)}
+                  >
+                    {(offered ?? []).map((link) => (
+                      <option key={link.id} value={link.id}>
+                        {link.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="field">
-              <label htmlFor="invite-email">Their email</label>
-              <input
-                id="invite-email"
-                className="input"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </div>
-
-            <div className="field">
-              <label htmlFor="invite-deadline">Deadline</label>
-              {/* The zone is said here rather than over the column below: it is the
-                  same sentence for both, and this is where an operator decides. */}
-              <p className="fine">
-                After it, the URL stops working and the times go back on offer. Deadlines are set and shown in your own zone, {zone}.
-              </p>
-              <select
-                id="invite-deadline"
-                className="select ctl-md"
-                value={hours}
-                onChange={(event) => setHours(event.target.value)}
-              >
-                {DEADLINES.map((deadline) => (
-                  <option key={deadline.label} value={deadline.hours}>
-                    {deadline.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div className="field">
+                  <label htmlFor="invite-deadline">Deadline</label>
+                  {/* The zone is said here rather than over the column below: it is
+                      the same sentence for both, and this is where an operator
+                      decides. */}
+                  <p className="fine">
+                    After it, the URL stops working and the times go back on offer. Deadlines are set and shown in your own zone, {zone}.
+                  </p>
+                  <select
+                    id="invite-deadline"
+                    className="select ctl-md"
+                    value={hours}
+                    onChange={(event) => setHours(event.target.value)}
+                  >
+                    {DEADLINES.map((deadline) => (
+                      <option key={deadline.label} value={deadline.hours}>
+                        {deadline.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* `btn-primary`, where the editor's copy of this form was a plain
                 `btn`. DESIGN.md allows one primary per view, and in the editor

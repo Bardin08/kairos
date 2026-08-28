@@ -107,7 +107,10 @@ const OPEN_FILTER = 'Open'
 const ALL_FILTER = 'All'
 const DEADLINE_FIELD = 'Deadline'
 const NAME_FIELD = 'Their name'
+const EMAIL_FIELD = 'Their email'
 const LINK_FIELD = 'Link'
+const CHANGE = 'Change'
+const NO_DEADLINE_WORD = 'no deadline'
 
 const SHOWN_ONCE = /shown once and cannot be read back/
 /**
@@ -277,6 +280,10 @@ test('generate issues the invite against the link the picker names', async () =>
 
   await show()
 
+  // The picker is behind `Change` now. What this test is about is unchanged: the
+  // id the picker carries is what routes the POST.
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+
   fireEvent.change(screen.getByLabelText(LINK_FIELD), { target: { value: OTHER_LINK_ID } })
   fireEvent.click(screen.getByRole('button', { name: GENERATE }))
 
@@ -354,6 +361,8 @@ test('the picker offers live links only', async () => {
   vi.mocked(listLinks).mockResolvedValue(linksPage([LINK, ARCHIVED_LINK]))
 
   await show()
+
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
 
   expect(screen.getByRole('option', { name: LINK_NAME })).toBeTruthy()
   expect(screen.queryByRole('option', { name: ARCHIVED_LINK_NAME })).toBeNull()
@@ -442,6 +451,10 @@ test('a deadline preset travels as an instant, because the wire carries a moment
   vi.mocked(createInvite).mockResolvedValue({ id: ADDRESSED_INVITE_ID, url: INVITE_URL })
 
   await show()
+
+  // The picker is behind `Change` now. What this test is about is unchanged: the
+  // id the picker carries is what routes the POST.
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
 
   fireEvent.change(screen.getByLabelText(DEADLINE_FIELD), {
     target: { value: String(HOURS_PER_DAY) },
@@ -660,6 +673,60 @@ test('the form is not on the page until the button asks for it', async () => {
   expect(screen.queryByLabelText(NAME_FIELD)).toBeNull()
   expect(screen.queryByRole('button', { name: GENERATE })).toBeNull()
   expect(open.getAttribute(EXPANDED)).toBe('false')
+})
+
+/**
+ * The two fields that change every time are asked; the two that are usually
+ * already right are stated. With one link and no deadline as the overwhelming
+ * case, four questions to ask two is the wrong trade.
+ */
+test('the panel asks for a person and states the link and the deadline', async () => {
+  await show()
+
+  expect(screen.getByLabelText(NAME_FIELD)).toBeTruthy()
+  expect(screen.getByLabelText(EMAIL_FIELD)).toBeTruthy()
+
+  expect(screen.queryByLabelText(LINK_FIELD)).toBeNull()
+  expect(screen.queryByLabelText(DEADLINE_FIELD)).toBeNull()
+
+  expect(screen.getByText(LINK_NAME)).toBeTruthy()
+  expect(screen.getByText(NO_DEADLINE_WORD)).toBeTruthy()
+})
+
+/**
+ * The risk this shape takes on. The picker is hidden and there is more than one
+ * link, so the failure it invites is minting against the wrong one and not
+ * learning about it until the recipient books the wrong meeting. The link name
+ * is the one phrase in the line that is not quiet.
+ *
+ * Switched to the second link, and switched back out of `Change`, for two
+ * separate reasons. Reading the sentence off the seeded first link passes just
+ * as well when the sentence ignores `linkId` and prints `offered[0]` — which is
+ * the bug this test exists to catch. And the picker's own <option> carries the
+ * same name, so the assertion is only unambiguous once the controls are
+ * collapsed again.
+ */
+test('the link the invite will be issued against is the loud half of the sentence', async () => {
+  await show()
+
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+  fireEvent.change(screen.getByLabelText(LINK_FIELD), { target: { value: OTHER_LINK_ID } })
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+
+  expect(screen.getByText(OTHER_LINK_NAME).tagName).toBe('STRONG')
+})
+
+test('Change is what puts the link and the deadline back on the page', async () => {
+  await show()
+
+  const change = screen.getByRole('button', { name: CHANGE })
+  expect(change.getAttribute(EXPANDED)).toBe('false')
+
+  fireEvent.click(change)
+
+  expect(change.getAttribute(EXPANDED)).toBe('true')
+  expect(screen.getByLabelText(LINK_FIELD)).toBeTruthy()
+  expect(screen.getByLabelText(DEADLINE_FIELD)).toBeTruthy()
 })
 
 /**
