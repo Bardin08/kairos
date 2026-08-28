@@ -38,6 +38,10 @@ public class BookingMailerTests
     private const string BaseUrl = "https://kairos.example.com";
     private const string ManageUrlFragment = "/manage/";
     private const string CancellationReason = "The client moved the workshop a week.";
+
+    /// <summary>Where the meeting is joined, in the shape <see cref="ConferenceLink.JoinUrl"/> holds.</summary>
+    private const string JoinUrl = "https://meet.example.com/kairos-consulting";
+
     private const string OrganizerAddress = "organizer@example.com";
     private const string BookerAddress = "guest@example.com";
     private const string BookerName = "Vlad";
@@ -239,6 +243,23 @@ public class BookingMailerTests
         Unfold(Ics(Compose())).ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
+    /// What makes Google Calendar and Outlook draw a join control on the event itself. The defect
+    /// this task was written around: ConferenceLink.JoinUrl is written at booking and nothing has
+    /// ever put it in a message.
+    /// </summary>
+    [Fact]
+    public void Compose_AConfirmationForAMeetingWithAConference_PutsTheJoinUrlInTheCalendarLocation() =>
+        Unfold(Ics(Compose(joinUrl: JoinUrl))).ShouldContain($"LOCATION:{JoinUrl}");
+
+    /// <summary>
+    /// Absent, not empty. A booking with no conference produces an .ics with no LOCATION property
+    /// — a blank one reads as a meeting whose place is unknown.
+    /// </summary>
+    [Fact]
+    public void Compose_AMeetingWithNoConference_WritesNoLocationInTheCalendarPart() =>
+        Ics(Compose(joinUrl: null)).ShouldNotContain("LOCATION");
+
+    /// <summary>
     /// A base URL written with a trailing slash is the ordinary way an operator writes one, and
     /// the double slash it would otherwise produce is enough for some clients to stop linkifying.
     /// </summary>
@@ -371,7 +392,8 @@ public class BookingMailerTests
     [Fact]
     public async Task SendConfirmationAsync_NoRelayConfigured_DoesNothingAndDoesNotThrow() =>
         await Should.NotThrowAsync(() => Mailer(new EmailOptions())
-            .SendConfirmationAsync(Booking(), ManageToken, TestContext.Current.CancellationToken));
+            .SendConfirmationAsync(
+                Booking(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
 
     /// <summary>
     /// Ground rule 14, against a real socket. A relay that is configured and refuses the
@@ -387,7 +409,8 @@ public class BookingMailerTests
         unreachable.Port = PortNothingListensOn;
 
         await Should.NotThrowAsync(() => Mailer(unreachable)
-            .SendConfirmationAsync(Booking(), ManageToken, TestContext.Current.CancellationToken));
+            .SendConfirmationAsync(
+                Booking(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
     }
 
     private static EmailOptions Options(string baseUrl, string from = OrganizerAddress) =>
@@ -446,11 +469,12 @@ public class BookingMailerTests
         Booking? booking = null,
         EmailOptions? options = null,
         BookingNotice notice = BookingNotice.Confirmation,
-        string? manageToken = ManageToken)
+        string? manageToken = ManageToken,
+        string? joinUrl = null)
     {
         using var stream = new MemoryStream();
         Mailer(options ?? Options(BaseUrl))
-            .Compose(booking ?? Booking(), manageToken, notice)
+            .Compose(booking ?? Booking(), manageToken, joinUrl, notice)
             .WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);

@@ -56,8 +56,9 @@ public sealed class BookingMailer(
     public Task SendConfirmationAsync(
         Booking booking,
         string manageToken,
+        string? joinUrl,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Confirmation, booking, manageToken, cancellationToken);
+        SendAsync(BookingNotice.Confirmation, booking, manageToken, joinUrl, cancellationToken);
 
     /// <summary>
     /// <c>METHOD:REQUEST</c> again, same <c>UID</c>, with a <see cref="Booking.Sequence"/> the
@@ -73,8 +74,9 @@ public sealed class BookingMailer(
     public Task SendRescheduleAsync(
         Booking booking,
         string? manageToken,
+        string? joinUrl,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Reschedule, booking, manageToken, cancellationToken);
+        SendAsync(BookingNotice.Reschedule, booking, manageToken, joinUrl, cancellationToken);
 
     /// <summary>
     /// <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
@@ -85,12 +87,15 @@ public sealed class BookingMailer(
     /// A cancellation the operator triggered has no plaintext token and no way to recover one. The
     /// confirmation keeps <c>string</c> deliberately: it mints the manage token, which appears in
     /// no later response.
+    ///
+    /// No join URL is taken, where the other two notices take one: this message removes the event,
+    /// so there is nothing left to join.
     /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
         string? manageToken,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Cancellation, booking, manageToken, cancellationToken);
+        SendAsync(BookingNotice.Cancellation, booking, manageToken, joinUrl: null, cancellationToken);
 
     /// <summary>
     /// The operator has offered a new time. Nothing has moved; the invitee decides.
@@ -116,8 +121,10 @@ public sealed class BookingMailer(
         BookingNotice notice,
         Booking booking,
         string? manageToken,
+        string? joinUrl,
         CancellationToken cancellationToken) =>
-        SendComposedAsync(notice, booking, () => Compose(booking, manageToken, notice), cancellationToken);
+        SendComposedAsync(
+            notice, booking, () => Compose(booking, manageToken, joinUrl, notice), cancellationToken);
 
     /// <summary>
     /// Composition is deferred rather than passed in already done, so that this stays the one home
@@ -197,7 +204,8 @@ public sealed class BookingMailer(
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
     /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
     /// </remarks>
-    public MimeMessage Compose(Booking booking, string? manageToken, BookingNotice notice)
+    public MimeMessage Compose(
+        Booking booking, string? manageToken, string? joinUrl, BookingNotice notice)
     {
         var settings = options.Value;
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
@@ -229,7 +237,8 @@ public sealed class BookingMailer(
             OrganizerEmail: organizer.Address,
             AttendeeEmail: booker.Email,
             Sequence: booking.Sequence,
-            Method: method));
+            Method: method,
+            Location: joinUrl));
 
         var body = new TextPart(TextFormat.Plain);
         body.SetText(

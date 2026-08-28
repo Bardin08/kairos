@@ -243,12 +243,17 @@ public static class BookingsEndpoints
         // request — SyncAsync has no throwing path — so the worst inline buys is a slower 201.
         await calendars.SyncAsync(booking, cancellationToken);
 
+        // Read back rather than carried out of the sync, and only correct because of where it sits:
+        // the ConferenceLink is committed by the same SaveChanges as the calendar entry, inside the
+        // call above. Move this read ahead of that call and every confirmation loses its join row.
+        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
+
         // After the sync, so the confirmation describes a meeting the organizer's calendar already
         // knows about, and never before the write committed. Sent on this thread rather than from a
         // queue because the plaintext manage token the confirmation carries exists only here, in
         // memory, and a queue would have to store it. The mailer swallows its own failures, so a
         // relay being down cannot become a booking the organizer never gets.
-        await mailer.SendConfirmationAsync(booking, result.ManageToken!, cancellationToken);
+        await mailer.SendConfirmationAsync(booking, result.ManageToken!, joinUrl, cancellationToken);
 
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}",
@@ -316,11 +321,13 @@ public static class BookingsEndpoints
         // it vanish. The trap the booking.cancelled announcement is kept out of, same pair of tests.
         await calendars.RescheduleAsync(booking, cancellationToken);
 
+        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
+
         // Then the invitee, so the mail describes a calendar the organizer's side already agrees
         // with. The token arrived in the URL, stays in memory for this request and is never
         // persisted. Sequence was advanced above and the UID is the booking id, which together are
         // what make this land as a change rather than as a second meeting.
-        await mailer.SendRescheduleAsync(booking, token, cancellationToken);
+        await mailer.SendRescheduleAsync(booking, token, joinUrl, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -401,9 +408,11 @@ public static class BookingsEndpoints
         // it would withdraw the event for a meeting that merely moved.
         await calendars.RescheduleAsync(booking, cancellationToken);
 
+        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
+
         // No manage token, and none can be had: the URL the invitee opened carried the PROPOSAL's
         // token and only the manage token's SHA-256 is stored. The mail goes without that link.
-        await mailer.SendRescheduleAsync(booking, manageToken: null, cancellationToken);
+        await mailer.SendRescheduleAsync(booking, manageToken: null, joinUrl, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -631,6 +640,24 @@ public static class BookingsEndpoints
         CancellationToken cancellationToken) =>
         Tracked(context).SingleAsync(booking => booking.Id == id, cancellationToken);
 
+    /// <summary>
+    /// Where this meeting is joined, or null when it has no conference — which is an ordinary state
+    /// and not an error, so the notice goes without the row.
+    /// </summary>
+    /// <remarks>
+    /// A correlated read rather than an Include: <see cref="Booking"/> has no navigation to its
+    /// conference links, and giving it one so a mail could use it would be a schema change made by
+    /// a message. This lands on the index over BookingId.
+    /// </remarks>
+    private static Task<string?> JoinUrlAsync(
+        KairosDbContext context,
+        Guid bookingId,
+        CancellationToken cancellationToken) =>
+        context.ConferenceLinks.AsNoTracking()
+            .Where(row => row.BookingId == bookingId)
+            .Select(row => (string?)row.JoinUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+
     private static IQueryable<Booking> Tracked(KairosDbContext context) =>
         context.Bookings
             .Include(booking => booking.Link)
@@ -657,8 +684,7 @@ public static class BookingsEndpoints
         var entry = await context.CalendarEntries.AsNoTracking()
             .FirstOrDefaultAsync(row => row.BookingId == booking.Id, cancellationToken);
 
-        var conference = await context.ConferenceLinks.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.BookingId == booking.Id, cancellationToken);
+        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
 
         return new BookingResponse(
             booking.Id,
@@ -674,7 +700,7 @@ public static class BookingsEndpoints
             booking.Notes,
             manageToken,
             entry?.State.ToString().ToLowerInvariant(),
-            conference?.JoinUrl);
+            joinUrl);
     }
 
     /// <summary>
