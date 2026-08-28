@@ -18,11 +18,15 @@ public class IcsBuilderTests
 
     private const string LineBreak = "\r\n";
 
+    private const string LocationProperty = "LOCATION";
+    private const string JoinUrl = "https://meet.example/abc-defg-hij";
+
     private static IcsRequest Request(
         int sequence = 0,
         IcsMethod method = IcsMethod.Request,
         string summary = "Consulting",
-        string description = "") =>
+        string description = "",
+        string? location = null) =>
         new(
             BookingId: BookingId,
             Start: Instant.FromUtc(2026, 9, 7, 9, 0),
@@ -32,7 +36,8 @@ public class IcsBuilderTests
             OrganizerEmail: "organizer@example.com",
             AttendeeEmail: "guest@example.com",
             Sequence: sequence,
-            Method: method);
+            Method: method,
+            Location: location);
 
     private static string Build(int sequence, IcsMethod method) =>
         new IcsBuilder().Build(Request(sequence, method));
@@ -116,6 +121,18 @@ public class IcsBuilderTests
         // Notes are free text typed by a stranger; one raw comma corrupts the file from there on.
         Unfold(new IcsBuilder().Build(Request(description: "a,b;c\\d\ne")))
             .ShouldContain(@"DESCRIPTION:a\,b\;c\\d\ne");
+
+    [Fact]
+    public void Build_ABookingWithAConference_WritesItsUrlAsLocation() =>
+        // LOCATION on the event is what makes Google Calendar and Outlook draw a join control,
+        // rather than the invitee hunting for the URL in a mail they have to keep.
+        new IcsBuilder().Build(Request(location: JoinUrl)).ShouldContain($"{LocationProperty}:{JoinUrl}");
+
+    [Fact]
+    public void Build_ABookingWithNoConference_WritesNoLocationPropertyAtAll() =>
+        // Absent, not empty: a client renders an empty LOCATION as a blank location field, which
+        // reads as a meeting whose place is unknown rather than one held wherever the two agreed.
+        new IcsBuilder().Build(Request()).ShouldNotContain(LocationProperty);
 
     [Fact]
     public void Build_Always_EndsEveryLineWithCarriageReturnLineFeed()

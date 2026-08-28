@@ -356,6 +356,7 @@ public class ProposalSweeperTests
             new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(database.ConnectionString).Options);
         services.AddScoped<KairosDbContext>();
         services.AddSingleton<IClock>(new FixedClock(Now));
+        services.AddLogging();
         services.AddSingleton<ILogger<OperatorMailer>>(NullLogger<OperatorMailer>.Instance);
         services.AddSingleton(Options.Create(email ?? new EmailOptions
         {
@@ -364,6 +365,7 @@ public class ProposalSweeperTests
             PublicBaseUrl = RelayBaseUrl,
         }));
         services.AddSingleton(relay);
+        services.AddSingleton<MailHtmlRenderer>();
         services.AddSingleton<OperatorMailer>();
 
         return services.BuildServiceProvider();

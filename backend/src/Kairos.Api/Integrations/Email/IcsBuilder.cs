@@ -29,6 +29,7 @@ public sealed class IcsBuilder(IClock? clock = null)
 
     private const string LineBreak = "\r\n";
     private const string ProductId = "-//Kairos//Kairos Scheduling//EN";
+    private const string LocationProperty = "LOCATION";
 
     private static readonly InstantPattern UtcPattern =
         InstantPattern.CreateWithInvariantCulture("uuuuMMdd'T'HHmmss'Z'");
@@ -51,6 +52,13 @@ public sealed class IcsBuilder(IClock? clock = null)
             $"DTEND:{UtcPattern.Format(request.End)}",
             $"SUMMARY:{Escape(request.Summary)}",
             $"DESCRIPTION:{Escape(request.Description)}",
+
+            // Omitted rather than written empty: a client renders an empty LOCATION as a blank
+            // location field, which says the place is unknown rather than that there is none.
+            .. request.Location is { Length: > 0 } location
+                ? (string[])[$"{LocationProperty}:{Escape(location)}"]
+                : [],
+
             $"ORGANIZER:mailto:{request.OrganizerEmail}",
             $"ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{request.AttendeeEmail}",
             $"SEQUENCE:{request.Sequence}",
