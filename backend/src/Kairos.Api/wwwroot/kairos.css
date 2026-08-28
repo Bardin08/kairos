@@ -812,12 +812,20 @@
   @media (max-width: 640px) { .card-pad { padding: var(--space-5); } }
 
   /* Every page in the admin opens with a title and one action. */
+  /* `min-height` is the one that is not cosmetic: a header carrying an action is
+     as tall as that action, and one carrying only its heading is 16px shorter.
+     Every view below it then starts at a different height, so moving between two
+     of them — Links and Meetings, or the two halves of the Links section — makes
+     the whole page jump under the pointer. Pinning it to the tap target costs a
+     header with no action nothing and holds the ones with an action exactly where
+     they already sat. */
   .page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: var(--space-3);
+    min-height: var(--tap);
     margin-bottom: var(--space-5);
   }
 
