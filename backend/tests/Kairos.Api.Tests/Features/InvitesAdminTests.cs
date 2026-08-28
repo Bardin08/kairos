@@ -481,8 +481,15 @@ public class InvitesAdminTests
     /// Seeded rather than issued through the route, and stored newest-FIRST on purpose. Issued
     /// through the route the ids ascend in step with the storage order, so the guaranteed answer
     /// and the incidental one agree and neither is being tested — measured: with the tiebreak
-    /// deleted, a test written that way still passed. Written in the opposite order the two
-    /// disagree, and only the id gives the right one.
+    /// deleted, a test written that way still passed.
+    ///
+    /// Stored this way round the two were meant to disagree, and they no longer do. Once
+    /// <see cref="InviteReader"/> began joining Links for the link's name, the plan the tie falls
+    /// back on changed and the incidental order started giving the right answer here too — so this
+    /// case survives the tiebreak being DELETED, and only still fails when it is inverted. The
+    /// guarantee is pinned by
+    /// <see cref="InviteReaderTests.AllAsync_TwoInvitesTiedOnTheSecond_OrdersOnTheIdRatherThanOnStorageOrder"/>,
+    /// which is where it stays when Task 7 of the invites-placement plan retires this route.
     ///
     /// The ids are UUIDv7 and reach SQLite as canonical hyphenated TEXT, which sorts
     /// lexicographically and therefore chronologically. That is what

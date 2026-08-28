@@ -113,7 +113,11 @@ public static class InvitesAdminEndpoints
         CancellationToken cancellationToken)
     {
         await RequireLinkAsync(context, id, cancellationToken);
-        return await reader.ForLinkAsync(id, cancellationToken);
+
+        // Temporary, and deleted with this route: the reader now answers across every link, and
+        // this route is retired in Task 7 of the invites-placement plan, in favour of the
+        // cross-link GET /admin/invites.
+        return [.. (await reader.AllAsync(cancellationToken)).Where(invite => invite.LinkId == id)];
     }
 
     private static async Task<Created<InviteCreatedResponse>> CreateAsync(
