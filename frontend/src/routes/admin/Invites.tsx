@@ -13,6 +13,7 @@ import {
 } from './adminInvites'
 import { listLinks, type AdminLink } from './adminLinks'
 import Failure from './Failure'
+import SectionNav from './SectionNav'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is why
 // they are shapes: `live` fills the 7px dot, `paused` leaves it hollow at the
@@ -328,6 +329,8 @@ export default function Invites() {
       <div className="page-header">
         <h1 className="title-page">Personal links</h1>
       </div>
+
+      <SectionNav />
 
       {nothingToOffer ? (
         // No picker, because there is nothing to put in it. One sentence for

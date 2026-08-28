@@ -4,6 +4,7 @@ import RecordTable, { type RecordColumn } from '../../components/RecordTable'
 import { listLinks, type AdminLink, type GlobalLimits, type LinksPage } from './adminLinks'
 import Failure from './Failure'
 import LinkEditor from './LinkEditor'
+import SectionNav from './SectionNav'
 
 // The two status shapes kairos.css draws, and the Second Channel Rule is why
 // they are shapes: `live` fills the 7px dot, `paused` leaves it hollow at the
@@ -149,6 +150,8 @@ export default function Links() {
           New link
         </button>
       </div>
+
+      <SectionNav />
 
       <Failure error={failure} className="mb-5" />
 
