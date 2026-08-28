@@ -1115,3 +1115,33 @@ The operator's half — the picker, the row's controls and the admin HTTP calls 
 **The `propose-*` checks in `scripts/measure-ui.mjs` are run by hand and nothing gates them.** They caught two defects no unit test could see — a month grid collapsing to single-digit day squares inside a table cell, and a commit button hidden below 861px by a class that pairs with an action bar the admin shell does not have — and they hold those guarantees only as often as somebody runs them. `verify.sh` does not, and should not: they need a seeded instance, an operator session and a browser download.
 
 **Nothing about the invitee's proposal page was measured in a browser.** The picker was, at six viewports; the page the invitee actually opens from the mail was not, and its own layout claims rest on unit tests and reading alone.
+
+---
+
+# Personal links
+
+## Why this section exists
+
+Same reason as the section above it: to correct the one number this work could move, and nothing else. The last recorded reading was 72,727 bytes gzipped on the booking route with a 15,085-byte admin chunk beside it, taken at `dc7c89e`, and that pair has been the quoted figure since. It is stale for two reasons at once — twenty-one merges landed on `main` in between, and this work put a second admin route behind the section switch — so a reading that does not separate the two would be worse than no reading at all.
+
+## Bundle
+
+Measured 2026-08-28 with `npm run build && bash scripts/bundle-budget.sh`, the base built at this branch's own merge base in a throwaway worktree sharing this one's `node_modules`, the lockfile being byte-identical across the range:
+
+```
+                                  booking route          admin chunk
+a1ba560  the branch point            73,216                17,751
+568a893  personal links              73,217        +1      17,950     +199
+─────────────────────────────────────────────────────────────────────────
+                        budget       76,800   (3,583 free, 95.3% used)
+```
+
+**The invitee pays one byte.** The panel, the link picker, the deadline and the section nav are all under `routes/admin/`, so all of them land in the lazy chunk that no invitee fetches; the single byte is gzip's own accounting shifting under a changed dictionary, not a line of code the booking route runs.
+
+**The gap between 72,727 and 73,216 is not this work's.** Those 489 bytes belong to the twenty-one merges in `dc7c89e..a1ba560` — among them #129 and #131, which built the personal link and the page this branch puts a switch in front of. The branch point is measured here rather than assumed so that the +1 above reads as the whole of this change and not as a slice of a larger move.
+
+## The register of what is not covered
+
+**No rail item is marked current on `/admin/links/invites`.** The section switch marks itself correctly — `aria-current="page"` moves between its two options — but the shell's own navigation does not: at 1280 the rail's *Links* entry loses its raised pill on the sub-route, and at 899 the tab bar's *Links* loses its underline and its accent. Measured on the running instance, `.rail .nav a` carries no `aria-current` at all there, where `/admin/links` gives it to *Links*. The switch is a second level of navigation under a rail item that stops claiming the operator is inside it, and nothing in the gate for this work asked about the level above.
+
+**The header was never measured below 759px.** It holds one row with room to spare at all three admin widths, and the design doc names crowding as this shape's cost, so the width where the heading and the switch actually collide is the interesting one and it is under every viewport measured here.
