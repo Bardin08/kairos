@@ -20,9 +20,16 @@ public sealed class InviteReader(KairosDbContext context, IClock clock)
         // AsNoTracking, then folded once the rows are in hand. The state is not a column, so it
         // is not something this Where could have filtered on; a list already holding its rows has
         // no reason to ask the database a question C# can answer about them.
+        //
+        // CreatedAt is unix SECONDS, so a regenerate — which revokes one invite and adds its
+        // replacement — reliably produces a tie, and the operator would see the two rows in
+        // whatever order the database chose. The id breaks it: keys here are UUIDv7 stored as
+        // canonical hyphenated TEXT, which sorts lexicographically and therefore chronologically,
+        // as Persistence.KeyGenerationTests pins end to end.
         var invites = await context.PersonalInvites.AsNoTracking()
             .Where(invite => invite.LinkId == linkId)
             .OrderByDescending(invite => invite.CreatedAt)
+            .ThenByDescending(invite => invite.Id)
             .ToListAsync(cancellationToken);
 
         return [.. invites.Select(invite => new InviteView(

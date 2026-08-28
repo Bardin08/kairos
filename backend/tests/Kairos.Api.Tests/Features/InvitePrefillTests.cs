@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Invites;
 
 using Shouldly;
@@ -21,6 +22,9 @@ public class InvitePrefillTests
     private const string SomeNotes = "About the migration";
     private const string SomeColour = "green";
 
+    /// <summary>What an over-long value is padded with. Only its count matters.</summary>
+    private const char Filler = 'x';
+
     [Fact]
     public void Validate_AKeyTheBookingPayloadDoesNotAccept_IsRefused()
     {
@@ -29,7 +33,58 @@ public class InvitePrefillTests
         var result = InvitePrefill.Validate(prefill);
 
         result.IsValid.ShouldBeFalse();
-        result.UnknownKey.ShouldBe(UnknownField);
+        result.Problem.ShouldBe(PrefillProblem.UnknownKey);
+        result.OffendingKey.ShouldBe(UnknownField);
+    }
+
+    /// <summary>
+    /// System.Text.Json ignores the nullable-reference annotation on the bag's value type, so this
+    /// is a shape that really binds off the wire. Unrefused it stores as <c>{"name":null}</c>, is
+    /// read back typed non-null, and lands in a controlled React input — after which the invitee's
+    /// own booking POST fails <c>[Required]</c> with a 400 they have no way to fix.
+    /// </summary>
+    [Fact]
+    public void Validate_AFillableKeyCarryingNull_IsRefusedAsAValueRatherThanAsTheKey()
+    {
+        var prefill = new Dictionary<string, string> { [Name] = null! };
+
+        var result = InvitePrefill.Validate(prefill);
+
+        // The key is fine and the value is not, so reporting this as an unknown key would tell the
+        // operator that 'name' is not a field the booking form accepts. It is.
+        result.Problem.ShouldBe(PrefillProblem.NullValue);
+        result.OffendingKey.ShouldBe(Name);
+    }
+
+    /// <summary>
+    /// Bounded against the booking payload's own limit rather than a copy of it. Unbounded, a
+    /// prefill longer than the field it seeds produces an invite that is fine until somebody opens
+    /// it — and then refuses their booking over something they did not write.
+    /// </summary>
+    [Fact]
+    public void Validate_AValueLongerThanTheBookingPayloadAccepts_IsRefused()
+    {
+        var prefill = new Dictionary<string, string>
+        {
+            [Notes] = new(Filler, CreateBookingRequest.MaxNotesLength + 1),
+        };
+
+        var result = InvitePrefill.Validate(prefill);
+
+        result.Problem.ShouldBe(PrefillProblem.TooLong);
+        result.OffendingKey.ShouldBe(Notes);
+    }
+
+    /// <summary>The bound itself is a length the payload accepts, so the invite that seeds it is accepted too.</summary>
+    [Fact]
+    public void Validate_AValueExactlyAtTheBookingPayloadsLimit_IsAccepted()
+    {
+        var prefill = new Dictionary<string, string>
+        {
+            [Notes] = new(Filler, CreateBookingRequest.MaxNotesLength),
+        };
+
+        InvitePrefill.Validate(prefill).IsValid.ShouldBeTrue();
     }
 
     [Fact]

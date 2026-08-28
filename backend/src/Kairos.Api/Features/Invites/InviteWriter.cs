@@ -67,9 +67,9 @@ public sealed class InviteWriter(KairosDbContext context, IClock clock)
     }
 
     /// <summary>
-    /// Issuing an invite, validation included: the prefill's keys and the deadline are decided
-    /// here rather than at the endpoint, so a second caller cannot reach <see cref="Add"/> with a
-    /// bag this one would have refused.
+    /// Issuing an invite, validation included: the prefill and the deadline are decided here
+    /// rather than at the endpoint, so a second caller cannot reach <see cref="Add"/> with a bag
+    /// this one would have refused.
     /// </summary>
     /// <remarks>
     /// The endpoint keeps exactly two jobs it cannot delegate — reading the request and turning
@@ -88,7 +88,7 @@ public sealed class InviteWriter(KairosDbContext context, IClock clock)
         var validation = InvitePrefill.Validate(prefill);
         if (!validation.IsValid)
         {
-            return IssueResult.Refused(IssueRefusal.PrefillInvalid, validation.UnknownKey);
+            return IssueResult.RefusedPrefill(validation);
         }
 
         var now = clock.GetCurrentInstant();
@@ -98,7 +98,7 @@ public sealed class InviteWriter(KairosDbContext context, IClock clock)
         // honestly.
         if (expiresAt is { } deadline && deadline < now)
         {
-            return IssueResult.Refused(IssueRefusal.DeadlinePast, null);
+            return IssueResult.RefusedDeadline();
         }
 
         var (invite, token) = Add(linkId, prefill, expiresAt, now);

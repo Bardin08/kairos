@@ -52,10 +52,20 @@ public sealed record CreateBookingRequest
 
     private const int MinDurationMinutes = 1;
     private const int MaxDurationMinutes = 1440;
-    private const int MaxNameLength = 200;
-    private const int MaxEmailLength = 320;
     private const int MaxTimeZoneLength = 64;
-    private const int MaxNotesLength = 2000;
+
+    /// <summary>
+    /// The three the operator may fill in on the invitee's behalf, and therefore the three
+    /// <see cref="Invites.InvitePrefill"/> has to bound as well. Public so that it bounds them
+    /// against THIS record rather than against a second copy of 200, 320 and 2000 free to drift
+    /// from the payload it exists to mirror — the habit
+    /// <see cref="Admin.CancelMeetingRequest.MaxReasonLength"/> already keeps.
+    /// </summary>
+    public const int MaxNameLength = 200;
+
+    public const int MaxEmailLength = 320;
+
+    public const int MaxNotesLength = 2000;
 }
 
 /// <summary>

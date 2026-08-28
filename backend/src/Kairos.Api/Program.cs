@@ -411,6 +411,7 @@ v1.MapIntegrationCallback();
 // MapAdmin() would be a second place to read when asking what is public.
 app.MapAdmin()
     .MapLinksAdmin()
+    .MapInvitesAdmin()
     .MapMeetingsAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()
