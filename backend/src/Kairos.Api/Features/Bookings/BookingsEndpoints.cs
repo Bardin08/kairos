@@ -313,6 +313,10 @@ public static class BookingsEndpoints
         // the invitee moves it themselves, and it is closed in the save that moves it — never on
         // the failing paths inside the release, where nothing happened and the question stands.
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
+
+        // Read before the move and never after: MoveToAsync overwrites the row in place, so past
+        // this line nothing anywhere still holds the hour the invitee was told to expect.
+        var previousStart = Instant.FromUnixTimeSeconds(booking.StartUtc);
         await mover.MoveToAsync(booking, start);
 
         // Here, at the end, and never in the release phase above: that release is bookkeeping the
@@ -327,7 +331,7 @@ public static class BookingsEndpoints
         // with. The token arrived in the URL, stays in memory for this request and is never
         // persisted. Sequence was advanced above and the UID is the booking id, which together are
         // what make this land as a change rather than as a second meeting.
-        await mailer.SendRescheduleAsync(booking, token, joinUrl, cancellationToken);
+        await mailer.SendRescheduleAsync(booking, token, joinUrl, previousStart, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -401,6 +405,9 @@ public static class BookingsEndpoints
             throw;
         }
 
+        // Read before the move, for RescheduleAsync's reason: the row is overwritten in place and
+        // the hour the invitee agreed to move away from survives nowhere else.
+        var previousStart = Instant.FromUnixTimeSeconds(booking.StartUtc);
         await mover.MoveToAsync(booking, start);
 
         // Rule 14's tail, in the order the reschedule above keeps it and never in the release
@@ -412,7 +419,8 @@ public static class BookingsEndpoints
 
         // No manage token, and none can be had: the URL the invitee opened carried the PROPOSAL's
         // token and only the manage token's SHA-256 is stored. The mail goes without that link.
-        await mailer.SendRescheduleAsync(booking, manageToken: null, joinUrl, cancellationToken);
+        await mailer.SendRescheduleAsync(
+            booking, manageToken: null, joinUrl, previousStart, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }

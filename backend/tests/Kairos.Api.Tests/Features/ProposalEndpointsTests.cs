@@ -363,7 +363,7 @@ public class ProposalEndpointsTests
     /// agree about one booking.
     /// </summary>
     /// <remarks>
-    /// <see cref="Integrations.Email.BookingMailer.ComposeProposal"/> formats every time in the
+    /// <see cref="Integrations.Email.BookingMailer.ComposeProposalAsync"/> formats every time in the
     /// booker's own zone, and the manage page renders the booking's. Answering the ORGANIZER's
     /// here would print a different clock time for the same instant in the tab opened from that
     /// mail — the fixture's booker is in Warsaw and the organizer is on UTC, so the two differ by

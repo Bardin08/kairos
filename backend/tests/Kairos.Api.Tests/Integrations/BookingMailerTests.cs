@@ -3,6 +3,8 @@ using System.Text;
 using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence.Entities;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -42,6 +44,9 @@ public class BookingMailerTests
     /// <summary>Where the meeting is joined, in the shape <see cref="ConferenceLink.JoinUrl"/> holds.</summary>
     private const string JoinUrl = "https://meet.example.com/kairos-consulting";
 
+    /// <summary>What the join row is labelled. Absent from a booking that has no conference.</summary>
+    private const string WhereLabel = "Where";
+
     private const string OrganizerAddress = "organizer@example.com";
     private const string BookerAddress = "guest@example.com";
     private const string BookerName = "Vlad";
@@ -60,8 +65,8 @@ public class BookingMailerTests
 
     private const int DurationMinutes = 25;
 
-    /// <summary>The heading the mailer writes over a cancellation's manage link.</summary>
-    private const string CancellationAction = "This booking:";
+    /// <summary>The label the mailer writes over a cancellation's manage link.</summary>
+    private const string CancellationAction = "Manage or cancel";
 
     /// <summary>
     /// Two blank lines in a row. Nothing in this mail is separated by more than one, so a run of
@@ -69,7 +74,22 @@ public class BookingMailerTests
     /// </summary>
     private const string BlankLineRun = "\n\n\n";
 
+    /// <summary>The plain half, the rendered half and the calendar part. Nothing else belongs there.</summary>
+    private const int AlternativeParts = 3;
+
+    /// <summary>A proposal's alternative: the two halves, and no calendar part at all.</summary>
+    private const int ProposalParts = 2;
+
+    /// <summary>
+    /// <see cref="PreviousStart"/> as the invitee reads it, spelled out for the reason
+    /// <see cref="Deadline"/> is: formatting it here would pass whatever the patterns became.
+    /// </summary>
+    private const string PreviousTime = "Friday 4 September 2026, 09:00";
+
     private static readonly Instant Start = Instant.FromUtc(2026, 9, 7, 7, 0);
+
+    /// <summary>Where a rescheduled meeting moved from — the Friday before, at an hour Warsaw shifts.</summary>
+    private static readonly Instant PreviousStart = Instant.FromUtc(2026, 9, 4, 7, 0);
 
     /// <summary>A day after the booking, and at an hour Warsaw renders differently from UTC.</summary>
     private static readonly Instant ProposedStart = Instant.FromUtc(2026, 9, 8, 11, 0);
@@ -82,9 +102,9 @@ public class BookingMailerTests
     private static readonly Instant ProposalExpiry = Instant.FromUtc(2026, 9, 7, 17, 0);
 
     [Fact]
-    public void Compose_Always_AttachesTheIcsAsACalendarRequest()
+    public async Task Compose_Always_AttachesTheIcsAsACalendarRequest()
     {
-        var calendar = CalendarPart(Compose());
+        var calendar = CalendarPart(await Compose());
 
         calendar.ContentType.MediaType.ShouldBe("text");
         calendar.ContentType.MediaSubtype.ShouldBe("calendar");
@@ -97,9 +117,9 @@ public class BookingMailerTests
     /// disagree it drops the update without a word, exactly as it does for a stale SEQUENCE.
     /// </summary>
     [Fact]
-    public void Compose_Always_MakesTheMimeMethodAgreeWithTheIcsMethod()
+    public async Task Compose_Always_MakesTheMimeMethodAgreeWithTheIcsMethod()
     {
-        var message = Compose();
+        var message = await Compose();
 
         Ics(message).ShouldContain($"METHOD:{CalendarPart(message).ContentType.Parameters["method"]}");
     }
@@ -114,11 +134,11 @@ public class BookingMailerTests
     /// is reported — the update is dropped and the invitee arrives at the old hour.
     /// </remarks>
     [Fact]
-    public void Compose_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
+    public async Task Compose_Reschedule_IsARequestCarryingTheSameUidAtTheNewSequence()
     {
         var booking = Booking(sequence: 1);
 
-        var message = Compose(booking, notice: BookingNotice.Reschedule);
+        var message = await Compose(booking, notice: BookingNotice.Reschedule);
         var ics = Ics(message);
 
         ics.ShouldContain($"UID:{booking.Id}");
@@ -134,11 +154,11 @@ public class BookingMailerTests
     /// marked CONFIRMED — and a CANCEL body in a part labelled REQUEST is discarded silently.
     /// </summary>
     [Fact]
-    public void Compose_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
+    public async Task Compose_Cancellation_IsACancelWhoseStatusAndMimeMethodBothAgree()
     {
         var booking = Booking(sequence: 2);
 
-        var message = Compose(booking, notice: BookingNotice.Cancellation);
+        var message = await Compose(booking, notice: BookingNotice.Cancellation);
         var ics = Ics(message);
 
         ics.ShouldContain("METHOD:CANCEL");
@@ -155,11 +175,11 @@ public class BookingMailerTests
     /// REQUEST at the advanced SEQUENCE that moves the event in their calendar.
     /// </summary>
     [Fact]
-    public void Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
+    public async Task Compose_ARescheduleWithNoManageToken_StillUpdatesTheEventInPlace()
     {
         var booking = Booking(sequence: 1);
 
-        var message = Compose(booking, notice: BookingNotice.Reschedule, manageToken: null);
+        var message = await Compose(booking, notice: BookingNotice.Reschedule, manageToken: null);
         var ics = Ics(message);
 
         Plain(message).ShouldNotContain(ManageUrlFragment);
@@ -173,14 +193,14 @@ public class BookingMailerTests
     /// stored. The notice still has to go, so the link is omitted rather than invented.
     /// </summary>
     /// <remarks>
-    /// The heading is asserted alongside the URL, and that is the half that pins this: a body
-    /// dropping the link but keeping "This booking:" over the empty space passes an assertion
-    /// about the URL alone, and reads as a mail with something missing.
+    /// The label is asserted alongside the URL, and that is the half that pins this: a body
+    /// dropping the link but keeping its label over the empty space passes an assertion about the
+    /// URL alone, and reads as a mail with something missing.
     /// </remarks>
     [Fact]
-    public void Compose_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
+    public async Task Compose_ACancellationWithNoManageToken_DropsTheWholeBlockAndStillCarriesTheCalendarPart()
     {
-        var message = Compose(manageToken: null, notice: BookingNotice.Cancellation);
+        var message = await Compose(manageToken: null, notice: BookingNotice.Cancellation);
         var body = Plain(message);
 
         body.ShouldNotContain(ManageUrlFragment);
@@ -201,14 +221,14 @@ public class BookingMailerTests
     /// why — which the workbench promises them is read, on the panel that collects it.
     /// </summary>
     [Fact]
-    public void Compose_ACancellationCarryingAReason_PrintsItUnderTheHeadline()
+    public async Task Compose_ACancellationCarryingAReason_PrintsItUnderTheHeadline()
     {
         var booking = Booking();
         booking.CancellationReason = CancellationReason;
 
-        var body = Plain(Compose(booking, notice: BookingNotice.Cancellation, manageToken: null));
+        var body = Plain(await Compose(booking, notice: BookingNotice.Cancellation, manageToken: null));
 
-        body.ShouldContain(BookingMailer.ReasonHeading);
+        body.ShouldContain(MailTextRenderer.ReasonHeading);
         body.ShouldContain(CancellationReason);
     }
 
@@ -218,11 +238,11 @@ public class BookingMailerTests
     /// optional block produces, read by the person least able to ask what was meant.
     /// </summary>
     [Fact]
-    public void Compose_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
+    public async Task Compose_ACancellationWithNoReason_PrintsNoHeadingOverNothing()
     {
-        var body = Plain(Compose(notice: BookingNotice.Cancellation));
+        var body = Plain(await Compose(notice: BookingNotice.Cancellation));
 
-        body.ShouldNotContain(BookingMailer.ReasonHeading);
+        body.ShouldNotContain(MailTextRenderer.ReasonHeading);
         body.ShouldNotContain(BlankLineRun);
     }
 
@@ -231,41 +251,40 @@ public class BookingMailerTests
     /// frontend routes — the raw token in the path, and nothing else keyed alongside it.
     /// </summary>
     [Fact]
-    public void Compose_Always_CarriesTheManageLinkInThePlainTextBody() =>
-        PlainPart(Compose()).Text.ShouldContain($"{BaseUrl}/manage/{ManageToken}");
+    public async Task Compose_Always_CarriesTheManageLinkInThePlainTextBody() =>
+        PlainPart(await Compose()).Text.ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
     /// The .ics carries it too, so the invitee who keeps only the calendar entry can still find
     /// their way back.
     /// </summary>
     [Fact]
-    public void Compose_Always_CarriesTheManageLinkInTheCalendarDescription() =>
-        Unfold(Ics(Compose())).ShouldContain($"{BaseUrl}/manage/{ManageToken}");
+    public async Task Compose_Always_CarriesTheManageLinkInTheCalendarDescription() =>
+        Unfold(Ics(await Compose())).ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
-    /// What makes Google Calendar and Outlook draw a join control on the event itself. The defect
-    /// this task was written around: ConferenceLink.JoinUrl is written at booking and nothing has
-    /// ever put it in a message.
+    /// What makes Google Calendar and Outlook draw a join control on the event itself, asserted
+    /// through the unfold because a longer link folds and a raw read would then miss it.
     /// </summary>
     [Fact]
-    public void Compose_AConfirmationForAMeetingWithAConference_PutsTheJoinUrlInTheCalendarLocation() =>
-        Unfold(Ics(Compose(joinUrl: JoinUrl))).ShouldContain($"LOCATION:{JoinUrl}");
+    public async Task Compose_AConfirmationForAMeetingWithAConference_PutsTheJoinUrlInTheCalendarLocation() =>
+        Unfold(Ics(await Compose(joinUrl: JoinUrl))).ShouldContain($"LOCATION:{JoinUrl}");
 
     /// <summary>
     /// Absent, not empty. A booking with no conference produces an .ics with no LOCATION property
     /// — a blank one reads as a meeting whose place is unknown.
     /// </summary>
     [Fact]
-    public void Compose_AMeetingWithNoConference_WritesNoLocationInTheCalendarPart() =>
-        Ics(Compose(joinUrl: null)).ShouldNotContain("LOCATION");
+    public async Task Compose_AMeetingWithNoConference_WritesNoLocationInTheCalendarPart() =>
+        Ics(await Compose(joinUrl: null)).ShouldNotContain("LOCATION");
 
     /// <summary>
     /// A base URL written with a trailing slash is the ordinary way an operator writes one, and
     /// the double slash it would otherwise produce is enough for some clients to stop linkifying.
     /// </summary>
     [Fact]
-    public void Compose_BaseUrlWithATrailingSlash_DoesNotProduceADoubleSlash() =>
-        PlainPart(Compose(options: Options($"{BaseUrl}/"))).Text
+    public async Task Compose_BaseUrlWithATrailingSlash_DoesNotProduceADoubleSlash() =>
+        PlainPart(await Compose(options: Options($"{BaseUrl}/"))).Text
             .ShouldContain($"{BaseUrl}/manage/{ManageToken}");
 
     /// <summary>
@@ -274,9 +293,9 @@ public class BookingMailerTests
     /// normalises whitespace or line endings leaves a file no client will parse.
     /// </summary>
     [Fact]
-    public void Compose_Always_KeepsTheFoldedIcsIntactThroughTheTransferEncoding()
+    public async Task Compose_Always_KeepsTheFoldedIcsIntactThroughTheTransferEncoding()
     {
-        var ics = Ics(Compose());
+        var ics = Ics(await Compose());
 
         ics.ShouldStartWith("BEGIN:VCALENDAR\r\n");
         ics.ShouldEndWith("END:VCALENDAR\r\n");
@@ -292,9 +311,9 @@ public class BookingMailerTests
     /// bytes, because dropping either costs the accept/decline control on some client.
     /// </summary>
     [Fact]
-    public void Compose_Always_OffersTheInvitationBothAsAnAlternativeAndAsAnAttachment()
+    public async Task Compose_Always_OffersTheInvitationBothAsAnAlternativeAndAsAnAttachment()
     {
-        var message = Compose();
+        var message = await Compose();
 
         message.Body.ShouldBeOfType<Multipart>().ContentType.MediaSubtype.ShouldBe("mixed");
         CalendarPart(message).ShouldNotBeNull();
@@ -305,14 +324,68 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// The single riskiest change in this task, asserted rather than hoped for.
+    /// </summary>
+    /// <remarks>
+    /// text/calendar stays INSIDE multipart/alternative and stays LAST, because a client renders
+    /// the last part it understands and the calendar part is what draws the accept/decline
+    /// control in Gmail and Outlook. Putting the HTML after it silently costs that control, and
+    /// no test but this one would notice.
+    /// </remarks>
+    [Fact]
+    public async Task ComposeAsync_AConfirmation_OrdersTheAlternativePlainThenHtmlThenCalendar()
+    {
+        var alternative = Alternative(await Compose());
+
+        alternative.Count.ShouldBe(AlternativeParts);
+        alternative[0].ContentType.MimeType.ShouldBe("text/plain");
+        alternative[1].ContentType.MimeType.ShouldBe("text/html");
+        alternative[2].ContentType.MimeType.ShouldBe("text/calendar");
+    }
+
+    /// <summary>
+    /// The defect this whole task was written around: the invitee is finally told where to join,
+    /// in every half of the message they might read.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_AConfirmationWithAConference_PutsTheJoinUrlInBothHalvesAndTheIcs()
+    {
+        var message = await Compose(joinUrl: JoinUrl);
+
+        Plain(message).ShouldContain(JoinUrl);
+        Html(message).ShouldContain(JoinUrl);
+        Ics(message).ShouldContain($"LOCATION:{JoinUrl}");
+    }
+
+    /// <summary>A booking with no conference says nothing about where to meet, in either half.</summary>
+    [Fact]
+    public async Task ComposeAsync_AConfirmationWithNoConference_SaysNothingAboutWhereToMeet()
+    {
+        var message = await Compose(joinUrl: null);
+
+        Plain(message).ShouldNotContain(WhereLabel);
+        Html(message).ShouldNotContain(WhereLabel);
+    }
+
+    /// <summary>The struck-through previous time is the whole message of a reschedule.</summary>
+    [Fact]
+    public async Task ComposeAsync_AReschedule_ShowsTheTimeTheMeetingMovedFrom()
+    {
+        var message = await Compose(notice: BookingNotice.Reschedule, previousStart: PreviousStart);
+
+        Plain(message).ShouldContain(PreviousTime);
+        Html(message).ShouldContain(PreviousTime);
+    }
+
+    /// <summary>
     /// No ORGANIZER and no ATTENDEE means no accept/decline control, whatever the MIME type says.
     /// The organizer is the configured sending address, parsed out of it, so a From written with
     /// a display name still yields a bare mailto.
     /// </summary>
     [Fact]
-    public void Compose_Always_NamesTheSenderAsOrganizerAndTheBookerAsAttendee()
+    public async Task Compose_Always_NamesTheSenderAsOrganizerAndTheBookerAsAttendee()
     {
-        var message = Compose(options: Options(BaseUrl, from: $"Kairos <{OrganizerAddress}>"));
+        var message = await Compose(options: Options(BaseUrl, from: $"Kairos <{OrganizerAddress}>"));
         var ics = Unfold(Ics(message));
 
         message.From.Mailboxes.Single().Address.ShouldBe(OrganizerAddress);
@@ -327,8 +400,8 @@ public class BookingMailerTests
     /// feature is judged on inbox placement rather than on a 250.
     /// </summary>
     [Fact]
-    public void Compose_Always_StampsTheMessageIdWithTheSendingDomain() =>
-        Compose().MessageId.ShouldEndWith("@example.com");
+    public async Task Compose_Always_StampsTheMessageIdWithTheSendingDomain() =>
+        (await Compose()).MessageId.ShouldEndWith("@example.com");
 
     /// <summary>
     /// The booker's zone, not the organizer's. 07:00Z is 09:00 in Warsaw, so a mail rendered in
@@ -336,9 +409,9 @@ public class BookingMailerTests
     /// entirely plausible.
     /// </summary>
     [Fact]
-    public void Compose_Always_RendersTheTimesInTheBookersOwnZone()
+    public async Task Compose_Always_RendersTheTimesInTheBookersOwnZone()
     {
-        var message = Compose();
+        var message = await Compose();
         var subject = message.Subject!;
 
         subject.ShouldContain("09:00");
@@ -352,11 +425,12 @@ public class BookingMailerTests
     /// apply it, and the meeting would have moved without anybody agreeing to it.
     /// </summary>
     [Fact]
-    public void ComposeProposal_Always_CarriesNoCalendarPartAndTheDecisionLink()
+    public async Task ComposeProposal_Always_CarriesNoCalendarPartAndTheDecisionLink()
     {
-        var message = ComposeProposal();
+        var message = await ComposeProposal();
 
-        message.BodyParts.ShouldHaveSingleItem().ShouldBe(PlainPart(message));
+        message.Body.ShouldBeAssignableTo<Multipart>()!.Count.ShouldBe(ProposalParts);
+        message.BodyParts.ShouldNotContain(part => part.ContentType.IsMimeType("text", "calendar"));
         message.Attachments.ShouldBeEmpty();
         Plain(message).ShouldContain($"{BaseUrl}/proposal/{ProposalToken}");
     }
@@ -367,9 +441,9 @@ public class BookingMailerTests
     /// invitee is asked to agree to is the one thing on the page they act on.
     /// </summary>
     [Fact]
-    public void ComposeProposal_Always_RendersTheProposedTimesInTheBookersOwnZone()
+    public async Task ComposeProposal_Always_RendersTheProposedTimesInTheBookersOwnZone()
     {
-        var body = Plain(ComposeProposal());
+        var body = Plain(await ComposeProposal());
 
         body.ShouldContain("13:00-13:25");
         body.ShouldContain(BookerZone);
@@ -381,8 +455,8 @@ public class BookingMailerTests
     /// meeting stays put if they do nothing.
     /// </summary>
     [Fact]
-    public void ComposeProposal_Always_SaysWhenTheOfferLapses() =>
-        Plain(ComposeProposal()).ShouldContain(Deadline);
+    public async Task ComposeProposal_Always_SaysWhenTheOfferLapses() =>
+        Plain(await ComposeProposal()).ShouldContain(Deadline);
 
     /// <summary>
     /// This deployment's state today, and the one that must never throw: no relay configured at
@@ -426,9 +500,11 @@ public class BookingMailerTests
     private static BookingMailer Mailer(EmailOptions options)
     {
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
         return new BookingMailer(
             new EmailSender(wrapped),
             new IcsBuilder(),
+            new MailHtmlRenderer(services, services.GetRequiredService<ILoggerFactory>()),
             wrapped,
             NullLogger<BookingMailer>.Instance);
     }
@@ -465,29 +541,39 @@ public class BookingMailerTests
     /// Composed, written and parsed back. Reading the object the mailer returned would skip the
     /// transfer encodings, which is precisely where the .ics survives or does not.
     /// </summary>
-    private static MimeMessage Compose(
+    private static async Task<MimeMessage> Compose(
         Booking? booking = null,
         EmailOptions? options = null,
         BookingNotice notice = BookingNotice.Confirmation,
         string? manageToken = ManageToken,
-        string? joinUrl = null)
+        string? joinUrl = null,
+        Instant? previousStart = null)
     {
-        using var stream = new MemoryStream();
-        Mailer(options ?? Options(BaseUrl))
-            .Compose(booking ?? Booking(), manageToken, joinUrl, notice)
-            .WriteTo(stream);
-        stream.Position = 0;
-        return MimeMessage.Load(stream);
+        var message = await Mailer(options ?? Options(BaseUrl)).ComposeAsync(
+            booking ?? Booking(),
+            manageToken,
+            joinUrl,
+            previousStart,
+            notice,
+            TestContext.Current.CancellationToken);
+
+        return RoundTrip(message);
     }
 
     /// <summary>Composed, written and parsed back, exactly as <see cref="Compose"/> is.</summary>
-    private static MimeMessage ComposeProposal()
+    private static async Task<MimeMessage> ComposeProposal()
     {
         var booking = Booking();
+        var message = await Mailer(Options(BaseUrl)).ComposeProposalAsync(
+            booking, Proposal(booking), ProposalToken, TestContext.Current.CancellationToken);
+
+        return RoundTrip(message);
+    }
+
+    private static MimeMessage RoundTrip(MimeMessage message)
+    {
         using var stream = new MemoryStream();
-        Mailer(Options(BaseUrl))
-            .ComposeProposal(booking, Proposal(booking), ProposalToken)
-            .WriteTo(stream);
+        message.WriteTo(stream);
         stream.Position = 0;
         return MimeMessage.Load(stream);
     }
@@ -514,6 +600,16 @@ public class BookingMailerTests
     /// </summary>
     private static string Ics(MimeMessage message) => Read(CalendarPart(message));
 
+    /// <summary>
+    /// The alternative, reached down the tree rather than off <see cref="MimeMessage.BodyParts"/>:
+    /// that enumeration flattens the tree to its leaves, so the container this test is about is
+    /// the one thing it never yields.
+    /// </summary>
+    private static Multipart Alternative(MimeMessage message) =>
+        message.Body.ShouldBeAssignableTo<Multipart>()!
+            .OfType<Multipart>()
+            .Single(part => part.ContentType.IsMimeType("multipart", "alternative"));
+
     private static TextPart CalendarPart(MimeMessage message) =>
         message.BodyParts.OfType<TextPart>()
             .Single(part => part.ContentType.IsMimeType("text", "calendar"));
@@ -529,6 +625,14 @@ public class BookingMailerTests
     private static TextPart PlainPart(MimeMessage message) =>
         message.BodyParts.OfType<TextPart>()
             .Single(part => part.ContentType.IsMimeType("text", "plain"));
+
+    /// <summary>
+    /// The rendered half. Line endings are not pinned as <see cref="Plain"/>'s are — nothing
+    /// asserted against the markup depends on where a line breaks.
+    /// </summary>
+    private static string Html(MimeMessage message) =>
+        message.BodyParts.OfType<TextPart>()
+            .Single(part => part.ContentType.IsMimeType("text", "html")).Text;
 
     private static string Read(MimePart part)
     {

@@ -18,13 +18,15 @@ namespace Kairos.Api.Integrations.Email;
 /// MIME structure, the METHOD/<c>method=</c> agreement and the manage link are all assertable
 /// without a relay. Inbox placement is not, and is verified by sending real mail.
 ///
-/// One composer for all three notices. What differs is three strings and the METHOD; the MIME
-/// shape, transfer encodings, Message-Id and rendering zone are identical and are the delicate
-/// parts — three composers would be three places for the folded .ics to get its encoding wrong.
+/// One composer for all three notices. What differs is the <see cref="MailBody"/> each builds and
+/// the METHOD; the MIME shape, transfer encodings, Message-Id and rendering zone are identical and
+/// are the delicate parts — three composers would be three places for the folded .ics to get its
+/// encoding wrong.
 /// </remarks>
 public sealed class BookingMailer(
     EmailSender sender,
     IcsBuilder calendar,
+    MailHtmlRenderer html,
     IOptions<EmailOptions> options,
     ILogger<BookingMailer> logger)
 {
@@ -34,15 +36,24 @@ public sealed class BookingMailer(
     /// <summary>And <c>/proposal/:token</c>, keyed on the proposal's own token.</summary>
     private const string ProposalPath = "proposal";
 
-    /// <summary>
-    /// What the operator's words are printed under. Public so a test can assert its absence: the
-    /// claim being made is that an empty reason leaves no heading, and a test spelling the string
-    /// itself would go on passing after the heading was reworded.
-    /// </summary>
-    public const string ReasonHeading = "Why:";
+    /// <summary>And <c>/book/:slug</c>, the public page a cancelled invitee books a new time from.</summary>
+    private const string BookPath = "book";
 
-    /// <summary>One blank line between blocks, which is what makes an absent block leave no mark.</summary>
-    private const string BlockSeparator = "\n\n";
+    /// <summary>
+    /// What the manage link is pressed under, in every notice that has a token to build one from.
+    /// </summary>
+    private const string ManageLabel = "Manage or cancel";
+
+    private const string LinkLabel = "Link";
+    private const string DurationLabel = "Duration";
+
+    /// <summary>
+    /// Where the meeting is joined. The value names no provider and could not: the mailer is
+    /// handed a URL and nothing else, and rule 13 keeps provider names out of this tree anyway.
+    /// </summary>
+    private const string WhereLabel = "Where";
+
+    private const string WhereValue = "Video call";
 
     private const string CalendarSubtype = "calendar";
     private const string AttachmentMediaType = "application";
@@ -58,7 +69,8 @@ public sealed class BookingMailer(
         string manageToken,
         string? joinUrl,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Confirmation, booking, manageToken, joinUrl, cancellationToken);
+        SendAsync(
+            BookingNotice.Confirmation, booking, manageToken, joinUrl, previousStart: null, cancellationToken);
 
     /// <summary>
     /// <c>METHOD:REQUEST</c> again, same <c>UID</c>, with a <see cref="Booking.Sequence"/> the
@@ -66,6 +78,10 @@ public sealed class BookingMailer(
     /// rather than show a second invitation. A stale sequence is discarded without a word, so
     /// nobody reports the reschedule that did not arrive and the invitee turns up at the old time.
     /// </summary>
+    /// <param name="previousStart">
+    /// The time the meeting moved FROM, struck through in the message so the invitee can see which
+    /// of the two hours in their inbox is the live one. Read before the move or it is the new time.
+    /// </param>
     /// <remarks>
     /// The token is nullable for the same reason a cancellation's is, and became so when a second
     /// caller appeared: accepting a proposal arrives holding the PROPOSAL's token, and the manage
@@ -75,8 +91,10 @@ public sealed class BookingMailer(
         Booking booking,
         string? manageToken,
         string? joinUrl,
+        Instant? previousStart,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Reschedule, booking, manageToken, joinUrl, cancellationToken);
+        SendAsync(
+            BookingNotice.Reschedule, booking, manageToken, joinUrl, previousStart, cancellationToken);
 
     /// <summary>
     /// <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
@@ -95,7 +113,13 @@ public sealed class BookingMailer(
         Booking booking,
         string? manageToken,
         CancellationToken cancellationToken) =>
-        SendAsync(BookingNotice.Cancellation, booking, manageToken, joinUrl: null, cancellationToken);
+        SendAsync(
+            BookingNotice.Cancellation,
+            booking,
+            manageToken,
+            joinUrl: null,
+            previousStart: null,
+            cancellationToken);
 
     /// <summary>
     /// The operator has offered a new time. Nothing has moved; the invitee decides.
@@ -114,7 +138,7 @@ public sealed class BookingMailer(
         SendComposedAsync(
             BookingNotice.Proposal,
             booking,
-            () => ComposeProposal(booking, proposal, proposalToken),
+            () => ComposeProposalAsync(booking, proposal, proposalToken, cancellationToken),
             cancellationToken);
 
     private Task SendAsync(
@@ -122,9 +146,13 @@ public sealed class BookingMailer(
         Booking booking,
         string? manageToken,
         string? joinUrl,
+        Instant? previousStart,
         CancellationToken cancellationToken) =>
         SendComposedAsync(
-            notice, booking, () => Compose(booking, manageToken, joinUrl, notice), cancellationToken);
+            notice,
+            booking,
+            () => ComposeAsync(booking, manageToken, joinUrl, previousStart, notice, cancellationToken),
+            cancellationToken);
 
     /// <summary>
     /// Composition is deferred rather than passed in already done, so that this stays the one home
@@ -147,7 +175,7 @@ public sealed class BookingMailer(
     private async Task<bool> SendComposedAsync(
         BookingNotice notice,
         Booking booking,
-        Func<MimeMessage> compose,
+        Func<Task<MimeMessage>> compose,
         CancellationToken cancellationToken)
     {
         if (!options.Value.IsConfigured)
@@ -162,7 +190,7 @@ public sealed class BookingMailer(
 
         try
         {
-            var message = compose();
+            var message = await compose();
             var response = await sender.SendAsync(message, cancellationToken);
 
             // Said at Information, not Debug. Silence on the happy path is what let a message
@@ -197,15 +225,21 @@ public sealed class BookingMailer(
     /// <code>
     /// multipart/mixed
     /// ├── multipart/alternative
-    /// │   ├── text/plain                          the body, carrying the manage link
+    /// │   ├── text/plain                          the body a filter and a watch read
+    /// │   ├── text/html                           the same message, rendered
     /// │   └── text/calendar; method=REQUEST       what draws the accept/decline control
     /// └── application/ics (attachment)            what clients that ignore the part above save
     /// </code>
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
     /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
     /// </remarks>
-    public MimeMessage Compose(
-        Booking booking, string? manageToken, string? joinUrl, BookingNotice notice)
+    public async Task<MimeMessage> ComposeAsync(
+        Booking booking,
+        string? manageToken,
+        string? joinUrl,
+        Instant? previousStart,
+        BookingNotice notice,
+        CancellationToken cancellationToken)
     {
         var settings = options.Value;
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
@@ -240,18 +274,22 @@ public sealed class BookingMailer(
             Method: method,
             Location: joinUrl));
 
-        var body = new TextPart(TextFormat.Plain);
-        body.SetText(
-            Encoding.UTF8,
-            Body(
-                notice,
-                booker.Name,
-                booking.Link.Name,
-                start,
-                end,
-                zone,
-                manageUrl,
-                booking.CancellationReason));
+        var fact = Fact(start, end, zone, previousStart);
+        var mail = notice switch
+        {
+            BookingNotice.Confirmation => Confirmation(booking, booker.Name, fact, manageUrl, joinUrl),
+            BookingNotice.Reschedule => Reschedule(booking, booker.Name, fact, manageUrl, joinUrl),
+            BookingNotice.Cancellation => Cancellation(
+                booking, booker.Name, fact, manageUrl, BookUrl(settings.PublicBaseUrl!, booking.Link.Slug)),
+            BookingNotice.Proposal => throw ComposedElsewhere(notice),
+            _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
+        };
+
+        var text = new TextPart(TextFormat.Plain);
+        text.SetText(Encoding.UTF8, MailTextRenderer.Render(mail));
+
+        var markup = new TextPart(TextFormat.Html);
+        markup.SetText(Encoding.UTF8, await html.RenderAsync(mail, cancellationToken));
 
         var invitation = new TextPart(CalendarSubtype)
         {
@@ -275,7 +313,9 @@ public sealed class BookingMailer(
             Subject(notice, booking.Link.Name, start, zone),
             new Multipart(MixedSubtype)
             {
-                new Multipart(AlternativeSubtype) { body, invitation },
+                // Order is the guarantee: a client renders the LAST part it understands, so the
+                // calendar part stays after the HTML or the accept/decline control is lost to it.
+                new Multipart(AlternativeSubtype) { text, markup, invitation },
                 attachment,
             },
             organizer,
@@ -286,8 +326,16 @@ public sealed class BookingMailer(
     /// No <c>text/calendar</c> part and no attachment, by design: a calendar part is applied by
     /// the client, so attaching one would move the meeting the message exists to ask about. The
     /// link is the whole interface.
+    ///
+    /// One action and no secondary, where the design showed a "keep the original" link beside it:
+    /// the page that link would open reads no query string, so it would land the invitee on the
+    /// same screen and decide nothing. The one action opens that page, which carries both buttons.
     /// </remarks>
-    public MimeMessage ComposeProposal(Booking booking, BookingProposal proposal, string proposalToken)
+    public async Task<MimeMessage> ComposeProposalAsync(
+        Booking booking,
+        BookingProposal proposal,
+        string proposalToken,
+        CancellationToken cancellationToken)
     {
         var settings = options.Value;
         var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
@@ -298,29 +346,142 @@ public sealed class BookingMailer(
         var proposed = Instant.FromUnixTimeSeconds(proposal.StartUtc).InZone(zone);
         var proposedEnd = Instant.FromUnixTimeSeconds(proposal.EndUtc).InZone(zone);
         var expires = Instant.FromUnixTimeSeconds(proposal.ExpiresAt).InZone(zone);
-        var url = ProposalUrl(settings.PublicBaseUrl!, proposalToken);
 
-        var body = new TextPart(TextFormat.Plain);
-        body.SetText(Encoding.UTF8, $"""
-            Hi {booker.Name},
+        var mail = new MailBody
+        {
+            Headline = "A new time is suggested",
 
-            {booking.Link.Name} is currently {OutgoingMail.Date(current)} at {OutgoingMail.Time(current)} ({zone.Id}).
+            // The PROPOSED time in the block and the current one struck through beside it, which
+            // is the opposite of every other notice: this message is about a time nothing holds.
+            Fact = new MailFact(
+                $"{OutgoingMail.Time(proposed)}-{OutgoingMail.Time(proposedEnd)}",
+                OutgoingMail.Date(proposed),
+                zone.Id,
+                Moment(current)),
+            Sentence =
+                $"Hi {booker.Name} — nothing has changed yet. Your meeting stays exactly where it is "
+                + "unless you accept.",
+            Action = new MailAction(
+                "Accept the new time", ProposalUrl(settings.PublicBaseUrl!, proposalToken)),
+            Details = [new MailDetail(LinkLabel, booking.Link.Name)],
+            Footer =
+                $"If you do not answer by {Moment(expires)} ({zone.Id}), the suggestion lapses and "
+                + "the meeting stays exactly where it is.",
+        };
 
-            A new time is being suggested:
+        var text = new TextPart(TextFormat.Plain);
+        text.SetText(Encoding.UTF8, MailTextRenderer.Render(mail));
 
-            {OutgoingMail.Date(proposed)}
-            {OutgoingMail.Time(proposed)}-{OutgoingMail.Time(proposedEnd)} ({zone.Id})
-
-            Nothing has changed yet. Accept or decline here:
-            {url}
-
-            If you do not answer by {OutgoingMail.Date(expires)}, {OutgoingMail.Time(expires)} ({zone.Id}),
-            the suggestion lapses and the meeting stays exactly where it is.
-            """);
+        var markup = new TextPart(TextFormat.Html);
+        markup.SetText(Encoding.UTF8, await html.RenderAsync(mail, cancellationToken));
 
         return OutgoingMail.Envelope(
-            $"A new time for {booking.Link.Name}?", body, organizer, Mailbox(booker));
+            $"A new time for {booking.Link.Name}?",
+            new Multipart(AlternativeSubtype) { text, markup },
+            organizer,
+            Mailbox(booker));
     }
+
+    private static MailBody Confirmation(
+        Booking booking, string bookerName, MailFact fact, string? manageUrl, string? joinUrl) =>
+        new()
+        {
+            Headline = "You are booked",
+            Fact = fact,
+            Sentence =
+                $"Hi {bookerName} — {booking.Link.Name} is confirmed. The invitation is attached, so "
+                + "your calendar will pick it up.",
+            Action = Manage(manageUrl),
+            Details = Details(booking, joinUrl),
+        };
+
+    private static MailBody Reschedule(
+        Booking booking, string bookerName, MailFact fact, string? manageUrl, string? joinUrl) =>
+        new()
+        {
+            Headline = "Your meeting moved",
+            Fact = fact,
+            Sentence =
+                $"Hi {bookerName} — {booking.Link.Name} has moved. Your calendar entry has been "
+                + "updated in place, so there is nothing to accept again.",
+            Action = Manage(manageUrl),
+            Details = Details(booking, joinUrl),
+        };
+
+    /// <remarks>
+    /// No join row, where the other two notices carry one: the meeting is off and there is nothing
+    /// left to join. The way back is the secondary link, which is the public booking page rather
+    /// than a slot — the invitee is choosing again, not confirming.
+    ///
+    /// The reason is the operator's own words and the point of an operator's cancel. Absent from a
+    /// cancellation the invitee triggered themselves, and its heading goes with it.
+    /// </remarks>
+    private static MailBody Cancellation(
+        Booking booking, string bookerName, MailFact fact, string? manageUrl, string bookUrl) =>
+        new()
+        {
+            Headline = "Your meeting is cancelled",
+            Fact = fact,
+            Sentence =
+                $"Hi {bookerName} — {booking.Link.Name} is off and the time has been released. Your "
+                + "calendar entry has been removed.",
+            Action = Manage(manageUrl),
+            Secondary = new MailSecondary("Book another time", bookUrl),
+            Details = Details(booking, joinUrl: null),
+            Reason = string.IsNullOrWhiteSpace(booking.CancellationReason)
+                ? null
+                : booking.CancellationReason,
+            Footer = "Nothing further is needed from you.",
+        };
+
+    /// <summary>
+    /// The manage link, in every notice that has a token to build one from — the cancellation
+    /// included, because it is the only way an invitee can check that a cancellation they are
+    /// reading about is real. A notice the operator triggered has no token and drops the block
+    /// whole rather than inventing a link.
+    /// </summary>
+    private static MailAction? Manage(string? manageUrl) =>
+        manageUrl is null ? null : new MailAction(ManageLabel, manageUrl);
+
+    /// <summary>
+    /// What every booking notice states under the fold, in one order. The join URL is a detail and
+    /// never the action: a confirmation arrives days out, when the thing to do is check or cancel.
+    /// </summary>
+    private static List<MailDetail> Details(Booking booking, string? joinUrl)
+    {
+        var minutes = (int)Duration.FromSeconds(booking.EndUtc - booking.StartUtc).TotalMinutes;
+        List<MailDetail> details =
+        [
+            new(LinkLabel, booking.Link.Name),
+            new(DurationLabel, $"{minutes} minutes"),
+        ];
+
+        if (joinUrl is not null)
+        {
+            details.Add(new MailDetail(WhereLabel, WhereValue, joinUrl));
+        }
+
+        return details;
+    }
+
+    private static MailFact Fact(Instant start, Instant end, DateTimeZone zone, Instant? previousStart)
+    {
+        var local = start.InZone(zone);
+
+        return new MailFact(
+            $"{OutgoingMail.Time(local)}-{OutgoingMail.Time(end.InZone(zone))}",
+            OutgoingMail.Date(local),
+            zone.Id,
+            previousStart is { } previous ? Moment(previous.InZone(zone)) : null);
+    }
+
+    /// <summary>
+    /// A day and an hour on one line. The time a meeting moved from is written this way in both
+    /// notices that show one, because a struck-through date over a struck-through hour reads as
+    /// two cancelled things rather than one.
+    /// </summary>
+    private static string Moment(ZonedDateTime value) =>
+        $"{OutgoingMail.Date(value)}, {OutgoingMail.Time(value)}";
 
     private static MailboxAddress Mailbox(BookingParticipant booker) => new(booker.Name, booker.Email);
 
@@ -334,16 +495,19 @@ public sealed class BookingMailer(
     private static string ProposalUrl(string baseUrl, string proposalToken) =>
         OutgoingMail.Url(baseUrl, $"{ProposalPath}/{Uri.EscapeDataString(proposalToken)}");
 
+    private static string BookUrl(string baseUrl, string slug) =>
+        OutgoingMail.Url(baseUrl, $"{BookPath}/{Uri.EscapeDataString(slug)}");
+
     /// <summary>
     /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
-    /// <see cref="ComposeProposal"/>. Spelled out anyway because the discard arm's "unknown
+    /// <see cref="ComposeProposalAsync"/>. Spelled out anyway because the discard arm's "unknown
     /// booking notice" is a lie here: the notice is known and this is the wrong composer for it.
     /// </summary>
     private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice) =>
         new(
             nameof(notice),
             notice,
-            $"A proposal carries no calendar part; compose it with {nameof(ComposeProposal)}.");
+            $"A proposal carries no calendar part; compose it with {nameof(ComposeProposalAsync)}.");
 
     /// <summary>
     /// A confirmation and a reschedule are both REQUEST — the second is the first at a new time,
@@ -372,75 +536,4 @@ public sealed class BookingMailer(
 
         return $"{lead}: {linkName}, {OutgoingMail.Date(local)} at {OutgoingMail.Time(local)} ({zone.Id})";
     }
-
-    /// <summary>
-    /// Plain text, and no HTML alternative. There is nothing here that needs a font, and a
-    /// text-only body is one fewer thing for a filter to score.
-    /// </summary>
-    /// <remarks>
-    /// Assembled out of blocks joined by one blank line rather than a template with holes in it:
-    /// two blocks are optional, and a template prints an empty line where an absent one was and a
-    /// heading over nothing where its label was.
-    ///
-    /// The manage link is in every notice that has a token to build one from, the cancellation
-    /// included — it is the only way an invitee can check that a cancellation they are reading
-    /// about is real. A notice the operator triggered has no token and drops the block whole.
-    ///
-    /// The reason is the operator's own words and the point of an operator's cancel. Absent from
-    /// notices the invitee triggered themselves, and absent leaves the mail byte-for-byte as it
-    /// was before this existed.
-    /// </remarks>
-    private static string Body(
-        BookingNotice notice,
-        string bookerName,
-        string linkName,
-        Instant start,
-        Instant end,
-        DateTimeZone zone,
-        string? manageUrl,
-        string? reason)
-    {
-        var (headline, closing) = notice switch
-        {
-            BookingNotice.Confirmation =>
-                ($"{linkName} is confirmed.", "The attached invitation adds it to your calendar."),
-            BookingNotice.Reschedule =>
-                ($"{linkName} has moved. It is now:",
-                    "The attached invitation updates the one already in your calendar."),
-            BookingNotice.Cancellation =>
-                ($"{linkName} has been cancelled. It was:",
-                    "The attached invitation removes it from your calendar."),
-            BookingNotice.Proposal => throw ComposedElsewhere(notice),
-            _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
-        };
-
-        var local = start.InZone(zone);
-        var times = $"""
-            {OutgoingMail.Date(local)}
-            {OutgoingMail.Time(local)}-{OutgoingMail.Time(end.InZone(zone))} ({zone.Id})
-            """;
-
-        var explanation = string.IsNullOrWhiteSpace(reason)
-            ? null
-            : $"""
-                {ReasonHeading}
-                {reason}
-                """;
-
-        var action = manageUrl is null
-            ? null
-            : $"""
-                {Action(notice)}
-                {manageUrl}
-                """;
-
-        string?[] blocks = [$"Hi {bookerName},", headline, times, explanation, action, closing];
-
-        return string.Join(BlockSeparator, blocks.Where(block => !string.IsNullOrEmpty(block)));
-    }
-
-    private static string Action(BookingNotice notice) =>
-        notice == BookingNotice.Cancellation
-            ? "This booking:"
-            : "To move or cancel this booking, open:";
 }
