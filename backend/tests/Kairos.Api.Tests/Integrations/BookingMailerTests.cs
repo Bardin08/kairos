@@ -48,6 +48,12 @@ public class BookingMailerTests
     private const string WhereLabel = "Where";
 
     private const string OrganizerAddress = "organizer@example.com";
+
+    /// <summary>What a provider mints, in the shape Google derives one.</summary>
+    private const string ProviderUid = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0@google.com";
+
+    /// <summary>The calendar account that owns the meeting, which is not the sending address.</summary>
+    private const string ConnectedAccount = "organizer@gmail.example";
     private const string BookerAddress = "guest@example.com";
     private const string BookerName = "Vlad";
     private const string LinkName = "Consulting call";
@@ -467,7 +473,7 @@ public class BookingMailerTests
     public async Task SendConfirmationAsync_NoRelayConfigured_DoesNothingAndDoesNotThrow() =>
         await Should.NotThrowAsync(() => Mailer(new EmailOptions())
             .SendConfirmationAsync(
-                Booking(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
+                Booking(), Identity(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
 
     /// <summary>
     /// Ground rule 14, against a real socket. A relay that is configured and refuses the
@@ -484,8 +490,14 @@ public class BookingMailerTests
 
         await Should.NotThrowAsync(() => Mailer(unreachable)
             .SendConfirmationAsync(
-                Booking(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
+                Booking(), Identity(), ManageToken, joinUrl: null, TestContext.Current.CancellationToken));
     }
+
+    /// <summary>
+    /// What a deployment with no calendar connected resolves to, which is what these tests were
+    /// asserting against before the identity existed.
+    /// </summary>
+    private static MeetingIdentity Identity() => new(Guid.CreateVersion7().ToString(), Owner: null);
 
     private static EmailOptions Options(string baseUrl, string from = OrganizerAddress) =>
         new()
@@ -538,6 +550,42 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// The defect this exists to stop: a confirmation under an identity no calendar has seen is
+    /// imported as a second meeting beside the one the provider already placed.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_AProviderPlacedTheEvent_QuotesItsUidAndAccount()
+    {
+        var message = await Compose(
+            identity: new MeetingIdentity(ProviderUid, ConnectedAccount));
+
+        // Read raw and unfolded: naming both addresses puts the ORGANIZER line past the 75-octet
+        // budget, and a client joins the continuation back up before reading it.
+        var ics = Unfold(Ics(message));
+        ics.ShouldContain($"UID:{ProviderUid}");
+        ics.ShouldContain($"ORGANIZER;SENT-BY=\"mailto:{OrganizerAddress}\":mailto:{ConnectedAccount}");
+    }
+
+    /// <summary>
+    /// A deployment with no calendar connected is untouched by this change, and stays the case
+    /// the .ics is the whole invitation for.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_NoProviderPlacedIt_QuotesTheBookingIdAndNoSentBy()
+    {
+        var booking = Booking();
+
+        var message = await Compose(
+            booking,
+            identity: new MeetingIdentity(booking.Id.ToString(), Owner: null));
+
+        var ics = Ics(message);
+        ics.ShouldContain($"UID:{booking.Id}");
+        ics.ShouldContain($"ORGANIZER:mailto:{OrganizerAddress}");
+        ics.ShouldNotContain("SENT-BY");
+    }
+
+    /// <summary>
     /// Composed, written and parsed back. Reading the object the mailer returned would skip the
     /// transfer encodings, which is precisely where the .ics survives or does not.
     /// </summary>
@@ -547,10 +595,13 @@ public class BookingMailerTests
         BookingNotice notice = BookingNotice.Confirmation,
         string? manageToken = ManageToken,
         string? joinUrl = null,
-        Instant? previousStart = null)
+        Instant? previousStart = null,
+        MeetingIdentity? identity = null)
     {
+        var subject = booking ?? Booking();
         var message = await Mailer(options ?? Options(BaseUrl)).ComposeAsync(
-            booking ?? Booking(),
+            subject,
+            identity ?? new MeetingIdentity(subject.Id.ToString(), Owner: null),
             manageToken,
             joinUrl,
             previousStart,

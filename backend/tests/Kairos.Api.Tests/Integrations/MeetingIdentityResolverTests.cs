@@ -2,8 +2,6 @@ using Kairos.Api.Integrations.Email;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 
-using Microsoft.Extensions.Options;
-
 using Shouldly;
 
 namespace Kairos.Api.Tests.Integrations;
@@ -18,8 +16,6 @@ namespace Kairos.Api.Tests.Integrations;
 /// </remarks>
 public class MeetingIdentityResolverTests
 {
-    private const string From = "Kairos <booking@kairos.example>";
-    private const string FromAddress = "booking@kairos.example";
     private const string ConnectedAccount = "organizer@gmail.example";
     private const string ProviderUid = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0@google.com";
     private const string EventId = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0";
@@ -37,8 +33,7 @@ public class MeetingIdentityResolverTests
             .ResolveAsync(bookingId, TestContext.Current.CancellationToken);
 
         identity.Uid.ShouldBe(ProviderUid);
-        identity.OrganizerEmail.ShouldBe(ConnectedAccount);
-        identity.SentBy.ShouldBe(FromAddress);
+        identity.Owner.ShouldBe(ConnectedAccount);
     }
 
     [Fact]
@@ -52,14 +47,14 @@ public class MeetingIdentityResolverTests
             .ResolveAsync(bookingId, TestContext.Current.CancellationToken);
 
         identity.Uid.ShouldBe(bookingId.ToString());
-        identity.OrganizerEmail.ShouldBe(FromAddress);
-        identity.SentBy.ShouldBeNull();
+        identity.Owner.ShouldBeNull();
     }
 
     /// <summary>
     /// The event is in a calendar whose account Kairos cannot name — a credential row that lost
-    /// its label. Quoting the provider's UID under the mail From would assert an organizer no
-    /// client has seen for that meeting, so both halves fall back together.
+    /// its label. Quoting the provider's UID while the message claims the sending address owns
+    /// the meeting would assert an organizer no client has seen for it, so both halves fall back
+    /// together.
     /// </summary>
     [Fact]
     public async Task ResolveAsync_TheAccountIsUnknown_FallsBackToBothHalves()
@@ -72,12 +67,10 @@ public class MeetingIdentityResolverTests
             .ResolveAsync(bookingId, TestContext.Current.CancellationToken);
 
         identity.Uid.ShouldBe(bookingId.ToString());
-        identity.OrganizerEmail.ShouldBe(FromAddress);
-        identity.SentBy.ShouldBeNull();
+        identity.Owner.ShouldBeNull();
     }
 
-    private static MeetingIdentityResolver Resolver(KairosDbContext context) =>
-        new(context, Options.Create(new EmailOptions { From = From }));
+    private static MeetingIdentityResolver Resolver(KairosDbContext context) => new(context);
 
     private static Guid Seed(KairosDbContext context, string? calendarUid, string? accountLabel)
     {

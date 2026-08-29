@@ -66,11 +66,13 @@ public sealed class BookingMailer(
     /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
     public Task SendConfirmationAsync(
         Booking booking,
+        MeetingIdentity identity,
         string manageToken,
         string? joinUrl,
         CancellationToken cancellationToken) =>
         SendAsync(
-            BookingNotice.Confirmation, booking, manageToken, joinUrl, previousStart: null, cancellationToken);
+            BookingNotice.Confirmation, booking, identity, manageToken, joinUrl,
+            previousStart: null, cancellationToken);
 
     /// <summary>
     /// <c>METHOD:REQUEST</c> again, same <c>UID</c>, with a <see cref="Booking.Sequence"/> the
@@ -89,12 +91,14 @@ public sealed class BookingMailer(
     /// </remarks>
     public Task SendRescheduleAsync(
         Booking booking,
+        MeetingIdentity identity,
         string? manageToken,
         string? joinUrl,
         Instant? previousStart,
         CancellationToken cancellationToken) =>
         SendAsync(
-            BookingNotice.Reschedule, booking, manageToken, joinUrl, previousStart, cancellationToken);
+            BookingNotice.Reschedule, booking, identity, manageToken, joinUrl, previousStart,
+            cancellationToken);
 
     /// <summary>
     /// <c>METHOD:CANCEL</c>, which <see cref="IcsBuilder"/> already pairs with
@@ -111,11 +115,13 @@ public sealed class BookingMailer(
     /// </remarks>
     public Task SendCancellationAsync(
         Booking booking,
+        MeetingIdentity identity,
         string? manageToken,
         CancellationToken cancellationToken) =>
         SendAsync(
             BookingNotice.Cancellation,
             booking,
+            identity,
             manageToken,
             joinUrl: null,
             previousStart: null,
@@ -144,6 +150,7 @@ public sealed class BookingMailer(
     private Task SendAsync(
         BookingNotice notice,
         Booking booking,
+        MeetingIdentity identity,
         string? manageToken,
         string? joinUrl,
         Instant? previousStart,
@@ -151,7 +158,8 @@ public sealed class BookingMailer(
         SendComposedAsync(
             notice,
             booking,
-            () => ComposeAsync(booking, manageToken, joinUrl, previousStart, notice, cancellationToken),
+            () => ComposeAsync(
+                booking, identity, manageToken, joinUrl, previousStart, notice, cancellationToken),
             cancellationToken);
 
     /// <summary>
@@ -232,9 +240,14 @@ public sealed class BookingMailer(
     /// </code>
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
     /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
+    ///
+    /// <paramref name="identity"/> is an argument rather than a lookup, exactly like
+    /// <paramref name="joinUrl"/> beside it: this class composes and does not read, which is what
+    /// keeps every assertion about it an assertion about bytes.
     /// </remarks>
     public async Task<MimeMessage> ComposeAsync(
         Booking booking,
+        MeetingIdentity identity,
         string? manageToken,
         string? joinUrl,
         Instant? previousStart,
@@ -263,16 +276,20 @@ public sealed class BookingMailer(
         var method = Method(notice);
 
         var ics = calendar.Build(new IcsRequest(
-            BookingId: booking.Id,
+            Uid: identity.Uid,
             Start: start,
             End: end,
             Summary: booking.Link.Name,
             Description: manageUrl is null ? string.Empty : $"Manage or cancel: {manageUrl}",
-            OrganizerEmail: organizer.Address,
+            // The connected calendar account owns the meeting when one placed the event, and Kairos
+            // is then only the address that posted the message. With no provider the sending
+            // address owns it, and a SENT-BY naming the organizer would say nothing.
+            OrganizerEmail: identity.Owner ?? organizer.Address,
             AttendeeEmail: booker.Email,
             Sequence: booking.Sequence,
             Method: method,
-            Location: joinUrl));
+            Location: joinUrl,
+            SentBy: identity.Owner is null ? null : organizer.Address));
 
         var fact = Fact(start, end, zone, previousStart);
         var mail = notice switch

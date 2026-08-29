@@ -1,9 +1,6 @@
 using Kairos.Api.Persistence;
 
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-
-using MimeKit;
 
 namespace Kairos.Api.Integrations.Email;
 
@@ -22,13 +19,17 @@ namespace Kairos.Api.Integrations.Email;
 /// The credential is read for its label alone, which is a column and not the protected payload,
 /// so this goes to the table rather than through <see cref="IntegrationCredentialStore"/>: that
 /// class is the one door to the secret, and nothing here opens one.
+///
+/// Nothing about mail is read here, deliberately. This runs on the booking's own request whether
+/// or not a relay is configured, and a resolver that parsed the sending address would fail the
+/// booking of a deployment that has none — stricter than the mailer it feeds, which answers that
+/// question for itself and sends nothing.
 /// </remarks>
-public sealed class MeetingIdentityResolver(KairosDbContext context, IOptions<EmailOptions> options)
+public sealed class MeetingIdentityResolver(KairosDbContext context)
 {
     public async Task<MeetingIdentity> ResolveAsync(Guid bookingId, CancellationToken cancellationToken)
     {
-        var from = MailboxAddress.Parse(options.Value.From!).Address;
-        var fallback = new MeetingIdentity(bookingId.ToString(), from, null);
+        var fallback = new MeetingIdentity(bookingId.ToString(), null);
 
         var entry = await context.CalendarEntries.AsNoTracking()
             .Where(row => row.BookingId == bookingId)
@@ -45,6 +46,6 @@ public sealed class MeetingIdentityResolver(KairosDbContext context, IOptions<Em
             .Select(row => row.AccountLabel)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return account is { Length: > 0 } owner ? new MeetingIdentity(uid, owner, from) : fallback;
+        return account is { Length: > 0 } owner ? new MeetingIdentity(uid, owner) : fallback;
     }
 }
