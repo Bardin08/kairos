@@ -35,6 +35,9 @@ public class OperatorCancelTests
     private const int OverLongReasonLength = CancelMeetingRequest.MaxReasonLength + 1;
 
     private const string ExternalEventId = "google-event-1";
+
+    /// <summary>The identity the provider mints alongside that id, quoted by every notice.</summary>
+    private const string CalendarUid = "google-event-1@google.com";
     private const int OneWithdrawal = 1;
 
     private const string ProposedInstant = $"{MeetingsFixture.Day}T14:00:00Z";
@@ -321,10 +324,10 @@ public class OperatorCancelTests
 
         public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
-        public Task<string> CreateEventAsync(
+        public Task<PlacedEvent> CreateEventAsync(
             CalendarEventRequest request,
             CancellationToken cancellationToken) =>
-            Task.FromResult(ExternalEventId);
+            Task.FromResult(new PlacedEvent(ExternalEventId, CalendarUid));
 
         public Task UpdateEventAsync(
             string externalEventId,
@@ -340,11 +343,6 @@ public class OperatorCancelTests
             }
 
             return Task.CompletedTask;
-        }
-
-        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
         }
     }
 

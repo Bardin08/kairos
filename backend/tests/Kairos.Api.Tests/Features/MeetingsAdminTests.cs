@@ -532,10 +532,10 @@ public class MeetingsAdminTests
 
         public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
-        public Task<string> CreateEventAsync(
+        public Task<PlacedEvent> CreateEventAsync(
             CalendarEventRequest request,
             CancellationToken cancellationToken) =>
-            Task.FromException<string>(new InvalidOperationException(Refusal));
+            Task.FromException<PlacedEvent>(new InvalidOperationException(Refusal));
 
         /// <summary>
         /// Refuses like the create does, because this calendar refuses. No test here moves a
@@ -550,11 +550,6 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
-
-        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
     }
 
     /// <summary>
@@ -569,10 +564,10 @@ public class MeetingsAdminTests
         public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
             Task.FromException<bool>(new InvalidOperationException(Revocation));
 
-        public Task<string> CreateEventAsync(
+        public Task<PlacedEvent> CreateEventAsync(
             CalendarEventRequest request,
             CancellationToken cancellationToken) =>
-            Task.FromException<string>(new InvalidOperationException(Revocation));
+            Task.FromException<PlacedEvent>(new InvalidOperationException(Revocation));
 
         public Task UpdateEventAsync(
             string externalEventId,
@@ -582,10 +577,5 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.FromException(new InvalidOperationException(Revocation));
-
-        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
     }
 }

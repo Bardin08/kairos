@@ -196,6 +196,7 @@ public static class BookingsEndpoints
         BookingMover mover,
         BookingWriter writer,
         CalendarSyncService calendars,
+        MeetingIdentityResolver identities,
         BookingMailer mailer,
         IClock clock,
         CancellationToken cancellationToken)
@@ -250,12 +251,18 @@ public static class BookingsEndpoints
         // call above. Move this read ahead of that call and every confirmation loses its join row.
         var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
 
+        // Read back for the join URL's reason and with the same requirement: the calendar entry
+        // carrying it is committed inside the sync above, and a confirmation composed before that
+        // would quote the fallback and publish this meeting a second time in the booker's calendar.
+        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
+
         // After the sync, so the confirmation describes a meeting the organizer's calendar already
         // knows about, and never before the write committed. Sent on this thread rather than from a
         // queue because the plaintext manage token the confirmation carries exists only here, in
         // memory, and a queue would have to store it. The mailer swallows its own failures, so a
         // relay being down cannot become a booking the organizer never gets.
-        await mailer.SendConfirmationAsync(booking, result.ManageToken!, joinUrl, cancellationToken);
+        await mailer.SendConfirmationAsync(
+            booking, identity, result.ManageToken!, joinUrl, cancellationToken);
 
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}",
@@ -298,6 +305,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         BookingMover mover,
         CalendarSyncService calendars,
+        MeetingIdentityResolver identities,
         BookingMailer mailer,
         ProposalWriter proposals,
         IClock clock,
@@ -329,11 +337,14 @@ public static class BookingsEndpoints
 
         var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
 
+        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
+
         // Then the invitee, so the mail describes a calendar the organizer's side already agrees
         // with. The token arrived in the URL, stays in memory for this request and is never
-        // persisted. Sequence was advanced above and the UID is the booking id, which together are
-        // what make this land as a change rather than as a second meeting.
-        await mailer.SendRescheduleAsync(booking, token, joinUrl, previousStart, cancellationToken);
+        // persisted. Sequence was advanced above and the UID is the one the confirmation carried,
+        // which together are what make this land as a change rather than as a second meeting.
+        await mailer.SendRescheduleAsync(
+            booking, identity, token, joinUrl, previousStart, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -367,6 +378,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         BookingMover mover,
         CalendarSyncService calendars,
+        MeetingIdentityResolver identities,
         BookingMailer mailer,
         IClock clock,
         CancellationToken cancellationToken)
@@ -421,8 +433,10 @@ public static class BookingsEndpoints
 
         // No manage token, and none can be had: the URL the invitee opened carried the PROPOSAL's
         // token and only the manage token's SHA-256 is stored. The mail goes without that link.
+        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
+
         await mailer.SendRescheduleAsync(
-            booking, manageToken: null, joinUrl, previousStart, cancellationToken);
+            booking, identity, manageToken: null, joinUrl, previousStart, cancellationToken);
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
