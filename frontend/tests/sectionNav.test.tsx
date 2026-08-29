@@ -54,6 +54,9 @@ const PAGE = 'page'
 /** The nav landmark's accessible name, and the only handle a page has on it. */
 const NAV_NAME = 'Links section'
 
+/** The header band both pages own, and the row this nav now belongs to. */
+const PAGE_HEADER = 'page-header'
+
 const settings: Settings = {
   timeZone: 'UTC',
   signedInAs: null,
@@ -175,6 +178,19 @@ test('the personal links render the section nav', async () => {
   renderAt(INVITES_PATH, <Invites />)
 
   expect(await screen.findByRole('navigation', { name: NAV_NAME })).toBeTruthy()
+})
+
+/**
+ * Where it sits, not merely that it exists. The two tests above pass with the
+ * nav in its own band below the heading, which is the layout this change
+ * replaces — so without this one the whole point of the change is unpinned.
+ */
+test('the section nav sits in the page header, beside the primary action', async () => {
+  renderAt(LINKS_PATH, <Links />)
+
+  const nav = await screen.findByRole('navigation', { name: NAV_NAME })
+
+  expect(nav.closest(`.${PAGE_HEADER}`)).toBeTruthy()
 })
 
 /**

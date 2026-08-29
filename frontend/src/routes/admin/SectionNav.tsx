@@ -36,18 +36,21 @@ const VIEWS: View[] = [
  * page as a pressed toggle. `.segmented` paints all three in one rule.
  *
  * No heading: both pages own a `page-header` with an `<h1>` already, and this
- * sits under it.
+ * sits inside it, beside that page's primary action.
  *
- * `.segmented-equal` spans the content width, which is what keeps this readable
- * as a header-width switch on the personal-links page — the Open/All filter
- * further down that page wears the same control at its content width, and scale
- * is what separates "which page" from "which rows" without inventing a device.
+ * Sized to its labels, and separated from the Open/All filter below by position
+ * rather than by scale. It once wore `.segmented-equal` and spanned the content
+ * width, which made the two unmistakably different controls; grouped into the
+ * header row beside the primary action it is the same size as the filter, and
+ * what tells them apart is that one sits in the header and the other sits above
+ * the table it filters. That is the weaker separator, and it is the price of
+ * getting the switch out of its own full-width band.
  */
 export default function SectionNav() {
   const [current] = useLocation()
 
   return (
-    <nav className="segmented segmented-equal mb-4" aria-label="Links section">
+    <nav className="segmented" aria-label="Links section">
       {VIEWS.map((view) => (
         <Link
           key={view.path}

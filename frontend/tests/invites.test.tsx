@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -91,11 +93,24 @@ const EXPIRED_WORD = 'Expired'
 const GENERATE = 'Generate link'
 const REVOKE = 'Revoke'
 const REGENERATE = 'Regenerate'
+const NEW_INVITE = 'New personal link'
+const CANCEL = 'Cancel'
+const EXPANDED = 'aria-expanded'
+const PRIMARY = 'btn-primary'
+const GHOST = 'btn-ghost'
+
+/** Same file the running app loads, and the authority on which class names exist. */
+const STYLESHEET = resolve(process.cwd(), '../backend/src/Kairos.Api/wwwroot/kairos.css')
+const PAGE_HEADER = 'page-header'
+const PANEL_ID = 'invite-panel'
 const OPEN_FILTER = 'Open'
 const ALL_FILTER = 'All'
 const DEADLINE_FIELD = 'Deadline'
 const NAME_FIELD = 'Their name'
+const EMAIL_FIELD = 'Their email'
 const LINK_FIELD = 'Link'
+const CHANGE = 'Change'
+const NO_DEADLINE_WORD = 'no deadline'
 
 const SHOWN_ONCE = /shown once and cannot be read back/
 /**
@@ -216,14 +231,20 @@ const EXPIRED: AdminInvite = { ...UNADDRESSED, id: EXPIRED_INVITE_ID, state: 'ex
 const LAPSED: AdminInvite = { ...UNADDRESSED, id: LAPSED_INVITE_ID, state: 'revoked' }
 
 /**
- * Rendered, and waited on until the link picker holds its options. Generate
- * sends whatever the picker is holding, and the picker is seeded by a second
- * request — so which of the two mocks settles first is not a thing any test
- * below is entitled to assume.
+ * Rendered, with the creation panel opened — which is where the form now lives.
+ *
+ * The wait is on the button losing `disabled` rather than on the picker holding
+ * its options, because the picker is inside the panel the button opens: the
+ * options do not exist until after the press, and the press does nothing until
+ * the links have landed and seeded `linkId`.
  */
 async function show() {
   const view = render(<Invites />)
-  await screen.findByRole('option', { name: LINK_NAME })
+
+  const open = await screen.findByRole('button', { name: NEW_INVITE })
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(open)
+
   return view
 }
 
@@ -258,6 +279,10 @@ test('generate issues the invite against the link the picker names', async () =>
   vi.mocked(createInvite).mockResolvedValue({ id: OTHER_LINK_INVITE_ID, url: INVITE_URL })
 
   await show()
+
+  // The picker is behind `Change` now. What this test is about is unchanged: the
+  // id the picker carries is what routes the POST.
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
 
   fireEvent.change(screen.getByLabelText(LINK_FIELD), { target: { value: OTHER_LINK_ID } })
   fireEvent.click(screen.getByRole('button', { name: GENERATE }))
@@ -316,6 +341,9 @@ test('with no links at all, the page says so instead of offering an empty picker
   render(<Invites />)
 
   expect(await screen.findByText(NO_LIVE_LINK)).toBeTruthy()
+  expect((screen.getByRole('button', { name: NEW_INVITE }) as HTMLButtonElement).disabled).toBe(
+    true,
+  )
   expect(screen.queryByLabelText(LINK_FIELD)).toBeNull()
   expect(screen.queryByRole('button', { name: GENERATE })).toBeNull()
   // And no table under it. `RecordTable` draws its empty state for zero rows
@@ -334,6 +362,8 @@ test('the picker offers live links only', async () => {
 
   await show()
 
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+
   expect(screen.getByRole('option', { name: LINK_NAME })).toBeTruthy()
   expect(screen.queryByRole('option', { name: ARCHIVED_LINK_NAME })).toBeNull()
 })
@@ -344,6 +374,9 @@ test('with every link archived, the page names both recoveries', async () => {
   render(<Invites />)
 
   expect(await screen.findByText(NO_LIVE_LINK)).toBeTruthy()
+  expect((screen.getByRole('button', { name: NEW_INVITE }) as HTMLButtonElement).disabled).toBe(
+    true,
+  )
   expect(screen.queryByLabelText(LINK_FIELD)).toBeNull()
   expect(screen.queryByText(NO_INVITES)).toBeNull()
 })
@@ -370,12 +403,13 @@ test('an invite on an archived link is still listed, and still revocable', async
 })
 
 /**
- * A links read that never lands leaves the picker with nothing in it, and the
- * page still draws the form — there is no empty state for a state nobody has
- * established. Generate has to be dead there, or it POSTs to
- * `/admin/links//invites` and stacks a second, unrelated failure on the first.
+ * A links read that never lands leaves nothing to seed `linkId` from, and there
+ * is no empty state for a state nobody has established — so the page draws no
+ * explanation, only a dead button. It has to be dead: a panel opened there can
+ * only POST to `/admin/links//invites` and stack a second, unrelated failure on
+ * the first.
  */
-test('a failed links read leaves generate dead rather than posting to no link', async () => {
+test('a failed links read leaves the panel unopenable rather than posting to no link', async () => {
   vi.mocked(listLinks).mockRejectedValue(
     new ApiError(HTTP_SERVER_ERROR, LINKS_UNREADABLE, LINKS_UNREADABLE_MESSAGE),
   )
@@ -384,10 +418,11 @@ test('a failed links read leaves generate dead rather than posting to no link', 
 
   expect(await screen.findByText(LINKS_UNREADABLE_MESSAGE)).toBeTruthy()
 
-  const generate = screen.getByRole('button', { name: GENERATE }) as HTMLButtonElement
-  expect(generate.disabled).toBe(true)
+  const open = screen.getByRole('button', { name: NEW_INVITE }) as HTMLButtonElement
+  expect(open.disabled).toBe(true)
 
-  fireEvent.click(generate)
+  fireEvent.click(open)
+  expect(screen.queryByRole('button', { name: GENERATE })).toBeNull()
   expect(createInvite).not.toHaveBeenCalled()
 })
 
@@ -416,6 +451,10 @@ test('a deadline preset travels as an instant, because the wire carries a moment
   vi.mocked(createInvite).mockResolvedValue({ id: ADDRESSED_INVITE_ID, url: INVITE_URL })
 
   await show()
+
+  // The picker is behind `Change` now. What this test is about is unchanged: the
+  // id the picker carries is what routes the POST.
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
 
   fireEvent.change(screen.getByLabelText(DEADLINE_FIELD), {
     target: { value: String(HOURS_PER_DAY) },
@@ -619,4 +658,148 @@ test('with nothing issued on any link, there is no filter and no talk of one', a
 
   expect(await screen.findByText(NO_INVITES)).toBeTruthy()
   expect(screen.queryByRole('button', { name: ALL_FILTER })).toBeNull()
+})
+
+/**
+ * At rest the page is heading, filter, table. The form card was open whether or
+ * not anybody was issuing an invite, and it is the largest thing on a page whose
+ * subject is the table.
+ */
+test('the form is not on the page until the button asks for it', async () => {
+  render(<Invites />)
+
+  const open = await screen.findByRole('button', { name: NEW_INVITE })
+
+  expect(screen.queryByLabelText(NAME_FIELD)).toBeNull()
+  expect(screen.queryByRole('button', { name: GENERATE })).toBeNull()
+  expect(open.getAttribute(EXPANDED)).toBe('false')
+})
+
+/**
+ * The two fields that change every time are asked; the two that are usually
+ * already right are stated. With one link and no deadline as the overwhelming
+ * case, four questions to ask two is the wrong trade.
+ */
+test('the panel asks for a person and states the link and the deadline', async () => {
+  await show()
+
+  expect(screen.getByLabelText(NAME_FIELD)).toBeTruthy()
+  expect(screen.getByLabelText(EMAIL_FIELD)).toBeTruthy()
+
+  expect(screen.queryByLabelText(LINK_FIELD)).toBeNull()
+  expect(screen.queryByLabelText(DEADLINE_FIELD)).toBeNull()
+
+  expect(screen.getByText(LINK_NAME)).toBeTruthy()
+  expect(screen.getByText(NO_DEADLINE_WORD)).toBeTruthy()
+})
+
+/**
+ * The risk this shape takes on. The picker is hidden and there is more than one
+ * link, so the failure it invites is minting against the wrong one and not
+ * learning about it until the recipient books the wrong meeting. The link name
+ * is the one phrase in the line that is not quiet.
+ *
+ * Switched to the second link, and switched back out of `Change`, for two
+ * separate reasons. Reading the sentence off the seeded first link passes just
+ * as well when the sentence ignores `linkId` and prints `offered[0]` — which is
+ * the bug this test exists to catch. And the picker's own <option> carries the
+ * same name, so the assertion is only unambiguous once the controls are
+ * collapsed again.
+ */
+test('the link the invite will be issued against is the loud half of the sentence', async () => {
+  await show()
+
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+  fireEvent.change(screen.getByLabelText(LINK_FIELD), { target: { value: OTHER_LINK_ID } })
+  fireEvent.click(screen.getByRole('button', { name: CHANGE }))
+
+  expect(screen.getByText(OTHER_LINK_NAME).tagName).toBe('STRONG')
+})
+
+test('Change is what puts the link and the deadline back on the page', async () => {
+  await show()
+
+  const change = screen.getByRole('button', { name: CHANGE })
+  expect(change.getAttribute(EXPANDED)).toBe('false')
+
+  fireEvent.click(change)
+
+  expect(change.getAttribute(EXPANDED)).toBe('true')
+  expect(screen.getByLabelText(LINK_FIELD)).toBeTruthy()
+  expect(screen.getByLabelText(DEADLINE_FIELD)).toBeTruthy()
+})
+
+/**
+ * DESIGN.md allows one primary per view and gives retreats the ghost treatment.
+ * Open, the panel owns the primary — Generate is what commits — and the header
+ * button is the way back out.
+ */
+test('the panel owns the only primary while it is open, and Cancel is a retreat', async () => {
+  render(<Invites />)
+
+  const open = await screen.findByRole('button', { name: NEW_INVITE })
+  await waitFor(() => expect((open as HTMLButtonElement).disabled).toBe(false))
+  expect(open.className).toContain(PRIMARY)
+
+  fireEvent.click(open)
+
+  const close = screen.getByRole('button', { name: CANCEL })
+  expect(close.className).not.toContain(PRIMARY)
+  expect(close.className).toContain(GHOST)
+  expect(screen.getByRole('button', { name: GENERATE }).className).toContain(PRIMARY)
+})
+
+test('the button that opens the panel is the button that closes it', async () => {
+  await show()
+
+  expect(screen.getByLabelText(NAME_FIELD)).toBeTruthy()
+
+  const close = screen.getByRole('button', { name: CANCEL })
+  expect(close.getAttribute(EXPANDED)).toBe('true')
+
+  fireEvent.click(close)
+
+  expect(screen.queryByLabelText(NAME_FIELD)).toBeNull()
+  expect(screen.getByRole('button', { name: NEW_INVITE })).toBeTruthy()
+})
+
+/**
+ * Regenerate mints a URL that exists exactly once — only its SHA-256 is stored —
+ * and the panel is the only place a URL is ever shown. Pressed from a row with
+ * the panel closed, which is the ordinary way it is pressed, the URL would
+ * otherwise be minted and thrown away in the same tick.
+ */
+test('regenerating from a closed panel opens it on the URL it just minted', async () => {
+  vi.mocked(listAllInvites).mockResolvedValue([ADDRESSED])
+  vi.mocked(regenerateInvite).mockResolvedValue({
+    id: REPLACEMENT_INVITE_ID,
+    url: REPLACEMENT_URL,
+  })
+
+  render(<Invites />)
+
+  fireEvent.click(await screen.findByRole('button', { name: REGENERATE }))
+
+  expect(await screen.findByDisplayValue(REPLACEMENT_URL)).toBeTruthy()
+})
+
+/**
+ * A className this page invents but the stylesheet does not have renders as
+ * unstyled markup that no other test can see. Scoped to the header and the
+ * panel — the two subtrees this page builds itself — rather than to the whole
+ * document, which would be re-asserting what RecordTable's own tests cover.
+ */
+test('every class the header and the panel render exists in kairos.css', async () => {
+  const css = readFileSync(STYLESHEET, 'utf8')
+  const { container } = await show()
+
+  const roots = [container.querySelector(`.${PAGE_HEADER}`), container.querySelector(`#${PANEL_ID}`)]
+  const used = new Set(
+    roots
+      .filter((root): root is Element => root !== null)
+      .flatMap((root) => [root, ...root.querySelectorAll('[class]')])
+      .flatMap((element) => [...element.classList]),
+  )
+
+  expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
 })

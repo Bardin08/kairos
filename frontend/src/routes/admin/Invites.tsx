@@ -36,15 +36,24 @@ const NO_DEADLINE = ''
 /** No link picked yet, which is the state until the links have been read. */
 const NO_LINK = ''
 
+/** What the header button controls, named so `aria-controls` can point at it. */
+const PANEL_ID = 'invite-panel'
+
+/** The pair of controls `Change` reveals, named so `aria-controls` can say so. */
+const SETTINGS_ID = 'invite-settings'
+
 /**
  * The deadlines on offer, held as durations and resolved to an instant at the
  * moment Generate is pressed — the wire carries a moment and never a duration,
  * and a preset resolved any earlier would be measured from the wrong clock read.
+ *
+ * Two words apiece, because the choice is read in two places: `label` starts an
+ * <option> and is capitalised for it, `settled` sits mid-sentence after a middot.
  */
 const DEADLINES = [
-  { hours: NO_DEADLINE, label: 'No deadline' },
-  { hours: String(HOURS_PER_DAY), label: 'In 24 hours' },
-  { hours: String(HOURS_PER_DAY * DAYS_PER_WEEK), label: 'In 7 days' },
+  { hours: NO_DEADLINE, label: 'No deadline', settled: 'no deadline' },
+  { hours: String(HOURS_PER_DAY), label: 'In 24 hours', settled: 'good for 24 hours' },
+  { hours: String(HOURS_PER_DAY * DAYS_PER_WEEK), label: 'In 7 days', settled: 'good for 7 days' },
 ]
 
 /**
@@ -139,6 +148,13 @@ export default function Invites() {
   // permanently, so All is where the archive is and Open is the question.
   const [showAll, setShowAll] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Whether the panel is showing. Not derived from `issued`: the panel is open
+  // before anything is issued, and stays open on the URL after. Regenerate sets
+  // both, because a URL minted from a row has nowhere else to be shown.
+  const [panelOpen, setPanelOpen] = useState(false)
+  // Whether the link picker and the deadline are showing as controls rather than
+  // as the sentence that states them.
+  const [changing, setChanging] = useState(false)
   // Bumped after every write. The list re-reads rather than patching its own
   // copy, because the server decides the order and folds the clock into each
   // state — and a local patch is where those two drift apart.
@@ -217,6 +233,10 @@ export default function Invites() {
       if (minted !== null) {
         setIssued(minted)
         setCopied(false)
+        // Regenerate is pressed from a row and does not go through the panel, so
+        // the panel has to come to the URL. Generate is already inside an open
+        // panel and this is a no-op there.
+        setPanelOpen(true)
       }
       setReload((count) => count + 1)
     } catch (error: unknown) {
@@ -237,6 +257,19 @@ export default function Invites() {
       setEmail('')
       return minted
     })
+  }
+
+  /**
+   * Closing forgets the URL along with the form. It is not a loss the operator
+   * cannot undo: regenerate revokes the invite and mints a replacement carrying
+   * the same prefill and the same deadline, and it is one press on the row. A
+   * panel that refused to close to protect a recoverable mistake would cost more
+   * than the mistake does.
+   */
+  function closePanel() {
+    setPanelOpen(false)
+    setIssued(null)
+    setCopied(false)
   }
 
   // Both of these take the invite's own link rather than the picker's: the
@@ -324,13 +357,53 @@ export default function Invites() {
 
   const nothingToOffer = offered !== null && offered.length === 0
 
+  // What the sentence says, read off the same two pieces of state the controls
+  // write — so the settled line and the revealed controls can never disagree.
+  const chosenLink = (offered ?? []).find((link) => link.id === linkId)
+  const chosenDeadline = DEADLINES.find((deadline) => deadline.hours === hours)
+
   return (
     <>
+      {/* The same grouping the links table uses, doing the same job: on Links the
+          primary action creates a link, here it creates a personal link. */}
       <div className="page-header">
         <h1 className="title-page">Personal links</h1>
+        <div className="row gap-2">
+          <SectionNav />
+          {/* Dead while the picker holds no link, which covers two states that
+              look alike from here: the window before the links land, and a links
+              read that failed outright. Opening a panel that can only POST to
+              `/admin/links//invites` stacks a second, unrelated failure on the
+              first. With every link archived the empty state below says so
+              instead, and this button is dead for the same reason. */}
+          <button
+            className={panelOpen ? 'btn btn-ghost' : 'btn btn-primary'}
+            type="button"
+            aria-expanded={panelOpen}
+            aria-controls={PANEL_ID}
+            disabled={linkId === NO_LINK}
+            onClick={() => (panelOpen ? closePanel() : setPanelOpen(true))}
+          >
+            {panelOpen ? (
+              'Cancel'
+            ) : (
+              <>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New personal link
+              </>
+            )}
+          </button>
+        </div>
       </div>
-
-      <SectionNav />
 
       {nothingToOffer ? (
         // No picker, because there is nothing to put in it. One sentence for
@@ -342,122 +415,150 @@ export default function Invites() {
           </p>
         </div>
       ) : (
-        <section className="card card-pad stack">
-          <p className="prose t-sm">
-            A personal link is one of your links with an invitation on it: the same hours, the same lengths, and a booking form that arrives filled in. It books once and is then spent.
-          </p>
-
-          <div className="field">
-            <label htmlFor="invite-link">Link</label>
-            <select
-              id="invite-link"
-              className="select ctl-md"
-              value={linkId}
-              onChange={(event) => setLinkId(event.target.value)}
-            >
-              {(offered ?? []).map((link) => (
-                <option key={link.id} value={link.id}>
-                  {link.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label htmlFor="invite-name">Their name</label>
-            <input
-              id="invite-name"
-              className="input"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="invite-email">Their email</label>
-            <input
-              id="invite-email"
-              className="input"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="invite-deadline">Deadline</label>
-            {/* The zone is said here rather than over the column below: it is the
-                same sentence for both, and this is where an operator decides. */}
-            <p className="fine">
-              After it, the URL stops working and the times go back on offer. Deadlines are set and shown in your own zone, {zone}.
-            </p>
-            <select
-              id="invite-deadline"
-              className="select ctl-md"
-              value={hours}
-              onChange={(event) => setHours(event.target.value)}
-            >
-              {DEADLINES.map((deadline) => (
-                <option key={deadline.label} value={deadline.hours}>
-                  {deadline.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* `btn-primary`, where the editor's copy of this form was a plain
-              `btn`. DESIGN.md allows one primary per view, and in the editor
-              that one was Save link in the savebar below. There is no savebar
-              here and nothing else on the page commits anything, so the ceiling
-              this button was under is gone. */}
-          {/* Dead until the picker holds a link, which covers two states that
-              look alike: the window before the links land, and a links read that
-              failed outright. In both `linkId` is still NO_LINK, and generating
-              would POST to `/admin/links//invites` and stack a second, unrelated
-              failure on the first. */}
-          <button
-            className="btn btn-primary"
-            type="button"
-            disabled={busy || linkId === NO_LINK}
-            onClick={() => void generate()}
-          >
-            Generate link
-          </button>
-
-          {/* The 201 is the only response that ever carries a URL — the server
-              keeps a SHA-256 of the token and can no more read one back than the
-              operator can. Same shape the booking page gives the manage link,
-              for the same reason. */}
-          {issued !== null && (
-            <div className="field">
-              <div className="row row-between">
-                <label htmlFor="invite-url">The link to send</label>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  aria-label="Copy personal link"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(issued.url)
-                    setCopied(true)
-                  }}
-                >
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
+        panelOpen && (
+          <section id={PANEL_ID} className="card card-pad stack">
+            {/* One thought, so one row: the operator reaching for this is thinking
+                about a person, not about four settings. */}
+            <div className="row gap-4 wrap">
+              <div className="field grow">
+                <label htmlFor="invite-name">Their name</label>
+                <input
+                  id="invite-name"
+                  className="input"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
               </div>
-              <p className="fine">
-                Copy it now. It is shown once and cannot be read back — if it is lost, regenerate the invite for a new one.
-              </p>
-              <input
-                id="invite-url"
-                className="input"
-                ref={urlField}
-                readOnly
-                value={issued.url}
-                onFocus={(event) => event.currentTarget.select()}
-              />
+
+              <div className="field grow">
+                <label htmlFor="invite-email">Their email</label>
+                <input
+                  id="invite-email"
+                  className="input"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
             </div>
-          )}
-        </section>
+
+            {/* The two decisions that are usually already right, stated rather than
+                asked. `.fact` and its `strong` are the stylesheet's existing "one
+                phrase at full strength in a quiet line" — and the link name is the
+                phrase that has to carry, because the picker is hidden and issuing
+                against the wrong link is not visible until the recipient books the
+                wrong meeting. */}
+            <p className="fact">
+              <span>
+                On <strong>{chosenLink?.name ?? ''}</strong> · <strong>{chosenDeadline?.settled ?? ''}</strong>
+              </span>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                aria-expanded={changing}
+                aria-controls={SETTINGS_ID}
+                onClick={() => setChanging((shown) => !shown)}
+              >
+                Change
+              </button>
+            </p>
+
+            {changing && (
+              <div id={SETTINGS_ID} className="stack">
+                <div className="field">
+                  <label htmlFor="invite-link">Link</label>
+                  <select
+                    id="invite-link"
+                    className="select ctl-md"
+                    value={linkId}
+                    onChange={(event) => setLinkId(event.target.value)}
+                  >
+                    {(offered ?? []).map((link) => (
+                      <option key={link.id} value={link.id}>
+                        {link.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="invite-deadline">Deadline</label>
+                  {/* The zone is said here rather than over the column below: it is
+                      the same sentence for both, and this is where an operator
+                      decides. */}
+                  <p className="fine">
+                    After it, the URL stops working and the times go back on offer. Deadlines are set and shown in your own zone, {zone}.
+                  </p>
+                  <select
+                    id="invite-deadline"
+                    className="select ctl-md"
+                    value={hours}
+                    onChange={(event) => setHours(event.target.value)}
+                  >
+                    {DEADLINES.map((deadline) => (
+                      <option key={deadline.label} value={deadline.hours}>
+                        {deadline.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* `btn-primary`, where the editor's copy of this form was a plain
+                `btn`. DESIGN.md allows one primary per view, and in the editor
+                that one was Save link in the savebar below. Here Generate is the
+                only thing that commits, and the header button steps down to a
+                ghost while the panel is open so it stays that way. */}
+            {/* Dead until the picker holds a link, which covers two states that
+                look alike: the window before the links land, and a links read that
+                failed outright. In both `linkId` is still NO_LINK, and generating
+                would POST to `/admin/links//invites` and stack a second, unrelated
+                failure on the first. */}
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={busy || linkId === NO_LINK}
+              onClick={() => void generate()}
+            >
+              Generate link
+            </button>
+
+            {/* The 201 is the only response that ever carries a URL — the server
+                keeps a SHA-256 of the token and can no more read one back than the
+                operator can. Same shape the booking page gives the manage link,
+                for the same reason. */}
+            {issued !== null && (
+              <div className="field">
+                <div className="row row-between">
+                  <label htmlFor="invite-url">The link to send</label>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    aria-label="Copy personal link"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(issued.url)
+                      setCopied(true)
+                    }}
+                  >
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <p className="fine">
+                  Copy it now. It is shown once and cannot be read back — if it is lost, regenerate the invite for a new one.
+                </p>
+                <input
+                  id="invite-url"
+                  className="input"
+                  ref={urlField}
+                  readOnly
+                  value={issued.url}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              </div>
+            )}
+          </section>
+        )
       )}
 
       {/* Outside the card, where the editor's copy sat inside it under Generate.

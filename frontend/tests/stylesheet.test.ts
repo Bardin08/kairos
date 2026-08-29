@@ -119,15 +119,18 @@ test('a section nav link is painted by aria-current, not by a toggle attribute',
 
 // An <a> is not a <button>: the UA centres a button's label inside the box
 // min-height gives it and gives an anchor an underline instead. Measured one
-// declaration at a time against the running page, each of the four moves
-// something — the label to the box's top-left corner, to its top edge, to its
-// left edge, or into an underline. Not the colour: the shared rule above sets
-// that, and it outranks the base `a` tint by layer rather than by this block.
-test('a segmented option that is a link is centred and unadorned like the buttons beside it', () => {
+// declaration at a time against the running page, each of the three moves
+// something — the label to the box's top edge, or into an underline. Matched
+// through the closing brace, so a fourth declaration creeping back in fails
+// here: `justify-content` was one, and it centred an option inside a box that
+// is already the width of its label. Not the colour either — the shared rule
+// above sets that, and it outranks the base `a` tint by layer, not by this
+// block.
+test('a segmented option that is a link is vertically centred and unadorned like the buttons beside it', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
   expect(css).toContain(
-    '.segmented a {\n    display: inline-flex;\n    align-items: center;\n    justify-content: center;\n    text-decoration: none;\n  }',
+    '.segmented a {\n    display: inline-flex;\n    align-items: center;\n    text-decoration: none;\n  }',
   )
 })
 
