@@ -12,15 +12,18 @@ using Shouldly;
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
-/// What a booking is left holding after the providers have had their turn. Every assertion is a
-/// row in the database, because those rows are this class's entire product: Part C's Meetings tab
-/// reads them and nothing else.
+/// What a booking is left holding after the providers have had their turn. Most of what is
+/// pinned is a row in the database, because those rows are this class's entire product: Part C's
+/// Meetings tab reads them and nothing else.
 /// </summary>
 /// <remarks>
-/// The two providers are a fake and a stub, and nothing counts calls on them; what is pinned is
-/// the outcomes a real provider can produce and the state each leaves behind. Asserting
-/// <c>Events.Update</c> was invoked would pass against a client broken in every way that matters,
-/// where the fake's held events tell a move from a delete-and-recreate.
+/// The two providers are a fake and a stub. Outcomes and the state each leaves behind are what
+/// most tests pin rather than calls — asserting <c>Events.Update</c> was invoked would pass
+/// against a client broken in every way that matters, where the fake's held events tell a move
+/// from a delete-and-recreate. The retry tests are the exception: <c>Creates</c> and
+/// <c>Deletes</c> exist because a second insert or delete under the same id is invisible in the
+/// held state — it overwrites or removes what the first call left, and looks like one call
+/// rather than two.
 /// </remarks>
 public class CalendarSyncTests
 {
@@ -299,6 +302,111 @@ public class CalendarSyncTests
         entry.LastError.ShouldBe(Refusal);
     }
 
+    private const int ReachedOnce = 1;
+
+    /// <summary>
+    /// The retry trap. A follow-up whose mail step failed is retried whole, so this method runs a
+    /// second time against a booking that is already in the calendar. Without the guard the second
+    /// insert comes back a duplicate, RecordFailureAsync catches it, and a row that is telling the
+    /// truth is overwritten with Failed — a mail outage corrupting calendar state.
+    /// </summary>
+    [Fact]
+    public async Task SyncAsync_RunTwice_ReachesTheProviderOnceAndLeavesTheEntrySynced()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+        var conference = new StubConference();
+
+        await Service(context, calendar, conference)
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+        await Service(context, calendar, conference)
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Creates.ShouldBe(ReachedOnce);
+        conference.Creates.ShouldBe(ReachedOnce);
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Synced);
+        context.ConferenceLinks.AsNoTracking().Count().ShouldBe(ReachedOnce);
+    }
+
+    /// <summary>
+    /// The same trap on the cancel path, with a different provider error. A retried delete of an
+    /// already-deleted event answers Gone, and without the guard that answer overwrites a
+    /// Cancelled row with Failed.
+    /// </summary>
+    [Fact]
+    public async Task CancelAsync_RunTwice_ReachesTheProviderOnceAndLeavesTheEntryCancelled()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+        await Service(context, calendar, new StubConference())
+            .CancelAsync(booking.Id, TestContext.Current.CancellationToken);
+        await Service(context, calendar, new StubConference())
+            .CancelAsync(booking.Id, TestContext.Current.CancellationToken);
+
+        calendar.Deletes.ShouldBe(ReachedOnce);
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Cancelled);
+    }
+
+    /// <summary>
+    /// The guard must not swallow a real retry. A first attempt the provider refused leaves a
+    /// Failed row, and the follow-up's next tick has to try again — a guard keyed on "a row
+    /// exists" rather than on "a row says Synced" would strand every booking made during an
+    /// outage.
+    /// </summary>
+    [Fact]
+    public async Task SyncAsync_AfterAFailedAttempt_TriesAgainAndSucceeds()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Failed);
+
+        calendar.Failure = null;
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Synced);
+    }
+
+    /// <summary>
+    /// The proof the Synced guard did not over-correct: it must not just skip the second call, it
+    /// must still finish the conference the first call left undone. Without the guard calling
+    /// AddConferenceAsync on this path, a booking whose event synced but whose conference refused
+    /// once would never get a join link — no later sync ever reaches PlaceAsync's own provider
+    /// call again once the entry is Synced.
+    /// </summary>
+    [Fact]
+    public async Task SyncAsync_TheConferenceRefusedOnce_GetsItsJoinLinkOnASecondSync()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+        var conference = new RefusingOnceConference();
+
+        await Service(context, calendar, conference)
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+        context.ConferenceLinks.AsNoTracking().ShouldBeEmpty();
+
+        await Service(context, calendar, conference)
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Creates.ShouldBe(ReachedOnce);
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Synced);
+        context.ConferenceLinks.AsNoTracking().Single().JoinUrl.ShouldBe(JoinUrl);
+    }
+
     private static CalendarSyncService Service(
         KairosDbContext context,
         ICalendarWriter calendars,
@@ -392,6 +500,15 @@ public class CalendarSyncTests
         /// <summary>What this calendar is holding, keyed by the id it gave each event.</summary>
         public IReadOnlyDictionary<string, CalendarEventRequest> Events => _events;
 
+        /// <summary>
+        /// How many times the provider was actually reached. The dictionary cannot answer this —
+        /// a second insert under the same id overwrites its entry and looks like one call, which
+        /// is the failure these guards exist to prevent.
+        /// </summary>
+        public int Creates { get; private set; }
+
+        public int Deletes { get; private set; }
+
         public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Connected);
 
@@ -399,6 +516,8 @@ public class CalendarSyncTests
             CalendarEventRequest request,
             CancellationToken cancellationToken)
         {
+            Creates++;
+
             if (Failure is not null)
             {
                 return Task.FromException<PlacedEvent>(Failure);
@@ -431,6 +550,8 @@ public class CalendarSyncTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken)
         {
+            Deletes++;
+
             if (Failure is not null)
             {
                 return Task.FromException(Failure);
@@ -447,11 +568,39 @@ public class CalendarSyncTests
 
         public IntegrationProvider Provider => IntegrationProvider.Google;
 
+        public int Creates { get; private set; }
+
         public Task<ConferenceDetails> CreateAsync(
             Guid bookingId,
-            CancellationToken cancellationToken) =>
-            Failure is null
+            CancellationToken cancellationToken)
+        {
+            Creates++;
+
+            return Failure is null
                 ? Task.FromResult(new ConferenceDetails(ConferenceId, new Uri(JoinUrl)))
                 : Task.FromException<ConferenceDetails>(Failure);
+        }
+    }
+
+    /// <summary>
+    /// Refuses its first attempt and takes every one after it, the shape of a conferencing
+    /// provider having a bad moment rather than being down.
+    /// </summary>
+    private sealed class RefusingOnceConference : IConferenceCreator
+    {
+        private const int FirstAttempt = 1;
+
+        public int Attempts { get; private set; }
+
+        public IntegrationProvider Provider => IntegrationProvider.Google;
+
+        public Task<ConferenceDetails> CreateAsync(Guid bookingId, CancellationToken cancellationToken)
+        {
+            Attempts++;
+
+            return Attempts == FirstAttempt
+                ? Task.FromException<ConferenceDetails>(new InvalidOperationException(Refusal))
+                : Task.FromResult(new ConferenceDetails(ConferenceId, new Uri(JoinUrl)));
+        }
     }
 }
