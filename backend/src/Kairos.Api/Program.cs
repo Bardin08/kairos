@@ -241,6 +241,11 @@ builder.Services.AddScoped<MeetingIdentityResolver>();
 // Scoped, and registered here by its first consumer: it adds to the request's DbContext and
 // never saves, so it has to be the same context the caller is about to commit.
 builder.Services.AddScoped<OutboxWriter>();
+builder.Services.AddScoped<FollowUpWriter>();
+
+// A singleton because it is the process's one doorbell: a scoped one would give every request its
+// own channel and nudge nobody.
+builder.Services.AddSingleton<FollowUpSignal>();
 
 builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(WebhookOptions.SectionName));
 

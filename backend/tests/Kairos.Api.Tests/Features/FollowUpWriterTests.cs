@@ -1,8 +1,11 @@
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 
 using Microsoft.EntityFrameworkCore;
+
+using NodaTime;
 
 using Shouldly;
 
@@ -27,6 +30,16 @@ public class FollowUpWriterTests
     private const string BookerZone = "Europe/Warsaw";
     private const long MeetingStartUtc = 1_788_000_000;
     private const long MeetingEndUtc = 1_788_003_600;
+
+    private const string ManageToken = "8f14e45fceea167a5a36dedd4bea2543";
+
+    /// <summary>
+    /// Thirty-two zero bytes, base64. A key a test can name, and one no deployment would ever
+    /// hold — <see cref="SecretProtector"/> only checks the length.
+    /// </summary>
+    private static readonly string TestKey = Convert.ToBase64String(new byte[SecretProtector.KeyBytes]);
+
+    private static readonly Instant Now = Instant.FromUnixTimeSeconds(CreatedAtUtc);
 
     [Fact]
     public void FollowUp_Inserted_RoundTripsThroughTheMigratedSchema()
@@ -54,6 +67,68 @@ public class FollowUpWriterTests
         stored.CreatedAt.ShouldBe(CreatedAtUtc);
         stored.Attempts.ShouldBe(NoAttempts);
         stored.LastError.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The property the whole design turns on: what reaches disk is ciphertext, and it opens back
+    /// to the token the mailer would have been handed inline.
+    /// </summary>
+    [Fact]
+    public void Enqueue_WithAManageToken_StoresItEncryptedAndRecoverable()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = SeedBooking(context);
+        var protector = new SecretProtector(TestKey);
+
+        new FollowUpWriter(context, protector, new FixedClock(Now))
+            .Enqueue(booking.Id, FollowUpType.Created, ManageToken);
+        context.SaveChanges();
+
+        var stored = context.FollowUps.AsNoTracking().Single();
+        stored.Secret.ShouldNotBeNull();
+        stored.Secret.ShouldNotContain(ManageToken);
+        protector.Unprotect(stored.Secret).ShouldBe(ManageToken);
+    }
+
+    /// <summary>
+    /// The operator's cancel has no token to carry, and null must stay null rather than become
+    /// the ciphertext of an empty string — which would decrypt to "" and print an empty link.
+    /// </summary>
+    [Fact]
+    public void Enqueue_WithoutAManageToken_StoresNoSecret()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = SeedBooking(context);
+
+        new FollowUpWriter(context, new SecretProtector(TestKey), new FixedClock(Now))
+            .Enqueue(booking.Id, FollowUpType.Cancelled);
+        context.SaveChanges();
+
+        context.FollowUps.AsNoTracking().Single().Secret.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The outbox discipline, restated for this table: the writer adds and never saves, so a
+    /// caller whose own write fails leaves no row behind promising a mail about it.
+    /// </summary>
+    [Fact]
+    public void Enqueue_WithoutASave_WritesNothing()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = SeedBooking(context);
+
+        new FollowUpWriter(context, new SecretProtector(TestKey), new FixedClock(Now))
+            .Enqueue(booking.Id, FollowUpType.Created, ManageToken);
+
+        // Its own connection rather than database.CreateContext(), which migrates on every call:
+        // a second concurrent migration against the same SQLite file this test's subject is
+        // mid-write to is a way to find out about locking, not about what got saved.
+        using var reader = new KairosDbContext(
+            new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(database.ConnectionString).Options);
+        reader.FollowUps.AsNoTracking().ShouldBeEmpty();
     }
 
     /// <summary>
