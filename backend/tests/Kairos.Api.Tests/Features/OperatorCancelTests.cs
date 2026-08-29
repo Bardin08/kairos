@@ -341,6 +341,11 @@ public class OperatorCancelTests
 
             return Task.CompletedTask;
         }
+
+        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 
     /// <summary>

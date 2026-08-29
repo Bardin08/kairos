@@ -30,7 +30,9 @@ public interface ICalendarWriter
     /// Throws on anything that means the meeting is not in the calendar; the caller records that
     /// rather than propagating it.
     /// </summary>
-    public Task<string> CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken);
+    public Task<PlacedEvent> CreateEventAsync(
+        CalendarEventRequest request,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Leaves everything <paramref name="request"/> does not describe exactly as it was. Throws on

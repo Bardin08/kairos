@@ -550,6 +550,11 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+
+        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 
     /// <summary>
@@ -577,5 +582,10 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.FromException(new InvalidOperationException(Revocation));
+
+        Task<PlacedEvent> ICalendarWriter.CreateEventAsync(CalendarEventRequest request, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

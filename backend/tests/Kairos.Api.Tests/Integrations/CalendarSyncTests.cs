@@ -25,6 +25,9 @@ namespace Kairos.Api.Tests.Integrations;
 public class CalendarSyncTests
 {
     private const string EventId = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0";
+
+    /// <summary>What Google derives a UID as, and the shape the .ics has to quote back.</summary>
+    private const string CalendarUid = "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0@google.com";
     private const string ConferenceId = "abc-defg-hij";
     private const string JoinUrl = "https://meet.example.com/abc-defg-hij";
     private const string Refusal = "Google said no.";
@@ -74,6 +77,23 @@ public class CalendarSyncTests
         entry.LastError.ShouldBe(Refusal);
         entry.ExternalEventId.ShouldBeNull();
         context.ConferenceLinks.AsNoTracking().ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The identity is the provider's to mint and Kairos's to keep: the confirmation quotes this
+    /// value, and a booking whose row lost it publishes itself a second time.
+    /// </summary>
+    [Fact]
+    public async Task SyncAsync_TheCalendarPlacesTheEvent_KeepsTheUidItWasGiven()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+
+        await Service(context, new FakeCalendar(), new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        context.CalendarEntries.AsNoTracking().Single().CalendarUid.ShouldBe(CalendarUid);
     }
 
     [Fact]
@@ -375,17 +395,17 @@ public class CalendarSyncTests
         public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Connected);
 
-        public Task<string> CreateEventAsync(
+        public Task<PlacedEvent> CreateEventAsync(
             CalendarEventRequest request,
             CancellationToken cancellationToken)
         {
             if (Failure is not null)
             {
-                return Task.FromException<string>(Failure);
+                return Task.FromException<PlacedEvent>(Failure);
             }
 
             _events[EventId] = request;
-            return Task.FromResult(EventId);
+            return Task.FromResult(new PlacedEvent(EventId, CalendarUid));
         }
 
         public Task UpdateEventAsync(
