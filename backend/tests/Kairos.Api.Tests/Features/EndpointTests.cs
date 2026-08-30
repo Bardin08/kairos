@@ -699,6 +699,52 @@ public class EndpointTests
         (await ReadJsonAsync(again)).GetProperty("sequence").GetInt32().ShouldBe(1);
     }
 
+    private const int OneFollowUp = 1;
+    private const int NoAttempts = 0;
+
+    /// <summary>
+    /// What the 201 now means: the booking is written and the work it owes is queued beside it.
+    /// The calendar and the confirmation are the worker's, and this endpoint waits on neither —
+    /// <see cref="KairosApp"/> does not run that worker at all, so the row surviving here is
+    /// nothing having been attempted yet, not a send that failed.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_Succeeds_QueuesOneFollowUpCarryingTheManageToken()
+    {
+        using var app = NewApp();
+
+        var response = await CreateAsync(app, Day() + FirstSlotTime);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        app.Read(context => context.FollowUps.Count()).ShouldBe(OneFollowUp);
+
+        var followUp = app.Read(context => context.FollowUps.AsNoTracking().Single());
+        followUp.Type.ShouldBe(FollowUpType.Created);
+        followUp.Attempts.ShouldBe(NoAttempts);
+
+        // Present, and not the token: the row exists at all only because it can carry the token
+        // without holding it in the clear.
+        followUp.Secret.ShouldNotBeNull();
+        var created = await ReadJsonAsync(response);
+        followUp.Secret.ShouldNotContain(created.GetProperty("manageToken").GetString()!);
+    }
+
+    /// <summary>
+    /// The transactional guarantee, and the reason the row is written by BookingWriter rather than
+    /// by the endpoint: a refused booking leaves nothing queued about it.
+    /// </summary>
+    [Fact]
+    public async Task CreateBooking_TheSlotIsTaken_QueuesNothingForTheRefusedOne()
+    {
+        using var app = NewApp();
+        var slot = Day() + FirstSlotTime;
+
+        (await CreateAsync(app, slot)).StatusCode.ShouldBe(HttpStatusCode.Created);
+        (await CreateAsync(app, slot)).StatusCode.ShouldBe(HttpStatusCode.Conflict);
+
+        app.Read(context => context.FollowUps.Count()).ShouldBe(OneFollowUp);
+    }
+
     /// <summary>
     /// A busy source that reports nothing and hangs up on the way out. It is registered for one
     /// client only, so every other request in this file meets exactly the sources the composition

@@ -195,9 +195,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         BookingMover mover,
         BookingWriter writer,
-        CalendarSyncService calendars,
-        MeetingIdentityResolver identities,
-        BookingMailer mailer,
+        FollowUpSignal signal,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -239,30 +237,10 @@ public static class BookingsEndpoints
 
         var booking = await LoadAsync(context, result.Id, cancellationToken);
 
-        // After the booking is committed and before the 201, in the request rather than behind a
-        // queue. Inline costs the booker whatever the provider's round trip costs; a background
-        // job would answer 201 for a meeting whose calendar state nothing has established yet,
-        // and this endpoint is also the only place holding the loaded booking. It cannot fail the
-        // request — SyncAsync has no throwing path — so the worst inline buys is a slower 201.
-        await calendars.SyncAsync(booking, cancellationToken);
-
-        // Read back rather than carried out of the sync, and only correct because of where it sits:
-        // the ConferenceLink is committed by the same SaveChanges as the calendar entry, inside the
-        // call above. Move this read ahead of that call and every confirmation loses its join row.
-        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
-
-        // Read back for the join URL's reason and with the same requirement: the calendar entry
-        // carrying it is committed inside the sync above, and a confirmation composed before that
-        // would quote the fallback and publish this meeting a second time in the booker's calendar.
-        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
-
-        // After the sync, so the confirmation describes a meeting the organizer's calendar already
-        // knows about, and never before the write committed. Sent on this thread rather than from a
-        // queue because the plaintext manage token the confirmation carries exists only here, in
-        // memory, and a queue would have to store it. The mailer swallows its own failures, so a
-        // relay being down cannot become a booking the organizer never gets.
-        await mailer.SendConfirmationAsync(
-            booking, identity, result.ManageToken!, joinUrl, cancellationToken);
+        // After the commit and never inside it: the worker reads on its own connection, so a nudge
+        // sent from inside the transaction races a pass that cannot yet see the row. The calendar
+        // and the confirmation are the worker's now — FollowUpWorker holds the order they run in.
+        signal.Nudge();
 
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}",

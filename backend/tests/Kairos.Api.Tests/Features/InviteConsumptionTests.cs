@@ -3,6 +3,7 @@ using Kairos.Api.Features.Invites;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -53,6 +54,12 @@ public class InviteConsumptionTests
 
     /// <summary>An operator who filled nothing in: an empty bag is a valid invite that still spends once.</summary>
     private static readonly Dictionary<string, string> NoPrefill = [];
+
+    /// <summary>
+    /// Thirty-two zero bytes, base64. A key a test can name, and one no deployment would ever
+    /// hold — <see cref="SecretProtector"/> only checks the length.
+    /// </summary>
+    private static readonly string TestKey = Convert.ToBase64String(new byte[SecretProtector.KeyBytes]);
 
     /// <summary>
     /// One token, two callers, two different half hours. The times are different on purpose: on
@@ -326,7 +333,11 @@ public class InviteConsumptionTests
     /// test that left it out would exercise a shorter INSERT batch than the application ever runs.
     /// </summary>
     private static BookingWriter Writer(KairosDbContext context, IClock clock) =>
-        new(context, clock, new OutboxWriter(context, clock));
+        new(
+            context,
+            clock,
+            new OutboxWriter(context, clock),
+            new FollowUpWriter(context, new SecretProtector(TestKey), clock));
 
     /// <summary>Through the real issuing path, so the token these cases spend is minted the way one in a URL is.</summary>
     private static (PersonalInvite Invite, string Token) Issue(
