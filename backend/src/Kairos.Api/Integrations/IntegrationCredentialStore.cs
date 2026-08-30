@@ -56,7 +56,12 @@ public sealed class IntegrationCredentialStore(
         where TPayload : class
     {
         var row = await FindAsync(provider, cancellationToken);
-        if (row is null)
+
+        // Two states, one answer, and that is the point. Never connected and switched off are the
+        // same fact to a caller: there is nothing here to talk to the provider with. Every adapter
+        // comes through this method, so the switch costs no line in any of them — and the provider
+        // added next year inherits it without knowing it exists.
+        if (row is null || !row.Enabled)
         {
             return null;
         }
@@ -132,6 +137,30 @@ public sealed class IntegrationCredentialStore(
         {
             row.AccountLabel = accountLabel;
         }
+
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Turns the provider on or off. A provider with no stored credential has no row to carry the
+    /// switch, and there is nothing to pause about a connection nobody made, so this throws rather
+    /// than inserting one.
+    /// </summary>
+    public async Task SetEnabledAsync(
+        IntegrationProvider provider,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        var row = await FindAsync(provider, cancellationToken)
+            ?? throw DomainException.NotFound("Integration");
+
+        if (row.Enabled == enabled)
+        {
+            return;
+        }
+
+        row.Enabled = enabled;
+        row.UpdatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
 
         await context.SaveChangesAsync(cancellationToken);
     }

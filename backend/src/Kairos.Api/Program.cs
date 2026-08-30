@@ -186,6 +186,7 @@ builder.Services.AddSingleton<IIntegrationConnector>(
 
 // Scoped: it reads and writes through the request's DbContext.
 builder.Services.AddScoped<IntegrationCredentialStore>();
+builder.Services.AddScoped<IntegrationSettingStore>();
 
 // The alert channel's first publisher. A second source is one more line here and no change to the
 // route, the response or the panel — which is the whole reason the channel is an interface rather
