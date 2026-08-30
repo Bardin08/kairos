@@ -1145,3 +1145,84 @@ a1ba560  the branch point            73,216                17,751
 **No rail item is marked current on `/admin/links/invites`.** The section switch marks itself correctly — `aria-current="page"` moves between its two options — but the shell's own navigation does not: at 1280 the rail's *Links* entry loses its raised pill on the sub-route, and at 899 the tab bar's *Links* loses its underline and its accent. Measured on the running instance, `.rail .nav a` carries no `aria-current` at all there, where `/admin/links` gives it to *Links*. The switch is a second level of navigation under a rail item that stops claiming the operator is inside it, and nothing in the gate for this work asked about the level above.
 
 **The header was never measured below 759px.** It holds one row with room to spare at all three admin widths, and the design doc names crowding as this shape's cost, so the width where the heading and the switch actually collide is the interesting one and it is under every viewport measured here.
+
+---
+
+# Booking follow-ups
+
+Measured 2026-08-30 on the cluster, `rpi01`, image `ghcr.io/bardin08/kairos:sha-185ac97`, read from the pod's own `kubectl logs --timestamps`. The before-figures were taken the same way on `sha-88944a8`, so the two are comparable; a laptop number would not be.
+
+## Headline
+
+```
+                        before      after      of which third-party
+POST /bookings          3518ms      377ms      363ms  Google freebusy
+cancel                  ~4000ms       6ms        0ms
+```
+
+**Everything this change controls is 14ms on a create and 6ms on a cancel.** What is left of the create is one Google round trip.
+
+## The create, warm
+
+```
+13:55:22.531              request in
+        →22.536     5ms   link, pattern, rules, settings
+        →22.899   363ms   Google freebusy — the availability re-check
+        →22.901     2ms   margin and booking reads
+        →22.901           BEGIN IMMEDIATE
+        →22.906     5ms   clash check, four inserts, COMMIT
+        →22.908     2ms   response build
+                   377ms  201 out
+
+        →22.913     7ms   worker picks the row up
+        →26.192           confirmation accepted by the relay
+```
+
+The booking, its outbox announcement and its follow-up row are four inserts inside one `BEGIN IMMEDIATE`, committing in 5ms. The nudge reaches the worker 7ms after that commit, and the confirmation leaves 3.3 seconds later — where it used to leave 3.3 seconds *before* the response.
+
+## The create, cold
+
+The first booking after a deploy costs more, and a booker can experience it:
+
+```
+13:52:16.926              request in       (pod 116s old, first booking)
+        →17.124   193ms   Google freebusy
+        →17.133     9ms   reads
+        →17.149    16ms   BEGIN IMMEDIATE, clash check
+        →17.349   200ms   first AES-GCM, first payload serialisation — JIT
+        →17.356     7ms   four inserts, COMMIT
+                  ~456ms  201 out
+```
+
+That 200ms is application code with no statement in it, and it does not recur: the same span on the warm request above is under a millisecond, and `BEGIN IMMEDIATE`…`COMMIT` falls from 223ms to 5ms between the two. It is one-time initialisation on the path the follow-up row added — minting the token, protecting it, serialising the announcement — not a cost this design carries.
+
+## The cancel
+
+```
+13:55:35.9698             request in       (manage-token lookup)
+        →35.9725          UPDATE Bookings, withdraw open proposals
+        →35.9739          outbox and follow-up inserts
+        →35.9756          response build
+                    ~6ms  200 out
+
+        →35.9767    1ms   worker picks the row up
+        →38.328           cancellation accepted by the relay
+```
+
+No availability re-check on this path, so nothing third-party runs inside the request at all. Six milliseconds is the whole of it.
+
+## Criterion 1 was not met, and the reason is not this change
+
+The design set `POST /bookings` under 250ms. It measured 377ms warm. **The criterion is missed and the number is recorded as measured.**
+
+The gap is entirely the freebusy re-check, which the design explicitly kept in the request: it is the seam between the slot the page offered and the slot the writer accepts, and caching it would let the page sell a time Google already occupies. That call was measured at 186ms when the before-figures were taken, 193ms cold here and 363ms warm here — a third party's latency, varying by a factor of two across three samples, and the only thing standing between this endpoint and its target.
+
+So the honest statement is: **the request now costs one Google round trip plus fourteen milliseconds.** Whether that clears 250ms on any given day is Google's to decide, not Kairos's. Either the criterion should be restated against what this code controls, or the re-check needs a different design — and that is a question for its own task, not a number to quietly restate here.
+
+## The register of what is not covered
+
+**One sample per path.** Three bookings were made: one cold create, one warm create, one cancel, plus two reschedules not broken down here. The before-figures had three consecutive creates behind them; these do not, so the freebusy spread is characterised by three readings across two builds rather than by a distribution.
+
+**The worker's own cost is not budgeted.** Calendar write, identity resolution and mail take 3.3 seconds after the response, which nobody waits on — but nothing here establishes what happens when a relay is slow and rows accumulate, and `MaxAttempts` times a fifteen-second send timeout is the worst case no test has driven.
+
+**Reschedule is not broken down.** Two ran during this session and both mailed successfully; neither was timed.
