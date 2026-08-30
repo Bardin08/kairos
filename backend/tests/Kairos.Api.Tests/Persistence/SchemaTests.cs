@@ -2,6 +2,7 @@ using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 using Shouldly;
@@ -50,6 +51,20 @@ public class SchemaTests
     private const string SettingsValues = """{"busyCalendars":["operator@example.com"]}""";
 
     private const string OtherSettingsValues = """{"busyCalendars":[]}""";
+
+    /// <summary>Unix seconds on the credential's timestamps. Nothing reads them; the columns are NOT NULL.</summary>
+    private const long CredentialWrittenAt = 1_800_000_000;
+
+    /// <summary>
+    /// A credential as a writer that has never heard of the switch inserts it: every column the
+    /// table has, named, except the one under test.
+    /// </summary>
+    private const string InsertCredentialWithoutTheSwitch = """
+        INSERT INTO IntegrationCredentials
+            (Id, Provider, ProtectedPayload, AccountLabel, Health, LastSuccessAt, LastError, ConnectedAt, UpdatedAt)
+        VALUES
+            ($id, $provider, $payload, NULL, $health, NULL, NULL, $writtenAt, $writtenAt)
+        """;
 
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
@@ -393,6 +408,11 @@ public class SchemaTests
     /// chosen, never assumed — the same reasoning
     /// <see cref="IntegrationCredential.Health"/> is initialised by.
     /// </summary>
+    /// <remarks>
+    /// Half of a pair, and the half that answers for the CLR: EF writes Enabled explicitly on
+    /// every insert, so this stays green on the property initialiser alone and says nothing about
+    /// what the column defaults to. The test below is the other half.
+    /// </remarks>
     [Fact]
     public async Task IntegrationCredentials_WithNothingSaidAboutTheSwitch_AreEnabled()
     {
@@ -409,6 +429,39 @@ public class SchemaTests
 
         var stored = await context.IntegrationCredentials.SingleAsync(
             TestContext.Current.CancellationToken);
+
+        stored.Enabled.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The same question asked of the schema rather than of the entity, which is the only way it
+    /// gets a true answer. Raw SQL because going through EF re-introduces the initialiser the test
+    /// above already stands on: the row is inserted by a connection that knows nothing of the
+    /// model, exactly as every credential stored before the column existed was. Turn the
+    /// migration's defaultValue back to the false the generator wrote and an upgrade pauses every
+    /// integration the operator had connected — silently, and only this test says so.
+    /// </summary>
+    [Fact]
+    public async Task IntegrationCredentials_InsertedWithoutTheSwitchColumn_AreEnabledByTheMigrationsDefault()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+
+        await using var connection = new SqliteConnection(database.ConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var insert = connection.CreateCommand();
+        insert.CommandText = InsertCredentialWithoutTheSwitch;
+        insert.Parameters.AddWithValue("$id", Guid.CreateVersion7().ToString());
+        insert.Parameters.AddWithValue("$provider", (int)IntegrationProvider.Google);
+        insert.Parameters.AddWithValue("$payload", SettingsValues);
+        insert.Parameters.AddWithValue("$health", (int)CredentialHealth.Healthy);
+        insert.Parameters.AddWithValue("$writtenAt", CredentialWrittenAt);
+        await insert.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+
+        var stored = await context.IntegrationCredentials
+            .AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
 
         stored.Enabled.ShouldBeTrue();
     }
