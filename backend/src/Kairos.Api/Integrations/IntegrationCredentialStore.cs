@@ -49,7 +49,10 @@ public sealed class IntegrationCredentialStore(
     public async Task<IReadOnlyList<IntegrationCredential>> ListAsync(CancellationToken cancellationToken) =>
         await context.IntegrationCredentials.AsNoTracking().ToListAsync(cancellationToken);
 
-    /// <summary>Null when the provider has never been connected — not an error, a state.</summary>
+    /// <summary>
+    /// Null for either of the two states in which there is nothing to talk to the provider with:
+    /// never connected, or connected and switched off. Neither is an error.
+    /// </summary>
     public async Task<TPayload?> ReadAsync<TPayload>(
         IntegrationProvider provider,
         CancellationToken cancellationToken)
@@ -57,10 +60,15 @@ public sealed class IntegrationCredentialStore(
     {
         var row = await FindAsync(provider, cancellationToken);
 
-        // Two states, one answer, and that is the point. Never connected and switched off are the
-        // same fact to a caller: there is nothing here to talk to the provider with. Every adapter
-        // comes through this method, so the switch costs no line in any of them — and the provider
-        // added next year inherits it without knowing it exists.
+        // Two states, one answer. Never connected and switched off are the same fact to a caller:
+        // there is nothing here to talk to the provider with.
+        //
+        // The gate is not on its own enough to pause a provider, and believing it was is what
+        // shipped a switch that did nothing on a running instance: an adapter that caches what it
+        // read never asks again, so it never learns. GoogleClientFactory caches the credential and
+        // checks IsPausedAsync ahead of that cache for exactly this reason. What this line still
+        // buys is the cold path and the provider added later, which is a floor rather than the
+        // whole switch.
         if (row is null || !row.Enabled)
         {
             return null;
@@ -142,10 +150,32 @@ public sealed class IntegrationCredentialStore(
     }
 
     /// <summary>
+    /// Whether the operator has switched this provider off. True only where there is a row and its
+    /// switch is off: a provider nobody connected is not paused, and holding those two apart is
+    /// what keeps a disconnect a fault while a pause is not one.
+    /// </summary>
+    /// <remarks>
+    /// The switch, asked without opening the credential — for callers that have to know before
+    /// reaching for one, or that hold a credential already and would otherwise never ask again.
+    /// One indexed row by <see cref="IntegrationProvider"/>, and every caller follows it with an
+    /// HTTP round trip it is saving.
+    /// </remarks>
+    public Task<bool> IsPausedAsync(IntegrationProvider provider, CancellationToken cancellationToken) =>
+        context.IntegrationCredentials.AsNoTracking()
+            .AnyAsync(row => (row.Provider == provider) && !row.Enabled, cancellationToken);
+
+    /// <summary>
     /// Turns the provider on or off. A provider with no stored credential has no row to carry the
     /// switch, and there is nothing to pause about a connection nobody made, so this throws rather
     /// than inserting one.
     /// </summary>
+    /// <remarks>
+    /// No early return for a switch already in the position asked for, unlike
+    /// <see cref="MarkHealthyAsync"/>. That one skips a write it measured — a refresh per booking
+    /// page view — and this one is pressed by hand, so there is nothing to save and the skip would
+    /// only cost <see cref="IntegrationCredential.UpdatedAt"/> its meaning: every other writer here
+    /// stamps it, and a row that says when it was last touched has to be right about it.
+    /// </remarks>
     public async Task SetEnabledAsync(
         IntegrationProvider provider,
         bool enabled,
@@ -153,11 +183,6 @@ public sealed class IntegrationCredentialStore(
     {
         var row = await FindAsync(provider, cancellationToken)
             ?? throw DomainException.NotFound("Integration");
-
-        if (row.Enabled == enabled)
-        {
-            return;
-        }
 
         row.Enabled = enabled;
         row.UpdatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();

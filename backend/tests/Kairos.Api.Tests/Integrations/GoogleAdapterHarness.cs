@@ -70,6 +70,16 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
             },
             TestContext.Current.CancellationToken);
 
+    /// <summary>
+    /// The operator's switch, thrown while this process is running. Written through the store for
+    /// the reason the credential is, and offered here so a test can pause a provider the adapter
+    /// has already used — which is the only state the switch was ever broken in.
+    /// </summary>
+    public Task PauseAsync() =>
+        _scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>()
+            .SetEnabledAsync(
+                IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
     public ValueTask DisposeAsync()
     {
         _scope.Dispose();

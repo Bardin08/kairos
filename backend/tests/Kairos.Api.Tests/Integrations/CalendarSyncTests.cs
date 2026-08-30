@@ -1,6 +1,7 @@
 using Kairos.Api.Integrations;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,6 +35,10 @@ public class CalendarSyncTests
     private const string ConferenceId = "abc-defg-hij";
     private const string JoinUrl = "https://meet.example.com/abc-defg-hij";
     private const string Refusal = "Google said no.";
+
+    /// <summary>Stands where ciphertext would; nothing in this file decrypts a credential.</summary>
+    private const string UnopenedPayload = "not-a-real-payload";
+
     private const long MeetingStartUtc = 1_788_000_000;
     private const long MeetingEndUtc = 1_788_003_600;
 
@@ -302,6 +307,69 @@ public class CalendarSyncTests
         entry.LastError.ShouldBe(Refusal);
     }
 
+    /// <summary>
+    /// The switch, on the one path that had no check for it. A provider paused by hand is not a
+    /// provider refusing, and recording it as one wrote <c>Failed</c> with the adapter's "no
+    /// account is connected" onto every meeting rescheduled while the page said Paused. The
+    /// refusal is set here because that is what a real paused adapter does when it is reached at
+    /// all — the point of the guard is that it never is.
+    /// </summary>
+    [Fact]
+    public async Task RescheduleAsync_TheProviderIsPaused_RecordsNoFailureAndLeavesTheEventAlone()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+        var service = Service(context, calendar, new StubConference());
+
+        await service.SyncAsync(booking, TestContext.Current.CancellationToken);
+        await MoveAsync(context, booking);
+
+        await PauseAsync(context);
+        calendar.Failure = new InvalidOperationException(Refusal);
+
+        await service.RescheduleAsync(booking, TestContext.Current.CancellationToken);
+
+        var entry = context.CalendarEntries.AsNoTracking().Single();
+        entry.State.ShouldBe(CalendarSyncState.Synced);
+        entry.LastError.ShouldBeNull();
+
+        // Where the pause left it: still in the calendar, still at the hour it was placed at. A
+        // provider that is not being written to cannot have moved anything, and the row must not
+        // claim it did either way.
+        calendar.Events[EventId].Start.ToUnixTimeSeconds().ShouldBe(MeetingStartUtc);
+    }
+
+    /// <summary>
+    /// The same switch on the withdrawal, where the untrue row would have been worse: a
+    /// cancellation is the last thing that happens to a booking, so the failure it recorded would
+    /// have been the permanent state of that meeting.
+    /// </summary>
+    [Fact]
+    public async Task CancelAsync_TheProviderIsPaused_RecordsNoFailureAndNeverReachesTheProvider()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+        var service = Service(context, calendar, new StubConference());
+
+        await service.SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        await PauseAsync(context);
+        calendar.Failure = new InvalidOperationException(Refusal);
+
+        await service.CancelAsync(booking.Id, TestContext.Current.CancellationToken);
+
+        var entry = context.CalendarEntries.AsNoTracking().Single();
+        entry.State.ShouldBe(CalendarSyncState.Synced);
+        entry.LastError.ShouldBeNull();
+        calendar.Deletes.ShouldBe(NeverReached);
+    }
+
+    private const int NeverReached = 0;
+
     private const int ReachedOnce = 1;
 
     /// <summary>
@@ -414,9 +482,35 @@ public class CalendarSyncTests
         new(
             calendars,
             conferences,
+            new IntegrationCredentialStore(context, new SecretProtector(TestKey()), SystemClock.Instance),
             context,
             SystemClock.Instance,
             NullLogger<CalendarSyncService>.Instance);
+
+    /// <summary>
+    /// A key of the right length and nothing more. The store is reached here for the switch alone,
+    /// which is a column; no test in this file writes or opens a payload.
+    /// </summary>
+    private static string TestKey() => Convert.ToBase64String(new byte[SecretProtector.KeyBytes]);
+
+    /// <summary>
+    /// The operator's switch, thrown on a provider that is connected. The payload is never opened
+    /// on this path, so the row carries a placeholder rather than ciphertext — what the switch
+    /// costs a caller is one column read.
+    /// </summary>
+    private static Task PauseAsync(KairosDbContext context)
+    {
+        context.IntegrationCredentials.Add(new IntegrationCredential
+        {
+            Provider = IntegrationProvider.Google,
+            ProtectedPayload = UnopenedPayload,
+            Enabled = false,
+            ConnectedAt = MeetingStartUtc,
+            UpdatedAt = MeetingStartUtc,
+        });
+
+        return context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>
     /// The booking as the reschedule endpoint hands it over: already at its new time, already

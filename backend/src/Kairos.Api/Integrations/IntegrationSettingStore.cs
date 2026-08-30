@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.Json;
 
 using Kairos.Api.Persistence;
@@ -12,19 +13,30 @@ namespace Kairos.Api.Integrations;
 /// <summary>
 /// The one door to <see cref="IntegrationSetting"/>, so no caller writes a line of JSON. Values
 /// cross this boundary as a map of field key to value — the shape
-/// <see cref="IIntegrationSettings.SaveSettingsAsync"/> takes and <see cref="SettingField"/>
-/// carries, so nothing has to be translated on the way in.
+/// <see cref="IIntegrationSettings.SaveSettingsAsync"/> takes, so nothing has to be translated on
+/// the way in.
 /// </summary>
 /// <remarks>
-/// Merging rather than replacing on write. A caller saves the keys it knows about and says
-/// nothing about the rest, so a replace would let whichever wrote last delete settings it had
-/// never heard of.
+/// Merging rather than replacing on write, and not because a caller sends a delta: the operator's
+/// Save sends the whole of the panel, exactly as
+/// <see cref="IIntegrationSettings.SaveSettingsAsync"/> says it does. It merges because not every
+/// writer is the operator — a provider materialising a default of its own writes the one key it
+/// decided, and a replace would let that write delete the rest.
+///
+/// Removal is therefore spelled, since a merge cannot express it by omission: a value of
+/// <see cref="JsonValueKind.Null"/> deletes its key rather than storing a null, so an unset
+/// setting has one spelling — an absent key — and never two.
+///
+/// Safe against a second writer only in the sense that no writer clears another's keys by
+/// omission. Two writes that overlap in time are not: both read the row, both merge onto what they
+/// read, and the second commit carries none of the first's new keys. Nothing here has a
+/// concurrency token, unlike <see cref="Pattern.OverridesVersion"/>, because every writer today is
+/// one operator pressing Save or one default being materialised behind them — and a token would
+/// need a column, a migration and a conflict the settings panel has no answer for. A writer that
+/// runs on its own schedule is the change that makes it necessary.
 /// </remarks>
 public sealed class IntegrationSettingStore(KairosDbContext context, IClock clock)
 {
-    private static readonly IReadOnlyDictionary<string, JsonElement> Empty =
-        new Dictionary<string, JsonElement>();
-
     /// <summary>
     /// Empty when the provider has never been configured — not an error, a state, and the one the
     /// default is computed for.
@@ -38,12 +50,22 @@ public sealed class IntegrationSettingStore(KairosDbContext context, IClock cloc
 
         if (row is null)
         {
-            return Empty;
+            return ReadOnlyDictionary<string, JsonElement>.Empty;
         }
 
-        return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.Values) ?? Empty;
+        var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.Values);
+        if (values is null)
+        {
+            return ReadOnlyDictionary<string, JsonElement>.Empty;
+        }
+
+        return values;
     }
 
+    /// <summary>
+    /// Writes the keys in <paramref name="values"/> and leaves every other key as it was. A key
+    /// whose value is <see cref="JsonValueKind.Null"/> is deleted instead of written.
+    /// </summary>
     public async Task WriteAsync(
         IntegrationProvider provider,
         IReadOnlyDictionary<string, JsonElement> values,
@@ -59,6 +81,12 @@ public sealed class IntegrationSettingStore(KairosDbContext context, IClock cloc
 
         foreach (var (key, value) in values)
         {
+            if (value.ValueKind == JsonValueKind.Null)
+            {
+                merged.Remove(key);
+                continue;
+            }
+
             merged[key] = value;
         }
 

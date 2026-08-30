@@ -14,8 +14,8 @@ namespace Kairos.Api.Integrations;
 /// <remarks>
 /// It never throws. Ground rule 14: a booking the domain accepted is never lost because a third
 /// party had a bad minute, so every path out of here is a return. A provider that refuses becomes
-/// a <see cref="CalendarSyncState.Failed"/> row with the reason on it; one nobody connected
-/// becomes nothing at all.
+/// a <see cref="CalendarSyncState.Failed"/> row with the reason on it; one nobody connected, and
+/// one the operator switched off, become nothing at all — pausing is not a fault.
 ///
 /// <see cref="CalendarEntry"/> is unique per (booking, provider), so a booking has one row for its
 /// whole life and the state on it answers "where is this meeting, really" —
@@ -26,6 +26,7 @@ namespace Kairos.Api.Integrations;
 public sealed class CalendarSyncService(
     ICalendarWriter calendars,
     IConferenceCreator conferences,
+    IntegrationCredentialStore credentials,
     KairosDbContext context,
     IClock clock,
     ILogger<CalendarSyncService> logger)
@@ -148,6 +149,11 @@ public sealed class CalendarSyncService(
     /// a time the booking no longer claims is the two-plausible-times problem this method ends.
     /// The adapter throws on a missing credential and that throw becomes the row.
     /// </summary>
+    /// <remarks>
+    /// The pause is the exception, and the only one. A provider switched off by hand is not
+    /// refusing anything, so <see cref="PausedAsync"/> is asked before the attempt rather than
+    /// after it.
+    /// </remarks>
     private async Task MoveAsync(Booking booking, CancellationToken cancellationToken)
     {
         var entry = await FindEntryAsync(booking.Id, cancellationToken);
@@ -157,6 +163,11 @@ public sealed class CalendarSyncService(
             // connected when the booking was made, or the write was refused and the Failed row
             // says so. Placing it now would hide a second decision inside a reschedule, putting
             // the meeting in a calendar the booker was never told it was in.
+            return;
+        }
+
+        if (await PausedAsync(cancellationToken))
+        {
             return;
         }
 
@@ -190,6 +201,8 @@ public sealed class CalendarSyncService(
     /// <see cref="ConferenceLink"/> is left exactly as it is. It has no state column by design,
     /// and the booking's own status already answers whether this meeting is happening; the row
     /// records that a conference was provisioned, which stays true after a cancellation.
+    ///
+    /// Gated on the pause for the reason <see cref="MoveAsync"/> is.
     /// </remarks>
     private async Task WithdrawAsync(Guid bookingId, CancellationToken cancellationToken)
     {
@@ -203,6 +216,11 @@ public sealed class CalendarSyncService(
         // "HttpStatusCode is Gone. Resource has been deleted" and RecordFailureAsync writes that
         // over a Cancelled row that is telling the truth.
         if (entry.State == CalendarSyncState.Cancelled)
+        {
+            return;
+        }
+
+        if (await PausedAsync(cancellationToken))
         {
             return;
         }
@@ -262,6 +280,25 @@ public sealed class CalendarSyncService(
                 bookingId);
         }
     }
+
+    /// <summary>
+    /// Whether the operator has switched this provider off, asked of the switch itself rather than
+    /// inferred from the provider refusing.
+    /// </summary>
+    /// <remarks>
+    /// The two are told apart because the answers differ. A refusal is a fault an operator has to
+    /// see; a pause is the operator's own instruction, and recording it as a failure would put
+    /// "no account is connected" on every meeting rescheduled or cancelled while a provider whose
+    /// own page reads Paused was doing exactly what it was told. A paused provider therefore
+    /// leaves no row at all, the same as one nobody connected.
+    ///
+    /// Asked here rather than answered by the adapter throwing something distinguishable: the
+    /// switch is <see cref="IntegrationCredential.Enabled"/> and belongs to no vendor, so a
+    /// provider added later inherits this without implementing anything, and the sentence an
+    /// adapter throws stays the adapter's business.
+    /// </remarks>
+    private Task<bool> PausedAsync(CancellationToken cancellationToken) =>
+        credentials.IsPausedAsync(calendars.Provider, cancellationToken);
 
     /// <summary>
     /// Tracked on purpose: the callers that pass an entry in mutate it and expect the save below

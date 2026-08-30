@@ -269,6 +269,90 @@ public class IntegrationCredentialStoreTests
         rows.ShouldHaveSingleItem().Enabled.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// The switch as the sync path asks about it. A provider nobody connected is not paused, and
+    /// collapsing the two is what turns a deliberate pause into a Failed calendar entry saying no
+    /// account is connected.
+    /// </summary>
+    [Fact]
+    public async Task IsPausedAsync_ForAProviderNobodyConnected_AnswersFalseRatherThanPaused()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        var paused = await store.IsPausedAsync(
+            IntegrationProvider.Google, TestContext.Current.CancellationToken);
+
+        paused.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The other side of the same answer, and the expensive one to get wrong: a provider reported
+    /// paused when it is not stops every calendar write on the deployment, silently and with no
+    /// row anywhere saying why.
+    /// </summary>
+    [Fact]
+    public async Task IsPausedAsync_ForAConnectedProviderThatIsOn_AnswersFalse()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+
+        var paused = await store.IsPausedAsync(
+            IntegrationProvider.Google, TestContext.Current.CancellationToken);
+
+        paused.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task IsPausedAsync_ForAProviderTheOperatorSwitchedOff_AnswersTrue()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        var paused = await store.IsPausedAsync(
+            IntegrationProvider.Google, TestContext.Current.CancellationToken);
+
+        paused.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// The switch has no throttle to justify skipping a write, unlike <c>MarkHealthyAsync</c>: it
+    /// is pressed by hand. Returning early on a value already set would leave UpdatedAt saying the
+    /// row was last touched at some earlier moment, which is the one thing that column claims.
+    /// </summary>
+    [Fact]
+    public async Task SetEnabledAsync_ForAValueAlreadySet_StampsTheRowAnyway()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        clock.Advance(PastTheWindowSeconds);
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        var row = await ReadRowAsync(database);
+        row.Enabled.ShouldBeFalse();
+        row.UpdatedAt.ShouldBe(FirstSuccess + PastTheWindowSeconds);
+    }
+
     /// <summary>Shaped like a provider's payload; nothing here reads what is inside it.</summary>
     private sealed record StoredPayload(string RefreshToken);
 
