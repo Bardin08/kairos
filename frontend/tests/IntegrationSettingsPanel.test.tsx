@@ -74,6 +74,18 @@ describe('IntegrationSettingsPanel', () => {
     expect((screen.getByLabelText(SELECT_LABEL) as HTMLSelectElement).value).toBe(FIRST_VALUE)
   })
 
+  // Breaks if the box loses the class its tap floor is keyed on. A UA checkbox
+  // draws at ~13px and the label naming this field is in the grid's other track,
+  // so the 44px DESIGN.md requires is grown off the box by `.check-tap` — on
+  // every kind: toggle, not on the key `enabled`, because a provider's own
+  // toggles need the target as much as the universal switch does. The rule
+  // itself is pinned in stylesheet.test.ts, jsdom performing no layout.
+  it('keys every toggle to the tap-floor class, whatever the provider called it', () => {
+    render(<IntegrationSettingsPanel settings={settings} onSaved={() => {}} />)
+
+    expect(control(SWITCH_LABEL).classList.contains('check-tap')).toBe(true)
+  })
+
   it('says a list could not be read rather than showing it as empty', () => {
     const unreachable: IntegrationSettings = {
       ...settings,

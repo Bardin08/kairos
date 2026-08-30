@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'wouter'
 
 import AlertIcon from '../components/AlertIcon'
@@ -8,7 +8,9 @@ import {
   CREDENTIAL_UNREADABLE,
   listIntegrations,
   PROVIDER_NOT_CONFIGURED,
+  readIntegrationSettings,
   type Integration,
+  type IntegrationSettings,
 } from '../lib/api'
 import { localZone, shortDate, zonedDate, zonedTime } from '../lib/time'
 
@@ -21,6 +23,9 @@ const LIVE = 'live'
 const PAUSED = 'paused'
 
 const UNAUTHORIZED = 401
+
+/** Provider, State, Since, Action — the width the settings panel opens across. */
+const COLUMNS = 4
 
 // The two the callback puts on this page's URL. It always redirects here and
 // always carries one of them, so the operator learns what happened on the page
@@ -162,6 +167,20 @@ function describe(integration: Integration): Presentation {
     }
   }
 
+  // Asked after `reconnectRequired` and before `Connected`. A paused connection
+  // that is also broken has a real fault to report and a button that fixes it,
+  // so the fault outranks the switch; a paused connection that is otherwise
+  // fine has neither, and calling it Connected would be the page saying an
+  // integration is working while nothing is reaching it.
+  if (!integration.enabled) {
+    return {
+      live: false,
+      state: 'Paused',
+      detail: 'The connection is kept. Nothing is being read or written while it is off.',
+      action: null,
+    }
+  }
+
   return {
     live: true,
     state: 'Connected',
@@ -205,6 +224,19 @@ function connectedOn(instant: string): string {
   return `${shortDate(zonedDate(instant, zone))}, ${zonedTime(instant, zone)}`
 }
 
+/**
+ * Lazy for the reason `App.tsx` gives about the admin shell, and this page is
+ * why it has to be: `/integrations` is a fixed callback path, so the page
+ * itself cannot be lazy, and everything it imports statically lands in the
+ * booking route an invitee downloads. Imported eagerly the panel cost that
+ * route 811 bytes gzipped, measured; imported here it costs it none.
+ *
+ * The fallback is null rather than a second sentence: the panel only mounts
+ * once a settings read has come back, and what remains is one same-origin chunk
+ * fetch under a row that already said what it was doing.
+ */
+const IntegrationSettingsPanel = lazy(() => import('../components/IntegrationSettingsPanel'))
+
 /** The operator's page for connecting a calendar to Kairos. */
 export default function Integrations() {
   // Read, never cleared. The banner is derived from the URL rather than copied
@@ -225,6 +257,12 @@ export default function Integrations() {
   // the browser is leaving for the consent screen, and a button that stops
   // spinning while the page is still there reads as a press that did nothing.
   const [pending, setPending] = useState('')
+  // The provider whose settings are open, or none. One at a time: two open
+  // panels are two forms with two Save buttons and no way to tell which one a
+  // press belongs to.
+  const [open, setOpen] = useState('')
+  const [settings, setSettings] = useState<IntegrationSettings | null>(null)
+  const [panelFailure, setPanelFailure] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -271,6 +309,31 @@ export default function Integrations() {
       // pressed is still on the row — so the only recovery worth adding here is
       // the one this page cannot draw twice: signing in again.
       setRecovery(failed.status === UNAUTHORIZED ? 'sign-in' : 'none')
+    }
+  }
+
+  async function disclose(provider: string) {
+    if (open === provider) {
+      setOpen('')
+      setSettings(null)
+      return
+    }
+
+    setOpen(provider)
+    setSettings(null)
+    setPanelFailure('')
+
+    try {
+      setSettings(await readIntegrationSettings(provider))
+    } catch (error: unknown) {
+      const failed = asApiError(error)
+      // Said on the row and nowhere else. The listing beside it came back and is
+      // still true, so a failure to read one provider's settings leaves the
+      // table standing — the isolation the listing already gives a credential it
+      // cannot decrypt.
+      setPanelFailure(
+        failed.status === UNAUTHORIZED ? LOCKED_MESSAGE : `${failed.message} ${RETRY_MESSAGE}`,
+      )
     }
   }
 
@@ -381,36 +444,98 @@ export default function Integrations() {
                   const shown = describe(integration)
 
                   return (
-                    <tr key={integration.provider}>
-                      <td data-column="">
-                        <span className="cell-primary">{label(integration.provider)}</span>
-                        {shown.detail !== '' && <span className="cell-sub">{shown.detail}</span>}
-                      </td>
-                      <td data-column="State">
-                        <span className="status" data-state={shown.live ? LIVE : PAUSED}>
-                          {shown.state}
-                        </span>
-                      </td>
-                      <td data-column="Since" className="numeric">
-                        {integration.connectedAt === null ? (
-                          <span className="muted">—</span>
-                        ) : (
-                          connectedOn(integration.connectedAt)
-                        )}
-                      </td>
-                      <td data-column="Action">
-                        {shown.action !== null && (
-                          <button
-                            className="btn"
-                            type="button"
-                            data-loading={pending === integration.provider || undefined}
-                            onClick={() => void connect(integration.provider)}
-                          >
-                            {shown.action}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={integration.provider}>
+                      <tr>
+                        <td data-column="">
+                          <span className="cell-primary">{label(integration.provider)}</span>
+                          {shown.detail !== '' && <span className="cell-sub">{shown.detail}</span>}
+                        </td>
+                        <td data-column="State">
+                          <span className="status" data-state={shown.live ? LIVE : PAUSED}>
+                            {shown.state}
+                          </span>
+                        </td>
+                        <td data-column="Since" className="numeric">
+                          {integration.connectedAt === null ? (
+                            <span className="muted">—</span>
+                          ) : (
+                            connectedOn(integration.connectedAt)
+                          )}
+                        </td>
+                        <td data-column="Action">
+                          <div className="row gap-2 wrap">
+                            {shown.action !== null && (
+                              <button
+                                className="btn"
+                                type="button"
+                                data-loading={pending === integration.provider || undefined}
+                                onClick={() => void connect(integration.provider)}
+                              >
+                                {shown.action}
+                              </button>
+                            )}
+                            {/* Only where a credential is stored: the switch is a
+                                column on that row, and a provider nobody connected
+                                has nothing to configure. Offered beside Connect on
+                                a broken grant, because the switch is worth reaching
+                                while the grant is being put right. */}
+                            {integration.connected && (
+                              <button
+                                className="btn"
+                                type="button"
+                                aria-expanded={open === integration.provider}
+                                onClick={() => void disclose(integration.provider)}
+                              >
+                                {open === integration.provider ? 'Hide settings' : 'Settings'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {open === integration.provider && (
+                        <tr>
+                          {/* Across every column, and `data-column=""` so the
+                              narrow-viewport card mode leaves it alone: the panel
+                              is about the row above it, and boxing it into one
+                              cell would put a form in a column sized for a date. */}
+                          <td colSpan={COLUMNS} data-column="">
+                            {panelFailure !== '' ? (
+                              <p className="field-error" role="alert">
+                                <AlertIcon />
+                                {panelFailure}
+                              </p>
+                            ) : settings === null ? (
+                              <p className="prose t-sm">Reading its settings…</p>
+                            ) : (
+                              <Suspense fallback={null}>
+                                <IntegrationSettingsPanel
+                                  // Keyed on the provider: the panel seeds its
+                                  // draft from a lazy initialiser that runs once,
+                                  // so an instance reused across two providers
+                                  // would draw the second one's fields over the
+                                  // first one's unsaved values.
+                                  key={settings.provider}
+                                  settings={settings}
+                                  onSaved={() => {
+                                    // Both, and in this order. The switch is the
+                                    // row's own state, so refreshing the panel
+                                    // alone leaves the table saying Connected
+                                    // beside a panel that has just been switched
+                                    // off. Closing the panel is the second half:
+                                    // the save landed, the row below now says so,
+                                    // and a panel left open on stale options is
+                                    // worse than a closed one.
+                                    void disclose(integration.provider)
+                                    setAttempt((previous) => previous + 1)
+                                  }}
+                                />
+                              </Suspense>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>

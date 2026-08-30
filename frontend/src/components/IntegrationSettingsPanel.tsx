@@ -114,6 +114,7 @@ function renderToggle(field: SettingField, checked: boolean, set: (value: Settin
       <div className="field-row-control">
         <input
           id={field.key}
+          className="check-tap"
           type="checkbox"
           checked={checked}
           onChange={(event) => set(event.target.checked)}
