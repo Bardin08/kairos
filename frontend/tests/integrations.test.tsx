@@ -24,6 +24,7 @@ const google: Integration = {
   accountLabel: null,
   connectedAt: null,
   reconnectRequired: false,
+  enabled: true,
   fault: null,
 }
 
@@ -40,6 +41,7 @@ const invented: Integration = {
   accountLabel: 'ops@example.com',
   connectedAt: '2026-08-14T22:29:14Z',
   reconnectRequired: false,
+  enabled: true,
   fault: null,
 }
 

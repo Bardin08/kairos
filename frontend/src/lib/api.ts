@@ -10,7 +10,7 @@
 // Integrations is the exception because of its route: /integrations is where the
 // OAuth callback redirects, App.tsx imports it eagerly so the redirect never
 // lands on a chunk boundary, and a call reached from an eager page is eager
-// wherever it is written. Moving these two moves the bytes, not removes them.
+// wherever it is written. Moving them moves the bytes, not removes them.
 
 const BASE = '/api/v1'
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -398,6 +398,13 @@ export type Integration = {
   connectedAt: string | null
   reconnectRequired: boolean
   /**
+   * The operator's switch. False means the connection is kept and nothing is
+   * being read or written with it — which is not `connected: false`, where there
+   * is no credential at all. True for a provider nobody has connected, because a
+   * connection that does not exist is not one somebody paused.
+   */
+  enabled: boolean
+  /**
    * A code for a stored credential this deployment cannot use, or null; today
    * only `CREDENTIAL_UNREADABLE`. Separate from `reconnectRequired` because the
    * causes differ — the provider refusing a grant, against this deployment being
@@ -428,4 +435,88 @@ export async function connectIntegration(
   )
 
   return consentUrl
+}
+
+/**
+ * One choice a field offers. `detail` is the provider's own second line —
+ * "Primary", "Read-only subscription", "No longer reachable" — and the panel
+ * renders it without knowing which provider wrote it.
+ */
+export type SettingOption = {
+  value: string
+  label: string
+  detail: string | null
+}
+
+/** A boolean for a `toggle`, a string or null for a `select`, a string array for a `multiSelect`. */
+export type SettingValue = boolean | string | string[] | null
+
+/**
+ * One setting, described well enough to draw without knowing the provider.
+ *
+ * `options` is null in two different circumstances and the difference matters: a
+ * `toggle` has no list to offer, and either of the other kinds carries null when
+ * the provider could not be reached. An empty array is a provider that really has
+ * nothing to offer. Never treat null as empty — the saved `value` is still what
+ * the backend is using.
+ */
+export type SettingField = {
+  key: string
+  kind: 'toggle' | 'select' | 'multiSelect'
+  label: string
+  help: string | null
+  options: SettingOption[] | null
+  /** The cap on a `multiSelect`, or null. Enforced here as well as on the server. */
+  maxValues: number | null
+  required: boolean
+  value: SettingValue
+}
+
+export type IntegrationSettings = {
+  provider: string
+  fields: SettingField[]
+}
+
+/** `enabled` is always the first field, and every provider has it. */
+export const ENABLED_FIELD = 'enabled'
+
+/**
+ * A key that belongs to nobody: the switch sent something other than a boolean, or
+ * a value sent to a provider that describes no settings of its own.
+ */
+export const SETTING_UNKNOWN = 'setting_unknown'
+
+/** A value the provider itself refuses — the wrong shape, or an option it does not offer. */
+export const SETTING_INVALID = 'setting_invalid'
+
+/** More values than the field's `maxValues` allows. */
+export const SETTING_TOO_MANY = 'setting_too_many'
+
+/** One provider's settings. 404 for a provider nobody has connected. */
+export function readIntegrationSettings(
+  provider: string,
+  signal?: AbortSignal,
+): Promise<IntegrationSettings> {
+  return request<IntegrationSettings>(
+    `/admin/integrations/${encodeURIComponent(provider)}/settings`,
+    { signal },
+  )
+}
+
+/**
+ * The whole map, not a patch: the panel has one Save and sends what it is
+ * showing. Answers 204, so nothing comes back — re-read after saving, because
+ * options move when values do.
+ */
+export function saveIntegrationSettings(
+  provider: string,
+  values: Record<string, SettingValue>,
+  signal?: AbortSignal,
+): Promise<void> {
+  return requestNothing(`/admin/integrations/${encodeURIComponent(provider)}/settings`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ values }),
+    signal,
+  })
 }
