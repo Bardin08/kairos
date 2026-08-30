@@ -510,12 +510,6 @@ export default function Integrations() {
                             ) : (
                               <Suspense fallback={null}>
                                 <IntegrationSettingsPanel
-                                  // Keyed on the provider: the panel seeds its
-                                  // draft from a lazy initialiser that runs once,
-                                  // so an instance reused across two providers
-                                  // would draw the second one's fields over the
-                                  // first one's unsaved values.
-                                  key={settings.provider}
                                   settings={settings}
                                   onSaved={() => {
                                     // Both, and in this order. The switch is the

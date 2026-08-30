@@ -1,8 +1,17 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import IntegrationSettingsPanel from '../src/components/IntegrationSettingsPanel'
-import type { IntegrationSettings } from '../src/lib/api'
+import { ApiError, saveIntegrationSettings, SETTING_TOO_MANY } from '../src/lib/api'
+import type { IntegrationSettings, SettingField } from '../src/lib/api'
+
+// ApiError stays real: the panel reads a refusal through `asApiError`, which
+// branches on `instanceof`, and a plain object would take the "could not reach
+// the server" path while the code branch under test never ran.
+vi.mock('../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/api')>()),
+  saveIntegrationSettings: vi.fn(),
+}))
 
 const PROVIDER = 'anything'
 const SWITCH_LABEL = 'Use this integration'
@@ -11,15 +20,24 @@ const SELECT_LABEL = 'Write bookings to'
 const FIRST_OPTION = 'Operator'
 const SECOND_OPTION = 'Side projects'
 const FIRST_VALUE = 'first'
+const SECOND_VALUE = 'second'
+const SWITCH_KEY = 'enabled'
+const MULTI_KEY = 'someSet'
+const SELECT_KEY = 'someChoice'
 const UNREACHABLE = /could not/i
+const AS_MANY_AS_ALLOWED = /as many as this allows/i
+const HAS_TO_BE_CHOSEN = /has to be chosen/i
+const CANNOT_DRAW = /cannot draw this setting/i
 const MAX_VALUES = 1
+const BAD_REQUEST = 400
+const SERVER_SENTENCE = 'Too many.'
 
 /** No provider name anywhere in it — which is the property under test. */
 const settings: IntegrationSettings = {
   provider: PROVIDER,
   fields: [
     {
-      key: 'enabled',
+      key: SWITCH_KEY,
       kind: 'toggle',
       label: SWITCH_LABEL,
       help: null,
@@ -29,20 +47,20 @@ const settings: IntegrationSettings = {
       value: true,
     },
     {
-      key: 'someSet',
+      key: MULTI_KEY,
       kind: 'multiSelect',
       label: MULTI_LABEL,
       help: null,
       options: [
         { value: FIRST_VALUE, label: FIRST_OPTION, detail: 'Primary' },
-        { value: 'second', label: SECOND_OPTION, detail: null },
+        { value: SECOND_VALUE, label: SECOND_OPTION, detail: null },
       ],
       maxValues: null,
       required: false,
       value: [FIRST_VALUE],
     },
     {
-      key: 'someChoice',
+      key: SELECT_KEY,
       kind: 'select',
       label: SELECT_LABEL,
       help: null,
@@ -54,6 +72,19 @@ const settings: IntegrationSettings = {
   ],
 }
 
+/** The same description with one field replaced, so a fixture states only its difference. */
+function withField(key: string, change: Partial<SettingField>): IntegrationSettings {
+  return {
+    ...settings,
+    fields: settings.fields.map((field) => (field.key === key ? { ...field, ...change } : field)),
+  }
+}
+
+beforeEach(() => {
+  vi.mocked(saveIntegrationSettings).mockReset()
+  vi.mocked(saveIntegrationSettings).mockResolvedValue(undefined)
+})
+
 afterEach(cleanup)
 
 /**
@@ -62,6 +93,10 @@ afterEach(cleanup)
  */
 function control(label: string | RegExp) {
   return screen.getByLabelText(label) as HTMLInputElement
+}
+
+function saveButton() {
+  return screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
 }
 
 describe('IntegrationSettingsPanel', () => {
@@ -74,48 +109,153 @@ describe('IntegrationSettingsPanel', () => {
     expect((screen.getByLabelText(SELECT_LABEL) as HTMLSelectElement).value).toBe(FIRST_VALUE)
   })
 
-  // Breaks if the box loses the class its tap floor is keyed on. A UA checkbox
-  // draws at ~13px and the label naming this field is in the grid's other track,
-  // so the 44px DESIGN.md requires is grown off the box by `.check-tap` — on
-  // every kind: toggle, not on the key `enabled`, because a provider's own
-  // toggles need the target as much as the universal switch does. The rule
-  // itself is pinned in stylesheet.test.ts, jsdom performing no layout.
-  it('keys every toggle to the tap-floor class, whatever the provider called it', () => {
+  // The label naming this field is in the grid's other track, so the box's own
+  // 44px comes from an empty label wrapping it. Breaks if the box loses that
+  // wrapper — on every kind: toggle, not on the key `enabled`, because a
+  // provider's own toggles need the target as much as the universal switch
+  // does. The rule sizing it is pinned in stylesheet.test.ts, jsdom performing
+  // no layout.
+  it('wraps every toggle in the label that carries its tap floor, whatever the provider called it', () => {
     render(<IntegrationSettingsPanel settings={settings} onSaved={() => {}} />)
 
-    expect(control(SWITCH_LABEL).classList.contains('check-tap')).toBe(true)
+    const wrapper = control(SWITCH_LABEL).closest('label')
+
+    expect(wrapper?.classList.contains('check-tap')).toBe(true)
+    // Empty, so the field's own label is the whole accessible name — which is
+    // what `control` above just resolved it by.
+    expect(wrapper?.textContent).toBe('')
+  })
+
+  it('gives the option list a name a screen reader can read', () => {
+    render(<IntegrationSettingsPanel settings={settings} onSaved={() => {}} />)
+
+    expect(screen.getByRole('group', { name: MULTI_LABEL })).not.toBeNull()
   })
 
   it('says a list could not be read rather than showing it as empty', () => {
-    const unreachable: IntegrationSettings = {
-      ...settings,
-      fields: settings.fields.map((field) =>
-        field.kind === 'multiSelect' ? { ...field, options: null } : field,
-      ),
-    }
-
-    render(<IntegrationSettingsPanel settings={unreachable} onSaved={() => {}} />)
+    render(
+      <IntegrationSettingsPanel
+        settings={withField(MULTI_KEY, { options: null })}
+        onSaved={() => {}}
+      />,
+    )
 
     expect(screen.getByText(UNREACHABLE)).not.toBeNull()
     // The saved value is still what the backend is using, so it is still shown.
     expect(control(new RegExp(FIRST_VALUE)).checked).toBe(true)
-    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(saveButton().disabled).toBe(true)
     // The switch is exactly what an operator reaches for when a provider is
     // misbehaving, so it stays live while the rest of the panel cannot save.
     expect(control(SWITCH_LABEL).disabled).toBe(false)
   })
 
   it('disables the unchosen once the cap is reached', () => {
-    const capped: IntegrationSettings = {
-      ...settings,
-      fields: settings.fields.map((field) =>
-        field.kind === 'multiSelect' ? { ...field, maxValues: MAX_VALUES } : field,
-      ),
-    }
-
-    render(<IntegrationSettingsPanel settings={capped} onSaved={() => {}} />)
+    render(
+      <IntegrationSettingsPanel
+        settings={withField(MULTI_KEY, { maxValues: MAX_VALUES })}
+        onSaved={() => {}}
+      />,
+    )
 
     expect(control(new RegExp(SECOND_OPTION)).disabled).toBe(true)
     expect(control(new RegExp(FIRST_OPTION)).disabled).toBe(false)
+  })
+
+  // The cap is reached by ticking rather than by arriving at it, which is the
+  // path a render-time assertion cannot see: `toggle` appending to the wrong
+  // array leaves every first-render assertion in this file passing.
+  it('closes the cap as the operator reaches it, and says which constraint closed it', () => {
+    render(
+      <IntegrationSettingsPanel
+        settings={withField(MULTI_KEY, { maxValues: MAX_VALUES, value: [] })}
+        onSaved={() => {}}
+      />,
+    )
+
+    expect(control(new RegExp(SECOND_OPTION)).disabled).toBe(false)
+    expect(screen.queryByText(AS_MANY_AS_ALLOWED)).toBeNull()
+
+    fireEvent.click(control(new RegExp(FIRST_OPTION)))
+
+    expect(control(new RegExp(FIRST_OPTION)).checked).toBe(true)
+    expect(control(new RegExp(SECOND_OPTION)).disabled).toBe(true)
+    expect(screen.getByText(AS_MANY_AS_ALLOWED)).not.toBeNull()
+  })
+
+  it('sends the whole map, with a cleared optional select as null rather than an empty string', async () => {
+    render(
+      <IntegrationSettingsPanel
+        settings={withField(SELECT_KEY, { required: false })}
+        onSaved={() => {}}
+      />,
+    )
+
+    fireEvent.click(control(SWITCH_LABEL))
+    fireEvent.click(control(new RegExp(SECOND_OPTION)))
+    fireEvent.change(screen.getByLabelText(SELECT_LABEL), { target: { value: '' } })
+    fireEvent.click(saveButton())
+
+    await waitFor(() =>
+      expect(vi.mocked(saveIntegrationSettings)).toHaveBeenCalledWith(PROVIDER, {
+        [SWITCH_KEY]: false,
+        [MULTI_KEY]: [FIRST_VALUE, SECOND_VALUE],
+        [SELECT_KEY]: null,
+      }),
+    )
+  })
+
+  it('says the cap was the reason when the server is the one that refuses', async () => {
+    vi.mocked(saveIntegrationSettings).mockRejectedValue(
+      new ApiError(BAD_REQUEST, SETTING_TOO_MANY, SERVER_SENTENCE),
+    )
+
+    render(<IntegrationSettingsPanel settings={settings} onSaved={() => {}} />)
+
+    fireEvent.click(saveButton())
+
+    expect(await screen.findByText(AS_MANY_AS_ALLOWED)).not.toBeNull()
+    // Gone the moment the form no longer describes what was refused.
+    fireEvent.click(control(new RegExp(SECOND_OPTION)))
+    expect(screen.queryByText(AS_MANY_AS_ALLOWED)).toBeNull()
+  })
+
+  it('names the empty required field instead of letting the server refuse the save', () => {
+    render(
+      <IntegrationSettingsPanel settings={withField(SELECT_KEY, { value: null })} onSaved={() => {}} />,
+    )
+
+    expect(screen.getByText(HAS_TO_BE_CHOSEN).textContent).toContain(SELECT_LABEL)
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  // A self-hosted server can be newer than the frontend shipped with it, and a
+  // field that vanishes is a value the operator cannot see themselves saving.
+  it('names a kind it cannot draw rather than dropping the field', () => {
+    render(
+      <IntegrationSettingsPanel
+        settings={withField(SELECT_KEY, { kind: 'colour' as SettingField['kind'] })}
+        onSaved={() => {}}
+      />,
+    )
+
+    expect(screen.getByText(CANNOT_DRAW)).not.toBeNull()
+    expect(screen.getByText(SELECT_LABEL)).not.toBeNull()
+  })
+
+  // The re-read after a save is the case a `key` on the caller does not cover:
+  // same provider, new values, and a draft still holding what was typed before.
+  it('re-seeds its draft when the settings it was seeded from are replaced', () => {
+    const normalised = withField(MULTI_KEY, { value: [FIRST_VALUE, SECOND_VALUE] })
+    const { rerender } = render(
+      <IntegrationSettingsPanel settings={settings} onSaved={() => {}} />,
+    )
+
+    fireEvent.click(control(SWITCH_LABEL))
+    expect(control(SWITCH_LABEL).checked).toBe(false)
+
+    rerender(<IntegrationSettingsPanel settings={normalised} onSaved={() => {}} />)
+
+    expect(control(SWITCH_LABEL).checked).toBe(true)
+    expect(control(new RegExp(SECOND_OPTION)).checked).toBe(true)
   })
 })

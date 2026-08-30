@@ -217,16 +217,24 @@ test('every option in a checkbox list is a tap-floor target through its label, w
 })
 
 // The settings panel's toggle has no label of its own to grow: in a .field-row
-// the label and the control sit in opposite grid tracks. So the target is grown
-// off the box, and this is the declaration that does it — measured in Chromium
-// and WebKit, a click 20px from the box's centre toggles it with this rule and
-// misses without. Matched through the inset, because a ::after that keeps its
-// content and loses its size is a rule that still exists and paints nothing.
-test('the settings toggle grows its own tap-floor hit area, since it has no label to grow', () => {
+// the label and the control sit in opposite grid tracks. So an empty label wraps
+// the box and is the target, and these are the two declarations that size it.
+// Measured in Chromium and WebKit — Playwright's Firefox does not launch on the
+// machine this was measured on: a click 20px right of the box's centre and one
+// 20px above it both toggle with these declarations, and both miss without them,
+// the wrapper falling to 25x24 and 22x24.
+//
+// This replaces a transparent `.check-tap::after` on the input, which reached the
+// same 44px on the same two engines. Two engines is all either approach was ever
+// measured on, and that is the argument for the label: whether a form control
+// generates a pseudo-element is the engine's business, and one that declines
+// leaves an 18px target and reports nothing, while a label has a box everywhere.
+// jsdom performs no layout, so nothing rendered can see either declaration go.
+test('the settings toggle is a tap-floor target through the label wrapping its box', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
-  expect(css).toContain('.check-tap { position: relative; width: 18px; height: 18px; }')
   expect(css).toContain(
-    '.check-tap::after {\n    content: "";\n    position: absolute;\n    inset: calc((18px - var(--tap)) / 2);\n  }',
+    '.check-tap {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    width: var(--tap);\n    height: var(--tap);\n    margin-inline: calc((18px - var(--tap)) / 2);',
   )
+  expect(css).toContain('.check-tap input { width: 18px; height: 18px; flex: none; }')
 })
