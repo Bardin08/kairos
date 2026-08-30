@@ -2,9 +2,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations.Google;
 using Kairos.Api.Persistence;
 using Kairos.Api.Security;
 using Kairos.Api.Shared;
+using Kairos.Api.Tests.Integrations;
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -14,12 +16,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
+// Aliased because Google's factory interface collides by name with the one in System.Net.Http.
+using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
+
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The application as it ships, over a throwaway SQLite file. Nothing is substituted: these tests
-/// are about the wiring — routing, binding, DataAnnotations, the exception handler, the
-/// composition root — so replacing any of it would test a program that does not exist.
+/// The application as it ships, over a throwaway SQLite file. Nothing is substituted unless a test
+/// asks for it: these tests are about the wiring — routing, binding, DataAnnotations, the exception
+/// handler, the composition root — so replacing any of it would test a program that does not exist.
+/// One substitution is offered, and <paramref name="google"/> documents why it has to be.
 /// </summary>
 /// <remarks>
 /// Typed on <see cref="KairosDbContext"/> rather than Program: the factory needs any type from
@@ -31,7 +37,15 @@ namespace Kairos.Api.Tests.Features;
 /// That is also why a test expecting a path NOT to be served asserts more than the status code:
 /// with a page present <c>MapFallbackToFile</c> answers 200 for any unmapped extensionless path.
 /// </param>
-public sealed class KairosApp(string? webRoot = null, string? publicBaseUrl = null)
+/// <param name="google">
+/// A stand-in for Google's HTTP, or null to leave the real one in place. The only substitution this
+/// harness makes: an adapter test has to see the request that went out, and a request that went out
+/// over the network went to somebody else's server.
+/// </param>
+public sealed class KairosApp(
+    string? webRoot = null,
+    string? publicBaseUrl = null,
+    FakeGoogleHandler? google = null)
     : WebApplicationFactory<KairosDbContext>
 {
     /// <summary>
@@ -42,6 +56,16 @@ public sealed class KairosApp(string? webRoot = null, string? publicBaseUrl = nu
 
     /// <summary>Far above anything one test does, and finite so a runaway loop still stops.</summary>
     private const int TestPermits = 100_000;
+
+    /// <summary>
+    /// Client credentials, so <see cref="GoogleClientFactory"/> reports itself configured. None of
+    /// the three is ever sent anywhere, because the fake handler answers before the socket.
+    /// </summary>
+    private const string GoogleClientId = "not-a-real-client-id.apps.googleusercontent.com";
+
+    private const string GoogleClientSecret = "not-a-real-client-secret";
+
+    private const string GoogleRedirectUri = "https://kairos.test/integrations/google/callback";
 
     private readonly string _path =
         Path.Combine(Path.GetTempPath(), $"kairos-api-{Guid.CreateVersion7():N}.db");
@@ -152,6 +176,22 @@ public sealed class KairosApp(string? webRoot = null, string? publicBaseUrl = nu
 
             services.AddSingleton<FollowUpWorker>();
         });
+
+        if (google is null)
+        {
+            return;
+        }
+
+        builder.UseSetting(
+            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientId)}", GoogleClientId);
+        builder.UseSetting(
+            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientSecret)}", GoogleClientSecret);
+        builder.UseSetting(
+            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.RedirectUri)}", GoogleRedirectUri);
+
+        builder.ConfigureServices(services =>
+            services.Replace(ServiceDescriptor.Singleton<GoogleHttpFactory>(
+                new FakeGoogleHttpFactory(google))));
     }
 
     protected override void Dispose(bool disposing)
