@@ -524,6 +524,11 @@ public class EndpointTests
     /// moved left its event where it was. The harness connects no Google, so reaching the calendar
     /// shows as the entry going <c>failed</c>, where never calling leaves it <c>synced</c>.
     /// </summary>
+    /// <remarks>
+    /// The move itself is a <see cref="FollowUpWorker"/> job now, so the response the reschedule
+    /// answers with still carries the row's pre-move state; this drains the worker and reads the
+    /// booking again, the way <see cref="OperatorCancelTests"/> already does for the cancel side.
+    /// </remarks>
     [Fact]
     public async Task RescheduleBooking_MeetingAlreadyInACalendar_ReachesTheCalendarToMoveIt()
     {
@@ -540,7 +545,12 @@ public class EndpointTests
             TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await ReadJsonAsync(response)).GetProperty("calendarSync").GetString().ShouldBe("failed");
+        await app.Services.GetRequiredService<FollowUpWorker>()
+            .DrainAsync(TestContext.Current.CancellationToken);
+
+        var booking = await ReadJsonAsync(await app.Client.GetAsync(
+            $"{ApiVersions.V1}/bookings/{token}", TestContext.Current.CancellationToken));
+        booking.GetProperty("calendarSync").GetString().ShouldBe("failed");
 
         // Still there, because it is the only handle for fixing the stale event by hand.
         app.Read(context => context.CalendarEntries.AsNoTracking().Single().ExternalEventId)
@@ -551,6 +561,10 @@ public class EndpointTests
     /// Gap 2, same argument. A cancellation that never reached the calendar left the meeting in
     /// the organizer's day for an appointment nobody was coming to.
     /// </summary>
+    /// <remarks>
+    /// The withdrawal is a <see cref="FollowUpWorker"/> job now, so this drains it and reads the
+    /// booking again rather than trusting the cancel response, which answers before the worker runs.
+    /// </remarks>
     [Fact]
     public async Task CancelBooking_MeetingAlreadyInACalendar_ReachesTheCalendarToWithdrawIt()
     {
@@ -564,7 +578,12 @@ public class EndpointTests
             $"{ApiVersions.V1}/bookings/{token}/cancel", null, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await ReadJsonAsync(response)).GetProperty("calendarSync").GetString().ShouldBe("failed");
+        await app.Services.GetRequiredService<FollowUpWorker>()
+            .DrainAsync(TestContext.Current.CancellationToken);
+
+        var booking = await ReadJsonAsync(await app.Client.GetAsync(
+            $"{ApiVersions.V1}/bookings/{token}", TestContext.Current.CancellationToken));
+        booking.GetProperty("calendarSync").GetString().ShouldBe("failed");
     }
 
     /// <summary>
@@ -743,6 +762,57 @@ public class EndpointTests
         (await CreateAsync(app, slot)).StatusCode.ShouldBe(HttpStatusCode.Conflict);
 
         app.Read(context => context.FollowUps.Count()).ShouldBe(OneFollowUp);
+    }
+
+    private const int TwoFollowUps = 2;
+
+    /// <summary>
+    /// The hour the invitee was told to expect survives on the row and nowhere else: the booking
+    /// is overwritten in place, so a move that queued no previous start would owe a notice it
+    /// cannot write.
+    /// </summary>
+    [Fact]
+    public async Task RescheduleBooking_Succeeds_QueuesTheMoveWithTheHourItMovedFrom()
+    {
+        using var app = NewApp();
+        var day = Day();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, day + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var response = await app.Client.PostAsJsonAsync(
+            $"{ApiVersions.V1}/bookings/{token}/reschedule",
+            new { start = day + ThirdSlotTime },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var followUp = app.Read(context => context.FollowUps.AsNoTracking()
+            .Single(row => row.Type == FollowUpType.Rescheduled));
+        followUp.Secret.ShouldNotBeNull();
+        followUp.PreviousStartUtc.ShouldBe(
+            InstantPattern.ExtendedIso.Parse(day + FirstSlotTime).Value.ToUnixTimeSeconds());
+    }
+
+    /// <summary>
+    /// The invitee's own cancel arrives holding the manage token, so its notice can still offer
+    /// the link — and the row is queued in the save that cancels, never after it.
+    /// </summary>
+    [Fact]
+    public async Task CancelBooking_Succeeds_QueuesTheCancellationBesideTheCreation()
+    {
+        using var app = NewApp();
+
+        var created = await ReadJsonAsync(await CreateAsync(app, Day() + FirstSlotTime));
+        var token = created.GetProperty("manageToken").GetString();
+
+        var response = await app.Client.PostAsync(
+            $"{ApiVersions.V1}/bookings/{token}/cancel", null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        app.Read(context => context.FollowUps.Count()).ShouldBe(TwoFollowUps);
+        app.Read(context => context.FollowUps.Count(row => row.Type == FollowUpType.Cancelled))
+            .ShouldBe(OneFollowUp);
     }
 
     /// <summary>

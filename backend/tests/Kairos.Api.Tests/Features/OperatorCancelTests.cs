@@ -105,9 +105,9 @@ public class OperatorCancelTests
     /// <remarks>
     /// The sequence alone is weakly held — the unique index would keep it still. The second press
     /// must also not run the tail: withdraw an event a calendar already released, mail a second
-    /// CANCEL. The withdrawal is counted and the mail is not, because
-    /// <see cref="Kairos.Api.Integrations.Email.EmailSender"/> has no seam to mock; it is pinned
-    /// by proxy, the withdrawal and the send being adjacent statements with no branch between.
+    /// CANCEL. Both cancels are answered before either follow-up is drained; the withdrawal is
+    /// counted once only because the idempotent early return means the second cancel queued
+    /// nothing to drain, not because anything here waited for the first pass to finish.
     /// </remarks>
     [Fact]
     public async Task Cancel_AMeetingAlreadyCancelled_AnswersTheSameAndRunsTheTailOnlyOnce()
@@ -128,6 +128,7 @@ public class OperatorCancelTests
         var sequence = app.Read(context => context.Bookings.Single(row => row.Id == booking).Sequence);
 
         var again = await CancelAsync(client, booking, Reason);
+        await DrainFollowUpsAsync(factory);
 
         again.StatusCode.ShouldBe(HttpStatusCode.OK);
         app.Read(context => context.Bookings.Single(row => row.Id == booking).Sequence).ShouldBe(sequence);

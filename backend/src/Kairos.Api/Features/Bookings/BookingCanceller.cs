@@ -1,5 +1,3 @@
-using Kairos.Api.Integrations;
-using Kairos.Api.Integrations.Email;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
@@ -25,9 +23,8 @@ namespace Kairos.Api.Features.Bookings;
 public sealed class BookingCanceller(
     KairosDbContext context,
     OutboxWriter outbox,
-    CalendarSyncService calendars,
-    MeetingIdentityResolver identities,
-    BookingMailer mailer,
+    FollowUpWriter followUps,
+    FollowUpSignal signal,
     ProposalWriter proposals,
     IClock clock)
 {
@@ -84,6 +81,11 @@ public sealed class BookingCanceller(
                 Instant.FromUnixTimeSeconds(booking.StartUtc),
                 Instant.FromUnixTimeSeconds(booking.EndUtc)).ToJson());
 
+        // Beside the announcement and for its reason: the calendar withdrawal and the mail are the
+        // worker's now, and they must not run for a cancellation that turns out not to have
+        // committed.
+        followUps.Enqueue(booking.Id, FollowUpType.Cancelled, manageToken);
+
         try
         {
             await context.SaveChangesAsync(cancellationToken);
@@ -93,27 +95,13 @@ public sealed class BookingCanceller(
             // Two cancels in flight at once. The other committed first, so the booking is off and
             // its announcement queued; this call has nothing to do but agree, and without the catch
             // the outbox row would turn an idempotent 200 into a 500. Returning rather than falling
-            // through is load-bearing: the outbox row this save could not write is still tracked,
-            // so the sync service's SaveChanges would raise the same violation and lose its own
-            // state change. The other call withdraws the event and sends the mail.
+            // through is load-bearing: this save never committed, so the outbox and follow-up rows
+            // it staged are only tracked, not written, and a nudge here would wake the worker for a
+            // cancellation that did not happen. The other call already queued its own row and will
+            // nudge for it.
             return;
         }
 
-        // Ground rule 14, in the order it demands. The cancellation has committed and nothing
-        // below can reach back and undo it: CancelAsync writes a Failed row rather than throwing,
-        // and the mailer swallows a relay that is down. A provider that is unreachable must never
-        // turn a cancel into a 500 for a meeting that is already off.
-        await calendars.CancelAsync(booking.Id, cancellationToken);
-
-        // Readable after the withdrawal because CancelAsync keeps the row and everything on it,
-        // moving the state to Cancelled and deleting nothing. So the CANCEL names the meeting the
-        // invitee is holding rather than one their calendar has never heard of.
-        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
-
-        // After the withdrawal, so the message describes a calendar that has already let the slot
-        // go. Sent inline rather than behind the outbox because a queued row would have to carry
-        // the plaintext token, which stays in memory for this request and is never written down.
-        await mailer.SendCancellationAsync(booking, identity, manageToken, cancellationToken);
+        signal.Nudge();
     }
-
 }
