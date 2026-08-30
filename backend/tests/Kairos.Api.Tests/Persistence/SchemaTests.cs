@@ -50,7 +50,10 @@ public class SchemaTests
     /// <summary>The shape a settings row actually holds — a JSON object keyed by field key.</summary>
     private const string SettingsValues = """{"busyCalendars":["operator@example.com"]}""";
 
-    private const string OtherSettingsValues = """{"busyCalendars":[]}""";
+    /// <summary>
+    /// Stands in for the AES-GCM ciphertext the column holds. Nothing here decrypts it.
+    /// </summary>
+    private const string CredentialPayload = "ciphertext";
 
     /// <summary>Unix seconds on the credential's timestamps. Nothing reads them; the columns are NOT NULL.</summary>
     private const long CredentialWrittenAt = 1_800_000_000;
@@ -396,7 +399,7 @@ public class SchemaTests
         context.IntegrationSettings.Add(new IntegrationSetting
         {
             Provider = IntegrationProvider.Google,
-            Values = OtherSettingsValues,
+            Values = SettingsValues,
         });
 
         await Should.ThrowAsync<DbUpdateException>(
@@ -422,7 +425,7 @@ public class SchemaTests
         context.IntegrationCredentials.Add(new IntegrationCredential
         {
             Provider = IntegrationProvider.Google,
-            ProtectedPayload = SettingsValues,
+            ProtectedPayload = CredentialPayload,
         });
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -454,7 +457,7 @@ public class SchemaTests
         insert.CommandText = InsertCredentialWithoutTheSwitch;
         insert.Parameters.AddWithValue("$id", Guid.CreateVersion7().ToString());
         insert.Parameters.AddWithValue("$provider", (int)IntegrationProvider.Google);
-        insert.Parameters.AddWithValue("$payload", SettingsValues);
+        insert.Parameters.AddWithValue("$payload", CredentialPayload);
         insert.Parameters.AddWithValue("$health", (int)CredentialHealth.Healthy);
         insert.Parameters.AddWithValue("$writtenAt", CredentialWrittenAt);
         await insert.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
