@@ -9,7 +9,7 @@ namespace Kairos.Api.Features.Integrations;
 
 /// <summary>One field as the settings panel renders it. No vendor name is in any of it.</summary>
 /// <param name="Kind">
-/// The wire spelling <see cref="IntegrationSettingKinds"/> mints, never the enum: the panel
+/// The wire spelling <see cref="IntegrationSettingsReader"/> mints, never the enum: the panel
 /// branches on this string, and the enum's own name is not a contract with anybody.
 /// </param>
 public sealed record SettingFieldResponse(
