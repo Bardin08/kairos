@@ -32,6 +32,8 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<IntegrationCredential> IntegrationCredentials => Set<IntegrationCredential>();
 
+    public DbSet<IntegrationSetting> IntegrationSettings => Set<IntegrationSetting>();
+
     public DbSet<CalendarEntry> CalendarEntries => Set<CalendarEntry>();
 
     public DbSet<ConferenceLink> ConferenceLinks => Set<ConferenceLink>();

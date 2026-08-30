@@ -46,6 +46,11 @@ public class SchemaTests
     private const int ProposalOffsetSeconds = ProposalOffsetHours * SecondsPerHour;
     private const int ProposalHoldSeconds = SchedulingDefaults.ProposalHoldHours * SecondsPerHour;
 
+    /// <summary>The shape a settings row actually holds — a JSON object keyed by field key.</summary>
+    private const string SettingsValues = """{"busyCalendars":["operator@example.com"]}""";
+
+    private const string OtherSettingsValues = """{"busyCalendars":[]}""";
+
     [Fact]
     public void Link_WithSeveralDurations_RoundTripsInSortOrder()
     {
@@ -353,6 +358,59 @@ public class SchemaTests
         context.SaveChanges();
 
         context.BookingProposals.Count().ShouldBe(2);
+    }
+
+    /// <summary>
+    /// One row per provider, said as a constraint rather than as a rule someone has to remember —
+    /// the same index <see cref="IntegrationCredential"/> already carries, for the same reason.
+    /// </summary>
+    [Fact]
+    public async Task IntegrationSettings_WithTwoRowsForOneProvider_RefusesTheSecond()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+
+        context.IntegrationSettings.Add(new IntegrationSetting
+        {
+            Provider = IntegrationProvider.Google,
+            Values = SettingsValues,
+        });
+
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        context.IntegrationSettings.Add(new IntegrationSetting
+        {
+            Provider = IntegrationProvider.Google,
+            Values = OtherSettingsValues,
+        });
+
+        await Should.ThrowAsync<DbUpdateException>(
+            () => context.SaveChangesAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// A credential written by a path that never thought about the switch is on. Failure has to be
+    /// chosen, never assumed — the same reasoning
+    /// <see cref="IntegrationCredential.Health"/> is initialised by.
+    /// </summary>
+    [Fact]
+    public async Task IntegrationCredentials_WithNothingSaidAboutTheSwitch_AreEnabled()
+    {
+        using var database = new TestDatabase();
+        await using var context = database.CreateContext();
+
+        context.IntegrationCredentials.Add(new IntegrationCredential
+        {
+            Provider = IntegrationProvider.Google,
+            ProtectedPayload = SettingsValues,
+        });
+
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var stored = await context.IntegrationCredentials.SingleAsync(
+            TestContext.Current.CancellationToken);
+
+        stored.Enabled.ShouldBeTrue();
     }
 
     private static Guid SeedBooking(KairosDbContext context)
