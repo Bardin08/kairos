@@ -234,6 +234,7 @@ public class FollowUpWorkerTests
         services.AddSingleton(calendar);
         services.AddSingleton(conference);
         services.AddScoped<CalendarSyncService>();
+        services.AddScoped<IntegrationCredentialStore>();
         services.AddScoped<MeetingIdentityResolver>();
         services.AddSingleton(new SecretProtector(TestKey));
 

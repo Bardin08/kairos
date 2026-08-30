@@ -148,14 +148,28 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     }
 
     /// <summary>
-    /// An authorised client, or null when there is nothing to authorise with — unconfigured, or
-    /// never connected. Null rather than an exception because both are ordinary states of a
-    /// self-hosted instance. The token is refreshed here rather than lazily inside somebody else's
-    /// HTTP call, so a dead grant is caught at a point that can record it.
+    /// An authorised client, or null when there is nothing to authorise with — unconfigured, never
+    /// connected, or connected and paused. Null rather than an exception because all three are
+    /// ordinary states of a self-hosted instance. The token is refreshed here rather than lazily
+    /// inside somebody else's HTTP call, so a dead grant is caught at a point that can record it.
     /// </summary>
     public async Task<UserCredential?> GetCredentialAsync(CancellationToken cancellationToken)
     {
         if (!IsConfigured)
+        {
+            return null;
+        }
+
+        // Ahead of the cache, and that placement is the whole of it. The credential store's own
+        // gate is only consulted when the cache is empty, so on a process that has already served
+        // one booking page a pause changed nothing until a restart — freebusy queries, calendar
+        // writes and health stamps all carried on against a provider the page called Paused.
+        //
+        // A check rather than clearing the cache from the toggle: invalidation would put a Google
+        // detail in the endpoint and break again for the next provider that caches anything. What
+        // it costs is one indexed read immediately before an HTTP round trip, and the cache was
+        // there to save token refreshes rather than selects.
+        if (await IsPausedAsync(cancellationToken))
         {
             return null;
         }
@@ -233,6 +247,14 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         await using var scope = _scopes.CreateAsyncScope();
         return await scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>()
             .ReadAsync<GoogleCredentialPayload>(Provider, cancellationToken);
+    }
+
+    /// <summary>A scope of its own, for the reason <see cref="ReadPayloadAsync"/> opens one.</summary>
+    private async Task<bool> IsPausedAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopes.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>()
+            .IsPausedAsync(Provider, cancellationToken);
     }
 
     /// <summary>
