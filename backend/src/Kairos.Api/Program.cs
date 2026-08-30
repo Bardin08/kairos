@@ -234,6 +234,10 @@ builder.Services.AddScoped<IConferenceCreator>(
 
 builder.Services.AddScoped<CalendarSyncService>();
 
+// Scoped, beside the sync whose row it reads: the identity a notice quotes is committed inside
+// that call, so this answers from the database rather than from anything a caller carries.
+builder.Services.AddScoped<MeetingIdentityResolver>();
+
 // Scoped, and registered here by its first consumer: it adds to the request's DbContext and
 // never saves, so it has to be the same context the caller is about to commit.
 builder.Services.AddScoped<OutboxWriter>();

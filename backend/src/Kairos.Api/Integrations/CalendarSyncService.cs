@@ -83,7 +83,7 @@ public sealed class CalendarSyncService(
 
     private async Task PlaceAsync(Booking booking, CancellationToken cancellationToken)
     {
-        string externalEventId;
+        PlacedEvent placed;
         try
         {
             // Asked before anything is attempted, because "nobody connected a calendar" is not a
@@ -94,7 +94,7 @@ public sealed class CalendarSyncService(
                 return;
             }
 
-            externalEventId = await calendars.CreateEventAsync(Describe(booking), cancellationToken);
+            placed = await calendars.CreateEventAsync(Describe(booking), cancellationToken);
         }
         catch (Exception exception)
         {
@@ -108,7 +108,8 @@ public sealed class CalendarSyncService(
         {
             BookingId = booking.Id,
             Provider = calendars.Provider,
-            ExternalEventId = externalEventId,
+            ExternalEventId = placed.ExternalEventId,
+            CalendarUid = placed.CalendarUid,
             State = CalendarSyncState.Synced,
             UpdatedAt = Now(),
         });

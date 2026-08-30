@@ -26,6 +26,7 @@ public sealed class BookingCanceller(
     KairosDbContext context,
     OutboxWriter outbox,
     CalendarSyncService calendars,
+    MeetingIdentityResolver identities,
     BookingMailer mailer,
     ProposalWriter proposals,
     IClock clock)
@@ -104,10 +105,15 @@ public sealed class BookingCanceller(
         // turn a cancel into a 500 for a meeting that is already off.
         await calendars.CancelAsync(booking.Id, cancellationToken);
 
+        // Readable after the withdrawal because CancelAsync keeps the row and everything on it,
+        // moving the state to Cancelled and deleting nothing. So the CANCEL names the meeting the
+        // invitee is holding rather than one their calendar has never heard of.
+        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
+
         // After the withdrawal, so the message describes a calendar that has already let the slot
         // go. Sent inline rather than behind the outbox because a queued row would have to carry
         // the plaintext token, which stays in memory for this request and is never written down.
-        await mailer.SendCancellationAsync(booking, manageToken, cancellationToken);
+        await mailer.SendCancellationAsync(booking, identity, manageToken, cancellationToken);
     }
 
 }

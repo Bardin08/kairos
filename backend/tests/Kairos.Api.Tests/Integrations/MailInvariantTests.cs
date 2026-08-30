@@ -262,6 +262,7 @@ public class MailInvariantTests
             BookingNotice.Confirmation or BookingNotice.Reschedule or BookingNotice.Cancellation =>
                 await mailer.ComposeAsync(
                     booking,
+                    new MeetingIdentity(booking.Id.ToString(), Owner: null),
                     ManageToken,
                     JoinUrl,
                     PreviousStart,

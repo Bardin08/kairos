@@ -170,6 +170,9 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<Guid>("BookingId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CalendarUid")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ExternalEventId")
                         .HasColumnType("TEXT");
 

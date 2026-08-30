@@ -10,7 +10,11 @@ namespace Kairos.Api.Tests.Integrations;
 
 public class IcsBuilderTests
 {
-    private static readonly Guid BookingId = Guid.Parse("0199a1b2-c3d4-7e5f-8091-a2b3c4d5e6f7");
+    private const string Uid = "0199a1b2-c3d4-7e5f-8091-a2b3c4d5e6f7";
+    private const string OrganizerAddress = "organizer@example.com";
+
+    /// <summary>Kairos's own sending address, which is not the address that owns the meeting.</summary>
+    private const string SentByAddress = "booking@kairos.example";
     private const int NonRoundDurationMinutes = 25;
 
     /// <summary>RFC 5545 §3.1 — a content line SHOULD NOT exceed this many octets, line break excluded.</summary>
@@ -26,18 +30,20 @@ public class IcsBuilderTests
         IcsMethod method = IcsMethod.Request,
         string summary = "Consulting",
         string description = "",
-        string? location = null) =>
+        string? location = null,
+        string? sentBy = null) =>
         new(
-            BookingId: BookingId,
+            Uid: Uid,
             Start: Instant.FromUtc(2026, 9, 7, 9, 0),
             End: Instant.FromUtc(2026, 9, 7, 9, NonRoundDurationMinutes),
             Summary: summary,
             Description: description,
-            OrganizerEmail: "organizer@example.com",
+            OrganizerEmail: OrganizerAddress,
             AttendeeEmail: "guest@example.com",
             Sequence: sequence,
             Method: method,
-            Location: location);
+            Location: location,
+            SentBy: sentBy);
 
     private static string Build(int sequence, IcsMethod method) =>
         new IcsBuilder().Build(Request(sequence, method));
@@ -46,8 +52,8 @@ public class IcsBuilderTests
     private static string Unfold(string ics) => ics.Replace(LineBreak + " ", string.Empty, StringComparison.Ordinal);
 
     [Fact]
-    public void Build_Always_UsesTheBookingIdAsUid() =>
-        Build(0, IcsMethod.Request).ShouldContain($"UID:{BookingId}");
+    public void Build_Always_UsesTheGivenUid() =>
+        Build(0, IcsMethod.Request).ShouldContain($"UID:{Uid}");
 
     [Fact]
     public void Build_NewInvitation_IsRequestAtSequenceZero()
@@ -63,8 +69,30 @@ public class IcsBuilderTests
     {
         var ics = Build(1, IcsMethod.Request);
 
-        ics.ShouldContain($"UID:{BookingId}");
+        ics.ShouldContain($"UID:{Uid}");
         ics.ShouldContain("SEQUENCE:1");
+    }
+
+    /// <summary>
+    /// The meeting is owned by the connected calendar account and posted by Kairos. RFC 5545
+    /// §3.2.18: SENT-BY is a quoted parameter, its value holding a colon.
+    /// </summary>
+    [Fact]
+    public void Build_TheSenderIsNotTheOwner_NamesBothWithSentByQuoted() =>
+        Unfold(new IcsBuilder().Build(Request(sentBy: SentByAddress)))
+            .ShouldContain($"ORGANIZER;SENT-BY=\"mailto:{SentByAddress}\":mailto:{OrganizerAddress}");
+
+    /// <summary>
+    /// A SENT-BY naming the organizer says nothing, and an empty parameter is worse than none:
+    /// clients differ on whether it is a syntax error.
+    /// </summary>
+    [Fact]
+    public void Build_TheOwnerSendsItself_WritesNoSentByParameter()
+    {
+        var ics = new IcsBuilder().Build(Request());
+
+        ics.ShouldContain($"ORGANIZER:mailto:{OrganizerAddress}");
+        ics.ShouldNotContain("SENT-BY");
     }
 
     [Fact]
@@ -95,7 +123,7 @@ public class IcsBuilderTests
         // No ORGANIZER and no ATTENDEE means no accept/decline control in the client.
         var ics = Unfold(Build(0, IcsMethod.Request));
 
-        ics.ShouldContain("ORGANIZER:mailto:organizer@example.com");
+        ics.ShouldContain($"ORGANIZER:mailto:{OrganizerAddress}");
         ics.ShouldContain("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:guest@example.com");
     }
 

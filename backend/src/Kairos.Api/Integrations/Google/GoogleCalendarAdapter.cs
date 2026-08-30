@@ -135,7 +135,7 @@ public sealed class GoogleCalendarAdapter(
     /// 0-9, five to 1024 long — so the booking id is a legal event id as it stands, and choosing
     /// it lets <see cref="CreateAsync"/> find this event again knowing only the booking.
     /// </remarks>
-    public async Task<string> CreateEventAsync(
+    public async Task<PlacedEvent> CreateEventAsync(
         CalendarEventRequest request,
         CancellationToken cancellationToken)
     {
@@ -173,7 +173,11 @@ public sealed class GoogleCalendarAdapter(
         insert.ConferenceDataVersion = ConferenceDataVersion;
 
         var created = await insert.ExecuteAsync(cancellationToken);
-        return created.Id;
+
+        // Read, never assembled. Google mints the UID on the insert and will not accept one there:
+        // the API documents iCalUID as supplied "when importing events via the import method", and
+        // that only one of iCalUID and id may be given at creation time.
+        return new PlacedEvent(created.Id, created.ICalUID);
     }
 
     /// <remarks>

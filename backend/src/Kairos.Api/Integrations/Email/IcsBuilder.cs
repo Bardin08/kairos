@@ -46,7 +46,7 @@ public sealed class IcsBuilder(IClock? clock = null)
             "CALSCALE:GREGORIAN",
             $"METHOD:{Keyword(request.Method)}",
             "BEGIN:VEVENT",
-            $"UID:{request.BookingId}",
+            $"UID:{request.Uid}",
             $"DTSTAMP:{UtcPattern.Format(_clock.GetCurrentInstant())}",
             $"DTSTART:{UtcPattern.Format(request.Start)}",
             $"DTEND:{UtcPattern.Format(request.End)}",
@@ -59,7 +59,7 @@ public sealed class IcsBuilder(IClock? clock = null)
                 ? (string[])[$"{LocationProperty}:{Escape(location)}"]
                 : [],
 
-            $"ORGANIZER:mailto:{request.OrganizerEmail}",
+            $"ORGANIZER{SentBy(request.SentBy)}:mailto:{request.OrganizerEmail}",
             $"ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{request.AttendeeEmail}",
             $"SEQUENCE:{request.Sequence}",
             $"STATUS:{Status(request.Method)}",
@@ -87,6 +87,13 @@ public sealed class IcsBuilder(IClock? clock = null)
         IcsMethod.Cancel => "CANCEL",
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown iCalendar method."),
     };
+
+    /// <summary>
+    /// RFC 5545 §3.2.18. Quoted because the value holds a colon, and omitted rather than written
+    /// empty: an organizer that posts for itself has nothing to say here.
+    /// </summary>
+    private static string SentBy(string? sentBy) =>
+        sentBy is { Length: > 0 } address ? $";SENT-BY=\"mailto:{address}\"" : string.Empty;
 
     /// <summary>
     /// METHOD:CANCEL alone is not enough — Outlook removes the event on STATUS:CANCELLED,
