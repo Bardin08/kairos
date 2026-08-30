@@ -197,3 +197,17 @@ test('the booking panel frame is composed from the head height and the slot heig
   expect(css).toContain('min-height: calc(var(--slots-h) + var(--slots-head-h))')
   expect(css).toContain('height: var(--slots-head-h)')
 })
+
+// A UA checkbox draws at about 13px, and the box in .check-row is set to 18. The
+// 44px target DESIGN.md's Tap Floor Rule requires is therefore the row's, not the
+// box's — the one declaration in the product's first checkbox list that a tidy-up
+// would drop with nothing failing, since jsdom performs no layout and the rendered
+// test beside it would still pass. Matched from the selector, so a floor moved off
+// this rule fails here too.
+test('every option in a checkbox list is a tap-floor target through its row, not its box', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain(
+    '.check-row {\n    display: flex;\n    align-items: flex-start;\n    gap: var(--space-3);\n    min-height: var(--tap);',
+  )
+})
