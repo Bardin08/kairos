@@ -198,16 +198,35 @@ test('the booking panel frame is composed from the head height and the slot heig
   expect(css).toContain('height: var(--slots-head-h)')
 })
 
-// A UA checkbox draws at about 13px, and the box in .check-row is set to 18. The
-// 44px target DESIGN.md's Tap Floor Rule requires is therefore the row's, not the
-// box's — the one declaration in the product's first checkbox list that a tidy-up
-// would drop with nothing failing, since jsdom performs no layout and the rendered
-// test beside it would still pass. Matched from the selector, so a floor moved off
-// this rule fails here too.
-test('every option in a checkbox list is a tap-floor target through its row, not its box', () => {
+// A UA checkbox draws at about 13px, and the box in .check-row is set to 18, so
+// the 44px DESIGN.md's Tap Floor Rule requires has to come from the label. It
+// cannot come from the row, which is where this floor used to sit: measured in
+// Chromium, `align-items: flex-start` leaves every item as tall as its own text,
+// so the row was 1016x44 around a 71.6x21.7 label and elementFromPoint at its
+// mid-right answered `div.check-row` — 22px of row that toggle nothing. On the
+// label the same point answers the label, at 979x44. `flex: 1` is half of that
+// and is pinned with it: without the width the height alone leaves the row's
+// trailing half dead. jsdom performs no layout, so nothing rendered can see
+// either declaration go.
+test('every option in a checkbox list is a tap-floor target through its label, which fills the row', () => {
   const css = readFileSync(stylesheet, 'utf8')
 
   expect(css).toContain(
-    '.check-row {\n    display: flex;\n    align-items: flex-start;\n    gap: var(--space-3);\n    min-height: var(--tap);',
+    '.check-row label {\n    flex: 1;\n    min-height: var(--tap);\n    padding-block: var(--space-2);',
+  )
+})
+
+// The settings panel's toggle has no label of its own to grow: in a .field-row
+// the label and the control sit in opposite grid tracks. So the target is grown
+// off the box, and this is the declaration that does it — measured in Chromium
+// and WebKit, a click 20px from the box's centre toggles it with this rule and
+// misses without. Matched through the inset, because a ::after that keeps its
+// content and loses its size is a rule that still exists and paints nothing.
+test('the settings toggle grows its own tap-floor hit area, since it has no label to grow', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.check-tap { position: relative; width: 18px; height: 18px; }')
+  expect(css).toContain(
+    '.check-tap::after {\n    content: "";\n    position: absolute;\n    inset: calc((18px - var(--tap)) / 2);\n  }',
   )
 })

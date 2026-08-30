@@ -4,8 +4,14 @@ import { Route, Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
 import Integrations from '../src/pages/Integrations'
-import { ApiError, connectIntegration, listIntegrations } from '../src/lib/api'
-import type { Integration } from '../src/lib/api'
+import {
+  ApiError,
+  connectIntegration,
+  listIntegrations,
+  readIntegrationSettings,
+  saveIntegrationSettings,
+} from '../src/lib/api'
+import type { Integration, IntegrationSettings } from '../src/lib/api'
 
 vi.mock('../src/lib/api', async (importOriginal) => ({
   // ApiError and PROVIDER_NOT_CONFIGURED stay real: the page reads a failure
@@ -15,7 +21,24 @@ vi.mock('../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/api')>()),
   listIntegrations: vi.fn(),
   connectIntegration: vi.fn(),
+  readIntegrationSettings: vi.fn(),
+  saveIntegrationSettings: vi.fn(),
 }))
+
+const LINKED_ACCOUNT = 'me@example.com'
+const LINKED_AT = '2026-08-14T22:29:14Z'
+
+/**
+ * The panel's one universal field, as every provider's description carries it.
+ * The key is the server's spelling of the reserved switch; this page never reads
+ * it, and the fixture carries it only because a real description would.
+ */
+const ENABLED_FIELD = 'enabled'
+const SWITCH_LABEL = 'Use this integration'
+
+/** The disclosure, closed and open. */
+const SETTINGS = 'Settings'
+const HIDE_SETTINGS = 'Hide settings'
 
 const google: Integration = {
   provider: 'google',
@@ -45,6 +68,37 @@ const invented: Integration = {
   fault: null,
 }
 
+/**
+ * Connected, working and switched on. The row the disclosure is offered on, and
+ * the one every state below is a departure from.
+ */
+const linked: Integration = {
+  ...google,
+  connected: true,
+  accountLabel: LINKED_ACCOUNT,
+  connectedAt: LINKED_AT,
+}
+
+/**
+ * What the panel is told about a provider that describes nothing of its own: the
+ * switch, which the endpoint injects, and nothing else. No provider name in it.
+ */
+const settings: IntegrationSettings = {
+  provider: google.provider,
+  fields: [
+    {
+      key: ENABLED_FIELD,
+      kind: 'toggle',
+      label: SWITCH_LABEL,
+      help: null,
+      options: null,
+      maxValues: null,
+      required: false,
+      value: true,
+    },
+  ],
+}
+
 // `searchPath` carries no leading `?` — memoryLocation adds it.
 function renderPage(searchPath = '') {
   const { hook, searchHook } = memoryLocation({ path: '/integrations', searchPath })
@@ -60,6 +114,8 @@ function renderPage(searchPath = '') {
 beforeEach(() => {
   vi.mocked(listIntegrations).mockResolvedValue([google])
   vi.mocked(connectIntegration).mockResolvedValue('https://accounts.google.com/o/oauth2/v2/auth?x=1')
+  vi.mocked(readIntegrationSettings).mockResolvedValue(settings)
+  vi.mocked(saveIntegrationSettings).mockResolvedValue(undefined)
 })
 
 // Set by the one test that swaps `window.location` out, so a stub that would
@@ -253,4 +309,110 @@ test('a 401 offers the sign-in instead of an empty table', async () => {
   // path the single page nests on, and wouter would swallow the navigation.
   expect(signIn.getAttribute('href')).toBe('/admin/login')
   expect(screen.queryByRole('table')).toBeNull()
+})
+
+// Breaks if a connection the operator switched off goes back to reading
+// Connected. Nothing is being read or written on that row, and a page that says
+// otherwise is the disagreement between two screens this build exists to end.
+test('a connection that is switched off reads Paused and keeps the hollow dot', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([{ ...linked, enabled: false }])
+  renderPage()
+
+  const state = await screen.findByText('Paused')
+  expect(state.getAttribute('data-state')).toBe('paused')
+  expect(screen.getByText(/connection is kept/)).toBeTruthy()
+})
+
+// Breaks if the switch starts outranking the fault. A paused connection that is
+// also broken has something a button can fix and the switch is not it, so the
+// row has to keep saying so — and keep the button.
+test('a paused connection that is also broken reports the fault rather than the switch', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([
+    { ...linked, enabled: false, reconnectRequired: true },
+  ])
+  renderPage()
+
+  expect(await screen.findByText('Reconnect needed')).toBeTruthy()
+  expect(screen.queryByText('Paused')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+})
+
+// Breaks if the disclosure appears on a row with nothing behind it: the switch
+// is a column on the stored credential, so a provider nobody connected has
+// nothing to configure and the read would come back 404. A broken grant is the
+// case worth pinning — it keeps its Connect button and gains the disclosure,
+// because the switch is still worth reaching while the grant is being fixed.
+test('settings are offered on every row holding a credential and on no row without one', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([
+    linked,
+    { ...linked, provider: 'fastmail', reconnectRequired: true },
+    google,
+    { ...google, provider: 'outlook', configured: false },
+  ])
+  renderPage()
+
+  const controls = await screen.findAllByRole('button', { name: SETTINGS })
+  expect(controls).toHaveLength(2)
+  expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+})
+
+// Breaks if the panel stops being about the row it opened from, and breaks if
+// the disclosure stops closing: two open panels are two Save buttons with no way
+// to tell which one a press belongs to.
+test('expanding a row reads that provider settings and folds them away again', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([linked])
+  renderPage()
+
+  fireEvent.click(await screen.findByRole('button', { name: SETTINGS }))
+
+  expect(await screen.findByLabelText(SWITCH_LABEL)).toBeTruthy()
+  expect(readIntegrationSettings).toHaveBeenCalledWith(google.provider)
+
+  fireEvent.click(screen.getByRole('button', { name: HIDE_SETTINGS }))
+
+  expect(screen.queryByLabelText(SWITCH_LABEL)).toBeNull()
+})
+
+// Breaks if a settings read that fails takes the table with it. The row is the
+// only thing that could not be read, and the listing beside it is still true —
+// the same isolation the listing already gives a credential it cannot decrypt.
+test('a settings read that fails says so inside the row and leaves the table standing', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([linked])
+  vi.mocked(readIntegrationSettings).mockRejectedValue(
+    new ApiError(500, null, 'The server answered 500.'),
+  )
+  renderPage()
+
+  fireEvent.click(await screen.findByRole('button', { name: SETTINGS }))
+
+  const said = await screen.findByText(/Nothing on this page can put that right/)
+  expect(said.closest('td')).not.toBeNull()
+  expect(screen.getByRole('table')).toBeTruthy()
+  expect(screen.getByText('Connected')).toBeTruthy()
+
+  cleanup()
+
+  vi.mocked(readIntegrationSettings).mockRejectedValue(new ApiError(401, null, 'Unauthorized'))
+  renderPage()
+
+  fireEvent.click(await screen.findByRole('button', { name: SETTINGS }))
+
+  expect(await screen.findByText(/session has expired/)).toBeTruthy()
+})
+
+// Breaks if a save refreshes the panel and not the listing. The switch is the
+// row's own state, so a table left unread says Connected beside a panel that has
+// just been switched off.
+test('a saved setting refreshes the listing under the panel, not only the panel', async () => {
+  vi.mocked(listIntegrations).mockResolvedValue([linked])
+  renderPage()
+
+  fireEvent.click(await screen.findByRole('button', { name: SETTINGS }))
+  expect(await screen.findByLabelText(SWITCH_LABEL)).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(listIntegrations).toHaveBeenCalledTimes(2))
+  expect(saveIntegrationSettings).toHaveBeenCalled()
+  expect(screen.queryByLabelText(SWITCH_LABEL)).toBeNull()
 })

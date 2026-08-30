@@ -1436,28 +1436,59 @@
     padding: var(--space-2) var(--space-4);
   }
 
-  /* The row carries the tap floor, not the box: a UA checkbox draws at ~13px
-     and DESIGN.md's floor is 44px on every viewport. The label is inside the
-     row and bound to the box by `for`, so the whole 44px is the target.
+  /* The label carries the tap floor, and it has to be the label: a floor on the
+     row buys nothing, because `align-items: flex-start` cancels the flex
+     default and leaves every item as tall as its own text. Measured with the
+     floor on the row — a 1016x44 row holding a 71.6x21.7 label, and
+     elementFromPoint at the row's mid-right answering `div.check-row`, which
+     toggles nothing. With it on the label: 979x44, and the same point answers
+     the label. DESIGN.md's floor is 44px on every viewport and a UA checkbox
+     draws at ~13px, so the label is the whole of the target either way.
 
      No accent-color here. `body` sets the product's, and a ticked box is the
      accent's first job — the selection.
 
      Top-aligned rather than centred, because an option with a detail line is
      two lines tall and a centred box would float against the middle of them.
-     18px is the box against --text-sm, and the 3px lift puts it on the label's
-     first baseline — measured the way .field-error's own 14px icon was. */
+     18px is the box against --text-sm, and 11px is the lift: the label's own
+     --space-2 padding plus the 3px this box carried before that padding moved
+     off the row. Measured against the rule this replaces, the box's centre
+     lands 2px under the first line's either way — the same place it has always
+     sat. */
   .check-row {
     display: flex;
     align-items: flex-start;
     gap: var(--space-3);
+  }
+  .check-row input { width: 18px; height: 18px; margin-top: 11px; flex: none; }
+  .check-row label {
+    flex: 1;
     min-height: var(--tap);
     padding-block: var(--space-2);
+    font-size: var(--text-sm);
+    cursor: pointer;
   }
-  .check-row input { width: 18px; height: 18px; margin-top: 3px; flex: none; }
-  .check-row label { font-size: var(--text-sm); cursor: pointer; }
   .check-row .detail { display: block; font-size: var(--text-xs); color: var(--text-tertiary); }
   .check-row[data-disabled="true"] label { color: var(--text-tertiary); cursor: not-allowed; }
+
+  /* A checkbox alone in a .field-row's control track, and the tap floor it
+     could not otherwise have. The label naming the field is in the grid's other
+     track, so — unlike .check-row above, where the label is the target — there
+     is nothing here to grow. The hit area is grown off the box instead: a
+     transparent ::after inset by half the difference reaches DESIGN.md's 44px
+     in both axes while the box stays the 18px the lists use. Nothing clips it;
+     .panel pads --space-5 and sets no overflow.
+
+     Not `.switch`: that name is already the design system's own toggle, a 40x24
+     track driven by aria-checked on a button (docs/ui/admin.html), and it is
+     declared later in this layer — a second `.switch` here would either lose to
+     it or repaint it. */
+  .check-tap { position: relative; width: 18px; height: 18px; }
+  .check-tap::after {
+    content: "";
+    position: absolute;
+    inset: calc((18px - var(--tap)) / 2);
+  }
 
   /* A form that belongs to the row above it — an integration's settings, opened
      from its row in a table. Sunken rather than raised: it is a recess in the
