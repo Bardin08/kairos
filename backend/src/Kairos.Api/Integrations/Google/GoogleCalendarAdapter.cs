@@ -128,12 +128,14 @@ public sealed class GoogleCalendarAdapter(
 
             using var service = CreateService(credential);
 
+            var calendars = await ResolveBusyCalendarsAsync(cancellationToken);
+
             var response = await service.Freebusy
                 .Query(new FreeBusyRequest
                 {
                     TimeMinDateTimeOffset = window.Start.ToDateTimeOffset(),
                     TimeMaxDateTimeOffset = window.End.ToDateTimeOffset(),
-                    Items = [new FreeBusyRequestItem { Id = PrimaryCalendarId }],
+                    Items = [.. calendars.Select(id => new FreeBusyRequestItem { Id = id })],
                 })
                 .ExecuteAsync(cancellationToken);
 
@@ -481,6 +483,73 @@ public sealed class GoogleCalendarAdapter(
         saved.TryGetValue(WriteCalendarKey, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    /// <summary>
+    /// Which calendars busy time is read from: the operator's choice, or the default worked out
+    /// once and then written down.
+    /// </summary>
+    /// <remarks>
+    /// The write is on a read path, and it is a cost taken deliberately. It happens once per
+    /// deployment, it is idempotent, and failing it is not fatal — this request still uses the set
+    /// it computed and the next load tries again. The alternative recomputes the default on every
+    /// view of an anonymous page, paying a second Google round trip forever to keep a property
+    /// the operator's first save ends anyway.
+    ///
+    /// What that costs is honest and worth saying: once the row exists, a calendar created in
+    /// Google afterwards does not join by itself. The operator adds it on the settings panel,
+    /// which is what <see cref="BusyCalendarsHelp"/> tells them.
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> ResolveBusyCalendarsAsync(
+        CancellationToken cancellationToken)
+    {
+        var chosen = Chosen(await settings.ReadAsync(Provider, cancellationToken));
+        if (chosen.Count > 0)
+        {
+            return chosen;
+        }
+
+        var entries = await ListCalendarsAsync(cancellationToken);
+        if (entries is null)
+        {
+            // Google would not say which calendars exist. The account's own is the one id that is
+            // always right, and nothing is written down on a guess.
+            return [PrimaryCalendarId];
+        }
+
+        // Google's own idea of which calendars the account cares about — the ones ticked in its
+        // sidebar. Capped rather than refused: this set is being materialised, so the operator
+        // opens the panel to a selection that is exactly what Kairos is using.
+        var selected = entries
+            .Where(entry => entry.Selected == true)
+            .Select(entry => entry.Id)
+            .Take(MaxFreebusyCalendars)
+            .ToList();
+
+        if (selected.Count == 0)
+        {
+            return [PrimaryCalendarId];
+        }
+
+        try
+        {
+            await settings.WriteAsync(
+                Provider,
+                new Dictionary<string, JsonElement>
+                {
+                    [BusyCalendarsKey] = JsonSerializer.SerializeToElement(selected),
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "Could not record the default Google calendar selection; using it for this "
+                + "request and working it out again on the next.");
+        }
+
+        return selected;
+    }
 
     /// <summary>
     /// Every calendar on the account, or null when Google could not be asked. Null rather than an
