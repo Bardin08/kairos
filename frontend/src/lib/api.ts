@@ -382,11 +382,13 @@ export const CREDENTIAL_UNREADABLE = 'credential_unreadable'
  * name the connect path takes, and nothing here is vendor-specific, so a
  * provider the backend learns to connect appears without a frontend change.
  *
- * The flags are not one question asked three times. `configured` is about the
+ * The flags are not one question asked four times. `configured` is about the
  * deployment: no client credentials, nothing to connect to. `connected` is about
  * the operator: a credential is stored. `reconnectRequired` is about that
  * credential still working — a grant revoked in the provider's own settings
  * leaves the row connected and useless, and only fresh consent fixes it.
+ * `enabled` is about whether the operator wants any of it used, as against
+ * `connected`, which is about whether a credential exists at all.
  */
 export type Integration = {
   provider: string
@@ -438,8 +440,8 @@ export async function connectIntegration(
 }
 
 /**
- * One choice a field offers. `detail` is the provider's own second line —
- * "Primary", "Read-only subscription", "No longer reachable" — and the panel
+ * One choice a field offers. `detail` is the provider's own second line — that
+ * one choice is the default, that another cannot be written to — and the panel
  * renders it without knowing which provider wrote it.
  */
 export type SettingOption = {
@@ -448,11 +450,16 @@ export type SettingOption = {
   detail: string | null
 }
 
-/** A boolean for a `toggle`, a string or null for a `select`, a string array for a `multiSelect`. */
+/** Every shape a value takes. Named so the panel's own draft record need not redeclare the union. */
 export type SettingValue = boolean | string | string[] | null
 
 /**
  * One setting, described well enough to draw without knowing the provider.
+ *
+ * `kind` fixes the shape of `value`: a boolean for a `toggle`, a string or null
+ * for a `select`, a string array for a `multiSelect`. The union stays flat rather
+ * than discriminated, so that correspondence is one the reader keeps rather than
+ * one the compiler checks.
  *
  * `options` is null in two different circumstances and the difference matters: a
  * `toggle` has no list to offer, and either of the other kinds carries null when
@@ -466,7 +473,10 @@ export type SettingField = {
   label: string
   help: string | null
   options: SettingOption[] | null
-  /** The cap on a `multiSelect`, or null. Enforced here as well as on the server. */
+  /**
+   * The cap on a `multiSelect`, or null. The panel enforces it too, so a save
+   * the server would refuse never leaves the browser.
+   */
   maxValues: number | null
   required: boolean
   value: SettingValue
@@ -477,22 +487,20 @@ export type IntegrationSettings = {
   fields: SettingField[]
 }
 
-/** `enabled` is always the first field, and every provider has it. */
-export const ENABLED_FIELD = 'enabled'
-
 /**
- * A key that belongs to nobody: the switch sent something other than a boolean, or
- * a value sent to a provider that describes no settings of its own.
+ * The panel sent something the server does not recognise — a client bug, not
+ * anything the operator can fix.
  */
 export const SETTING_UNKNOWN = 'setting_unknown'
-
-/** A value the provider itself refuses, once Kairos's own checks have already passed. */
-export const SETTING_INVALID = 'setting_invalid'
 
 /** More values than the field's `maxValues` allows. */
 export const SETTING_TOO_MANY = 'setting_too_many'
 
-/** One provider's settings. 404 for a provider nobody has connected. */
+/**
+ * One provider's settings. 404 twice over: the name is resolved before the
+ * credential is looked up, so a name no provider matches and a provider nobody
+ * has connected answer alike.
+ */
 export function readIntegrationSettings(
   provider: string,
   signal?: AbortSignal,
@@ -513,10 +521,13 @@ export function saveIntegrationSettings(
   values: Record<string, SettingValue>,
   signal?: AbortSignal,
 ): Promise<void> {
-  return requestNothing(`/admin/integrations/${encodeURIComponent(provider)}/settings`, {
-    method: 'PUT',
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ values }),
-    signal,
-  })
+  return requestNothing(
+    `/admin/integrations/${encodeURIComponent(provider)}/settings`,
+    {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ values }),
+      signal,
+    },
+  )
 }
