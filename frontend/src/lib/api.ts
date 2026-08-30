@@ -486,7 +486,7 @@ export const ENABLED_FIELD = 'enabled'
  */
 export const SETTING_UNKNOWN = 'setting_unknown'
 
-/** A value the provider itself refuses — the wrong shape, or an option it does not offer. */
+/** A value the provider itself refuses, once Kairos's own checks have already passed. */
 export const SETTING_INVALID = 'setting_invalid'
 
 /** More values than the field's `maxValues` allows. */
