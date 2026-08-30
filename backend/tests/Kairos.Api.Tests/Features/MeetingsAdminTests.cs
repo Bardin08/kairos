@@ -3,12 +3,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 
 using Kairos.Api.Features.Admin;
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -134,14 +136,16 @@ public class MeetingsAdminTests
     public async Task ListMeetings_TheCalendarRefusedTheWrite_ReadsNotSyncedWithTheReasonAndTheBookingStands()
     {
         using var app = NewApp();
-        using var client = app.CreateOperatorClient(services =>
+        var factory = app.OperatorFactory(services =>
         {
             services.RemoveAll<ICalendarWriter>();
             services.AddScoped<ICalendarWriter>(_ => new RefusingCalendar());
         });
+        using var client = factory.CreateClient();
 
         var created = await BookAsync(client);
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        await DrainFollowUpsAsync(factory);
 
         var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
 
@@ -168,14 +172,16 @@ public class MeetingsAdminTests
     public async Task ListMeetings_TheGrantWasRevoked_ReadsNotSyncedWithTheReasonRatherThanAsNeverConnected()
     {
         using var app = NewApp();
-        using var client = app.CreateOperatorClient(services =>
+        var factory = app.OperatorFactory(services =>
         {
             services.RemoveAll<ICalendarWriter>();
             services.AddScoped<ICalendarWriter>(_ => new RevokedCalendar());
         });
+        using var client = factory.CreateClient();
 
         var created = await BookAsync(client);
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        await DrainFollowUpsAsync(factory);
 
         var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
 
@@ -409,6 +415,25 @@ public class MeetingsAdminTests
                 timeZone = BookerZone,
             },
             TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// The booking's creation no longer syncs its calendar inline — a <see cref="FollowUpWorker"/>
+    /// does, off the request the invitee waits on. Driven directly rather than waited for, the way
+    /// <see cref="ProposalSweeper"/>'s own tests drive <c>SweepAsync</c>: a test that waited on the
+    /// worker's timer would be asserting on a clock. <see cref="KairosApp"/> keeps it out of
+    /// <c>IHostedService</c> for exactly this reason, so it is resolved as the plain singleton it
+    /// is registered as instead — otherwise this call would race the real background pass over
+    /// the same row.
+    /// </summary>
+    /// <param name="factory">
+    /// <see cref="OperatorSession.OperatorFactory"/>'s return, never the outer <c>app</c> a test
+    /// substituted a calendar on: <c>WithWebHostBuilder</c> hands that substitution a container
+    /// of its own, so draining through <c>app.Services</c> would resolve the real
+    /// <see cref="ICalendarWriter"/> and leave the test's double never called.
+    /// </param>
+    private static Task DrainFollowUpsAsync(WebApplicationFactory<KairosDbContext> factory) =>
+        factory.Services.GetRequiredService<FollowUpWorker>()
+            .DrainAsync(TestContext.Current.CancellationToken);
 
     /// <summary>
     /// Computed rather than written down. The create path reads the real clock for minimum

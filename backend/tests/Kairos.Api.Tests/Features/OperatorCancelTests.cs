@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 
 using Kairos.Api.Features.Admin;
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
@@ -9,6 +10,7 @@ using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -103,27 +105,30 @@ public class OperatorCancelTests
     /// <remarks>
     /// The sequence alone is weakly held — the unique index would keep it still. The second press
     /// must also not run the tail: withdraw an event a calendar already released, mail a second
-    /// CANCEL. The withdrawal is counted and the mail is not, because
-    /// <see cref="Kairos.Api.Integrations.Email.EmailSender"/> has no seam to mock; it is pinned
-    /// by proxy, the withdrawal and the send being adjacent statements with no branch between.
+    /// CANCEL. Both cancels are answered before either follow-up is drained; the withdrawal is
+    /// counted once only because the idempotent early return means the second cancel queued
+    /// nothing to drain, not because anything here waited for the first pass to finish.
     /// </remarks>
     [Fact]
     public async Task Cancel_AMeetingAlreadyCancelled_AnswersTheSameAndRunsTheTailOnlyOnce()
     {
         var calendar = new CountingCalendar();
         using var app = new KairosApp();
-        using var client = app.CreateOperatorClient(services =>
+        var factory = app.OperatorFactory(services =>
         {
             services.RemoveAll<ICalendarWriter>();
             services.AddScoped<ICalendarWriter>(_ => calendar);
         });
+        using var client = factory.CreateClient();
 
         var booking = await MeetingsFixture.BookAsync(app, client);
+        await DrainFollowUpsAsync(factory);
 
         await CancelAsync(client, booking, Reason);
         var sequence = app.Read(context => context.Bookings.Single(row => row.Id == booking).Sequence);
 
         var again = await CancelAsync(client, booking, Reason);
+        await DrainFollowUpsAsync(factory);
 
         again.StatusCode.ShouldBe(HttpStatusCode.OK);
         app.Read(context => context.Bookings.Single(row => row.Id == booking).Sequence).ShouldBe(sequence);
@@ -275,6 +280,25 @@ public class OperatorCancelTests
             $"{ApiVersions.V1}/admin/meetings/{id}/cancel",
             new CancelMeetingRequest { Reason = reason },
             TestContext.Current.CancellationToken);
+
+    /// <summary>
+    /// The booking's creation no longer syncs its calendar inline — a <see cref="FollowUpWorker"/>
+    /// drains it, off the request the invitee waits on. Driven directly rather than waited for,
+    /// the way <see cref="ProposalSweeper"/>'s own tests drive <c>SweepAsync</c>: a test that
+    /// waited on the worker's timer would be asserting on a clock. <see cref="KairosApp"/> keeps
+    /// it out of <c>IHostedService</c> for exactly this reason, so it is resolved as the plain
+    /// singleton it is registered as instead — otherwise this call would race the real background
+    /// pass over the same row.
+    /// </summary>
+    /// <param name="factory">
+    /// <see cref="OperatorSession.OperatorFactory"/>'s return, never the outer <c>app</c> a test
+    /// substituted a calendar on: <c>WithWebHostBuilder</c> hands that substitution a container
+    /// of its own, so draining through <c>app.Services</c> would resolve the real
+    /// <see cref="ICalendarWriter"/> and leave the test's double never called.
+    /// </param>
+    private static Task DrainFollowUpsAsync(WebApplicationFactory<KairosDbContext> factory) =>
+        factory.Services.GetRequiredService<FollowUpWorker>()
+            .DrainAsync(TestContext.Current.CancellationToken);
 
     /// <summary>
     /// A live hold on a slot away from the booking's own, written straight in: nothing in this

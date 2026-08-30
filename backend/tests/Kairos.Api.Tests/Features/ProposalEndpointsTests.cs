@@ -477,6 +477,28 @@ public class ProposalEndpointsTests
     }
 
     /// <summary>
+    /// Accepting arrives holding the PROPOSAL's token, not the manage one, and the manage token
+    /// cannot be recovered from a stored SHA-256. So the row carries no secret and the notice goes
+    /// without a manage link — which is what the inline path already did.
+    /// </summary>
+    [Fact]
+    public async Task AcceptProposal_Succeeds_QueuesTheMoveWithNoSecret()
+    {
+        using var app = new KairosApp();
+        using var client = OperatorWithRelay(app);
+        var booking = await MeetingsFixture.BookAsync(app, client);
+        var token = await ProposeWithKnownTokenAsync(app, client, booking);
+
+        var answer = await AnswerAsync(app, token, AcceptAction);
+
+        answer.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var followUp = app.Read(context => context.FollowUps.AsNoTracking()
+            .Single(row => row.BookingId == booking && row.Type == FollowUpType.Rescheduled));
+        followUp.Secret.ShouldBeNull();
+        followUp.PreviousStartUtc.ShouldNotBeNull();
+    }
+
+    /// <summary>
     /// The accept's own release, and the only case that pins it. The meeting pads its own slot by
     /// the margin, so the hour directly after it is covered by the meeting being moved: released,
     /// the re-check sees a free hour; left confirmed, the acceptance is refused by its own subject.

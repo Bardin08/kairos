@@ -241,6 +241,11 @@ builder.Services.AddScoped<MeetingIdentityResolver>();
 // Scoped, and registered here by its first consumer: it adds to the request's DbContext and
 // never saves, so it has to be the same context the caller is about to commit.
 builder.Services.AddScoped<OutboxWriter>();
+builder.Services.AddScoped<FollowUpWriter>();
+
+// A singleton because it is the process's one doorbell: a scoped one would give every request its
+// own channel and nudge nobody.
+builder.Services.AddSingleton<FollowUpSignal>();
 
 builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(WebhookOptions.SectionName));
 
@@ -252,6 +257,7 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 // independently of each other and of every request.
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
+builder.Services.AddHostedService<FollowUpWorker>();
 
 // Beside them rather than inside that pair: it runs on the same minute and notices something only
 // a clock can notice, but what it produces is a mail rather than a queued event. Nothing depends on

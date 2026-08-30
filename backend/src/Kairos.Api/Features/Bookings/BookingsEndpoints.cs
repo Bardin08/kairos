@@ -195,9 +195,7 @@ public static class BookingsEndpoints
         KairosDbContext context,
         BookingMover mover,
         BookingWriter writer,
-        CalendarSyncService calendars,
-        MeetingIdentityResolver identities,
-        BookingMailer mailer,
+        FollowUpSignal signal,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -239,30 +237,10 @@ public static class BookingsEndpoints
 
         var booking = await LoadAsync(context, result.Id, cancellationToken);
 
-        // After the booking is committed and before the 201, in the request rather than behind a
-        // queue. Inline costs the booker whatever the provider's round trip costs; a background
-        // job would answer 201 for a meeting whose calendar state nothing has established yet,
-        // and this endpoint is also the only place holding the loaded booking. It cannot fail the
-        // request — SyncAsync has no throwing path — so the worst inline buys is a slower 201.
-        await calendars.SyncAsync(booking, cancellationToken);
-
-        // Read back rather than carried out of the sync, and only correct because of where it sits:
-        // the ConferenceLink is committed by the same SaveChanges as the calendar entry, inside the
-        // call above. Move this read ahead of that call and every confirmation loses its join row.
-        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
-
-        // Read back for the join URL's reason and with the same requirement: the calendar entry
-        // carrying it is committed inside the sync above, and a confirmation composed before that
-        // would quote the fallback and publish this meeting a second time in the booker's calendar.
-        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
-
-        // After the sync, so the confirmation describes a meeting the organizer's calendar already
-        // knows about, and never before the write committed. Sent on this thread rather than from a
-        // queue because the plaintext manage token the confirmation carries exists only here, in
-        // memory, and a queue would have to store it. The mailer swallows its own failures, so a
-        // relay being down cannot become a booking the organizer never gets.
-        await mailer.SendConfirmationAsync(
-            booking, identity, result.ManageToken!, joinUrl, cancellationToken);
+        // After the commit and never inside it: the worker reads on its own connection, so a nudge
+        // sent from inside the transaction races a pass that cannot yet see the row. The calendar
+        // and the confirmation are the worker's now — FollowUpWorker holds the order they run in.
+        signal.Nudge();
 
         return TypedResults.Created(
             $"{ApiVersions.V1}/bookings/{result.ManageToken}",
@@ -304,9 +282,8 @@ public static class BookingsEndpoints
         RescheduleBookingRequest request,
         KairosDbContext context,
         BookingMover mover,
-        CalendarSyncService calendars,
-        MeetingIdentityResolver identities,
-        BookingMailer mailer,
+        FollowUpWriter followUps,
+        FollowUpSignal signal,
         ProposalWriter proposals,
         IClock clock,
         CancellationToken cancellationToken)
@@ -325,26 +302,13 @@ public static class BookingsEndpoints
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
 
         // Read before the move and never after: MoveToAsync overwrites the row in place, so past
-        // this line nothing anywhere still holds the hour the invitee was told to expect.
+        // this line nothing anywhere still holds the hour the invitee was told to expect. Enqueued
+        // before the move so both ride the same SaveChanges — MoveToAsync's own — rather than a
+        // second one the endpoint would have to open just to carry this row.
         var previousStart = Instant.FromUnixTimeSeconds(booking.StartUtc);
+        followUps.Enqueue(booking.Id, FollowUpType.Rescheduled, token, previousStart);
         await mover.MoveToAsync(booking, start);
-
-        // Here, at the end, and never in the release phase above: that release is bookkeeping the
-        // failing paths undo, so a calendar hook hung on the status change would withdraw the event
-        // for every meeting that merely moved and an attendee who had already accepted would watch
-        // it vanish. The trap the booking.cancelled announcement is kept out of, same pair of tests.
-        await calendars.RescheduleAsync(booking, cancellationToken);
-
-        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
-
-        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
-
-        // Then the invitee, so the mail describes a calendar the organizer's side already agrees
-        // with. The token arrived in the URL, stays in memory for this request and is never
-        // persisted. Sequence was advanced above and the UID is the one the confirmation carried,
-        // which together are what make this land as a change rather than as a second meeting.
-        await mailer.SendRescheduleAsync(
-            booking, identity, token, joinUrl, previousStart, cancellationToken);
+        signal.Nudge();
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }
@@ -377,9 +341,8 @@ public static class BookingsEndpoints
         string token,
         KairosDbContext context,
         BookingMover mover,
-        CalendarSyncService calendars,
-        MeetingIdentityResolver identities,
-        BookingMailer mailer,
+        FollowUpWriter followUps,
+        FollowUpSignal signal,
         IClock clock,
         CancellationToken cancellationToken)
     {
@@ -422,21 +385,13 @@ public static class BookingsEndpoints
         // Read before the move, for RescheduleAsync's reason: the row is overwritten in place and
         // the hour the invitee agreed to move away from survives nowhere else.
         var previousStart = Instant.FromUnixTimeSeconds(booking.StartUtc);
-        await mover.MoveToAsync(booking, start);
-
-        // Rule 14's tail, in the order the reschedule above keeps it and never in the release
-        // phase: that release is bookkeeping the failing paths undo, and a calendar hook hung on
-        // it would withdraw the event for a meeting that merely moved.
-        await calendars.RescheduleAsync(booking, cancellationToken);
-
-        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
 
         // No manage token, and none can be had: the URL the invitee opened carried the PROPOSAL's
-        // token and only the manage token's SHA-256 is stored. The mail goes without that link.
-        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
-
-        await mailer.SendRescheduleAsync(
-            booking, identity, manageToken: null, joinUrl, previousStart, cancellationToken);
+        // token and only the manage token's SHA-256 is stored. The notice goes without a manage
+        // link — exactly what the inline path used to send.
+        followUps.Enqueue(booking.Id, FollowUpType.Rescheduled, manageToken: null, previousStart);
+        await mover.MoveToAsync(booking, start);
+        signal.Nudge();
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
     }

@@ -16,7 +16,11 @@ namespace Kairos.Api.Features.Bookings;
 /// The booking write. Everything else in the codebase may be wrong and be a bug; this being
 /// wrong is a double-booked calendar, so it is the one place that talks to SQLite directly.
 /// </summary>
-public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxWriter outbox)
+public sealed class BookingWriter(
+    KairosDbContext context,
+    IClock clock,
+    OutboxWriter outbox,
+    FollowUpWriter followUps)
 {
     /// <summary>
     /// The slot is not available: it conflicts with a confirmed booking, or with the hold an open
@@ -113,6 +117,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
         var started = false;
         Booking? pending = null;
         OutboxMessage? announcement = null;
+        FollowUp? work = null;
         try
         {
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
@@ -158,7 +163,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
 
             if (clashes > 0)
             {
-                Abandon(started, pending, announcement);
+                Abandon(started, pending, announcement, work);
                 return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
             }
 
@@ -206,7 +211,7 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
 
                 if (spent != 1)
                 {
-                    Abandon(started, pending, announcement);
+                    Abandon(started, pending, announcement, work);
                     return new CreateBookingResult(false, Guid.Empty, null, InviteSpentReason);
                 }
             }
@@ -251,6 +256,12 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
                 OutboxMessageType.BookingCreated,
                 BookingEventPayload.Created(bookingId, slug, start, duration).ToJson());
 
+            // Beside the announcement and for its reason: inside this BEGIN IMMEDIATE, in the same
+            // INSERT batch as the booking, so no window exists in which the booking is written and
+            // nothing will ever tell the booker about it. The plaintext manage token goes in
+            // encrypted — this method mints it, and it exists nowhere else.
+            work = followUps.Enqueue(bookingId, FollowUpType.Created, manageToken);
+
             context.SaveChanges();
             context.Database.ExecuteSqlRaw("COMMIT;");
 
@@ -259,12 +270,12 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
         catch (Exception exception) when (IsSlotAlreadyTaken(exception))
         {
             // The partial unique index fired — the backstop, not the mechanism.
-            Abandon(started, pending, announcement);
+            Abandon(started, pending, announcement, work);
             return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
         }
         catch
         {
-            Abandon(started, pending, announcement);
+            Abandon(started, pending, announcement, work);
             throw;
         }
         finally
@@ -288,10 +299,10 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
     /// Undoes what this call did, and nothing else. Both guards matter: a bare ROLLBACK after a
     /// BEGIN IMMEDIATE that never ran discards a transaction the caller opened — the shape a
     /// reschedule takes — and clearing the change tracker discards entities the caller holds. Left
-    /// tracked, the three failed inserts ride along on the caller's next SaveChanges and re-insert
-    /// the booking this method just refused, announcement included.
+    /// tracked, the four failed inserts ride along on the caller's next SaveChanges and re-insert
+    /// the booking this method just refused, announcement and follow-up included.
     /// </summary>
-    private void Abandon(bool started, Booking? pending, OutboxMessage? announcement)
+    private void Abandon(bool started, Booking? pending, OutboxMessage? announcement, FollowUp? work)
     {
         if (started)
         {
@@ -301,6 +312,11 @@ public sealed class BookingWriter(KairosDbContext context, IClock clock, OutboxW
         if (announcement is not null)
         {
             context.Entry(announcement).State = EntityState.Detached;
+        }
+
+        if (work is not null)
+        {
+            context.Entry(work).State = EntityState.Detached;
         }
 
         if (pending is null)

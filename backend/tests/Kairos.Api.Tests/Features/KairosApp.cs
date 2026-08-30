@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Persistence;
 using Kairos.Api.Security;
 using Kairos.Api.Shared;
@@ -11,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace Kairos.Api.Tests.Features;
 
@@ -132,6 +134,23 @@ public sealed class KairosApp(string? webRoot = null, string? publicBaseUrl = nu
             services.RemoveAll<DbContextOptions<KairosDbContext>>();
             services.AddSingleton(
                 new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(connectionString).Options);
+
+            // The real hosted FollowUpWorker races a test that drains it directly — two callers
+            // against one row, which is the opposite of OutboxDispatcher's single-instance
+            // assumption. Removed here rather than left running: a test that needs the queue
+            // worked drains it itself, the documented house pattern, and one that does not gets a
+            // queue that sits still instead of a background pass timed against the assertion.
+            var hosted = services
+                .Where(descriptor =>
+                    (descriptor.ServiceType == typeof(IHostedService))
+                    && (descriptor.ImplementationType == typeof(FollowUpWorker)))
+                .ToList();
+            foreach (var descriptor in hosted)
+            {
+                services.Remove(descriptor);
+            }
+
+            services.AddSingleton<FollowUpWorker>();
         });
     }
 

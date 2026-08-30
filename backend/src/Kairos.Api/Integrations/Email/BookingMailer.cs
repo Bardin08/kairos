@@ -64,7 +64,13 @@ public sealed class BookingMailer(
     private const string MixedSubtype = "mixed";
 
     /// <summary>The booking exists. <c>METHOD:REQUEST</c>, and the invitee's first sight of it.</summary>
-    public Task SendConfirmationAsync(
+    /// <returns>
+    /// Whether the relay took it, the way <see cref="SendProposalAsync"/> already reports and for
+    /// the same reason: a caller that retries — <see cref="Bookings.FollowUpWorker"/> — has to be
+    /// able to tell a refusal from a send, and a caller with nowhere to retry is free to discard it,
+    /// as the inline endpoints still do.
+    /// </returns>
+    public Task<bool> SendConfirmationAsync(
         Booking booking,
         MeetingIdentity identity,
         string manageToken,
@@ -89,7 +95,8 @@ public sealed class BookingMailer(
     /// caller appeared: accepting a proposal arrives holding the PROPOSAL's token, and the manage
     /// one cannot be recovered from a stored SHA-256. The mail goes without the link.
     /// </remarks>
-    public Task SendRescheduleAsync(
+    /// <returns>Whether the relay took it — see <see cref="SendConfirmationAsync"/>.</returns>
+    public Task<bool> SendRescheduleAsync(
         Booking booking,
         MeetingIdentity identity,
         string? manageToken,
@@ -113,7 +120,8 @@ public sealed class BookingMailer(
     /// No join URL is taken, where the other two notices take one: this message removes the event,
     /// so there is nothing left to join.
     /// </remarks>
-    public Task SendCancellationAsync(
+    /// <returns>Whether the relay took it — see <see cref="SendConfirmationAsync"/>.</returns>
+    public Task<bool> SendCancellationAsync(
         Booking booking,
         MeetingIdentity identity,
         string? manageToken,
@@ -147,7 +155,7 @@ public sealed class BookingMailer(
             () => ComposeProposalAsync(booking, proposal, proposalToken, cancellationToken),
             cancellationToken);
 
-    private Task SendAsync(
+    private Task<bool> SendAsync(
         BookingNotice notice,
         Booking booking,
         MeetingIdentity identity,
@@ -173,12 +181,12 @@ public sealed class BookingMailer(
     /// — an unconfigured relay is the ordinary state of a fresh deployment, and a relay that
     /// refused is a delivery problem, not a booking one.
     ///
-    /// The trade: a failed send is not retried and the invitee gets nothing, logged at Warning
-    /// with the booking id so the organizer can resend by hand. The outbox would give retries free
-    /// and is the right home for the webhook, but an email row would have to carry a raw token in
-    /// its payload, and Part A stores only those tokens' SHA-256 — persisting the plaintext would
-    /// make one database read worth cancel-and-reschedule on every booking in the file. So every
-    /// send runs on the request that caused it, where the plaintext is in hand.
+    /// Every failure is logged at Warning with the booking id, whether or not anything retries it.
+    /// The inline endpoints discard the bool this returns and give the organizer a resend by hand;
+    /// <see cref="Bookings.FollowUpWorker"/> reads it and tries again on a later pass, which is why
+    /// the token this composes from now reaches the worker encrypted rather than only hashed — the
+    /// row the outbox pattern would need to retry a send is exactly what
+    /// <see cref="Persistence.Entities.FollowUp"/> is.
     /// </remarks>
     private async Task<bool> SendComposedAsync(
         BookingNotice notice,

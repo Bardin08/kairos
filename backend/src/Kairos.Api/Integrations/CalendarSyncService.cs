@@ -83,6 +83,22 @@ public sealed class CalendarSyncService(
 
     private async Task PlaceAsync(Booking booking, CancellationToken cancellationToken)
     {
+        // Before anything is attempted, because this method can now run twice: a follow-up whose
+        // mail step failed is retried whole, and a second insert under the same deterministic id
+        // comes back a duplicate that RecordFailureAsync would write over a genuinely Synced row.
+        // Keyed on Synced and not on the row existing, so a Failed attempt is still retried — that
+        // distinction is the whole guard.
+        var placedAlready = await FindEntryAsync(booking.Id, cancellationToken);
+        if (placedAlready?.State == CalendarSyncState.Synced)
+        {
+            // The event is there; the conference may not be. AddConferenceAsync has its own row
+            // guard, so this is safe to repeat — and it is the only path by which a conference
+            // that failed on its first attempt is ever retried.
+            await AddConferenceAsync(booking.Id, cancellationToken);
+            await context.SaveChangesAsync(CancellationToken.None);
+            return;
+        }
+
         PlacedEvent placed;
         try
         {
@@ -98,21 +114,24 @@ public sealed class CalendarSyncService(
         }
         catch (Exception exception)
         {
-            // No row can exist to update: this runs once, on the request that inserted the
-            // booking, and nothing else writes a CalendarEntry before it.
-            await RecordFailureAsync(booking.Id, null, exception);
+            // placedAlready is the row a prior Failed attempt left, if this is a retry of one —
+            // passed through rather than null, so a second refusal updates that row instead of
+            // colliding with it under the same unique (booking, provider) index.
+            await RecordFailureAsync(booking.Id, placedAlready, exception);
             return;
         }
 
-        context.CalendarEntries.Add(new CalendarEntry
+        if (placedAlready is null)
         {
-            BookingId = booking.Id,
-            Provider = calendars.Provider,
-            ExternalEventId = placed.ExternalEventId,
-            CalendarUid = placed.CalendarUid,
-            State = CalendarSyncState.Synced,
-            UpdatedAt = Now(),
-        });
+            placedAlready = new CalendarEntry { BookingId = booking.Id, Provider = calendars.Provider };
+            context.CalendarEntries.Add(placedAlready);
+        }
+
+        placedAlready.ExternalEventId = placed.ExternalEventId;
+        placedAlready.CalendarUid = placed.CalendarUid;
+        placedAlready.State = CalendarSyncState.Synced;
+        placedAlready.LastError = null;
+        placedAlready.UpdatedAt = Now();
 
         await AddConferenceAsync(booking.Id, cancellationToken);
 
@@ -180,6 +199,14 @@ public sealed class CalendarSyncService(
             return;
         }
 
+        // Already withdrawn, so a retry has nothing to do. Without this, the second delete answers
+        // "HttpStatusCode is Gone. Resource has been deleted" and RecordFailureAsync writes that
+        // over a Cancelled row that is telling the truth.
+        if (entry.State == CalendarSyncState.Cancelled)
+        {
+            return;
+        }
+
         try
         {
             await calendars.CancelEventAsync(entry.ExternalEventId, cancellationToken);
@@ -207,6 +234,15 @@ public sealed class CalendarSyncService(
     {
         try
         {
+            // PlaceAsync's guard, for the conference: a retry must not mint a second meeting room,
+            // and the row is what says one already exists. No state column to consult here by
+            // design — the row's absence is what "no join link" looks like.
+            if (await context.ConferenceLinks
+                    .AnyAsync(row => row.BookingId == bookingId, cancellationToken))
+            {
+                return;
+            }
+
             var conference = await conferences.CreateAsync(bookingId, cancellationToken);
             context.ConferenceLinks.Add(new ConferenceLink
             {
@@ -238,7 +274,9 @@ public sealed class CalendarSyncService(
 
     /// <summary>
     /// One row per booking per provider, so a failure either starts that row or overwrites what
-    /// it said. <paramref name="entry"/> is null only on the create path, where none can exist.
+    /// it said. <paramref name="entry"/> is null when no attempt has ever been recorded for this
+    /// booking and provider — the first attempt, from whichever of the three callers made it —
+    /// and non-null on every attempt after, a retry of a prior failure included.
     /// </summary>
     private Task RecordFailureAsync(Guid bookingId, CalendarEntry? entry, Exception exception)
     {

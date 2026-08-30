@@ -227,6 +227,42 @@ namespace Kairos.Api.Persistence.Migrations
                     b.ToTable("ConferenceLinks");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.FollowUp", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("PreviousStartUtc")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Secret")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
+
+                    b.HasIndex("Attempts", "CreatedAt", "Id");
+
+                    b.ToTable("FollowUps");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.IntegrationCredential", b =>
                 {
                     b.Property<Guid>("Id")
@@ -590,6 +626,17 @@ namespace Kairos.Api.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.ConferenceLink", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.FollowUp", b =>
                 {
                     b.HasOne("Kairos.Api.Persistence.Entities.Booking", "Booking")
                         .WithMany()

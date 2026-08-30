@@ -35,7 +35,7 @@ public static class OperatorSession
     public const string Subject = "kairos-test-operator";
 
     /// <summary>
-    /// A client on its own host, so <paramref name="substitutions"/> can replace a registered
+    /// The client's own host, so <paramref name="substitutions"/> can replace a registered
     /// service. Taken on the factory so <c>WithWebHostBuilder(…).CreateOperatorClient()</c>
     /// composes; the database is the factory's, so <see cref="KairosApp.Seed"/> is visible.
     /// </summary>
@@ -50,7 +50,7 @@ public static class OperatorSession
     /// ClaimTypes URI. Mapping off is the other spelling; both are live arms of
     /// <see cref="AdminAuthorization.IsOperator"/>.
     /// </param>
-    public static HttpClient CreateOperatorClient(
+    public static WebApplicationFactory<KairosDbContext> OperatorFactory(
         this WebApplicationFactory<KairosDbContext> app,
         Action<IServiceCollection>? substitutions = null,
         IReadOnlyList<string>? groups = null,
@@ -76,7 +76,26 @@ public static class OperatorSession
                 options => options.DefaultAuthenticateScheme = Scheme);
 
             substitutions?.Invoke(services);
-        })).CreateClient();
+        }));
+
+    /// <summary>
+    /// <see cref="OperatorFactory"/>'s client, for the tests that only need the client and never
+    /// the host behind it. <paramref name="substitutions"/> lives on a SEPARATE container from
+    /// <paramref name="app"/>'s own <c>Services</c> — <c>WithWebHostBuilder</c> derives a new
+    /// host rather than mutating the one passed in — so a test that both substitutes a service
+    /// AND has to resolve that same service back out again (draining <c>FollowUpWorker</c>
+    /// against the calendar double it just registered, say) needs <see cref="OperatorFactory"/>
+    /// itself, not this shortcut.
+    /// </summary>
+    public static HttpClient CreateOperatorClient(
+        this WebApplicationFactory<KairosDbContext> app,
+        Action<IServiceCollection>? substitutions = null,
+        IReadOnlyList<string>? groups = null,
+        string groupClaimType = AdminAuthorization.GroupClaimType,
+        string? subject = Subject,
+        string subjectClaimType = ClaimTypes.NameIdentifier) =>
+        app.OperatorFactory(substitutions, groups, groupClaimType, subject, subjectClaimType)
+            .CreateClient();
 
     /// <summary>What the substituted provider puts in the ticket, and the only thing it varies.</summary>
     private sealed class SignedInOptions : AuthenticationSchemeOptions

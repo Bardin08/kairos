@@ -38,6 +38,8 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
+    public DbSet<FollowUp> FollowUps => Set<FollowUp>();
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         optionsBuilder.AddInterceptors(PragmaInterceptor.Instance);
 

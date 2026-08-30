@@ -2,6 +2,7 @@ using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations.Webhooks;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
+using Kairos.Api.Security;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -32,6 +33,12 @@ public class BookingConcurrencyTests
     private static readonly Instant MeetingStart = Instant.FromUtc(2026, 9, 14, 10, 0);
     private static readonly Duration SlotDuration = Duration.FromMinutes(SlotMinutes);
     private static readonly BookerDetails Booker = new("Ada", "ada@example.com", "Europe/Warsaw");
+
+    /// <summary>
+    /// Thirty-two zero bytes, base64. A key a test can name, and one no deployment would ever
+    /// hold — <see cref="SecretProtector"/> only checks the length.
+    /// </summary>
+    private static readonly string TestKey = Convert.ToBase64String(new byte[SecretProtector.KeyBytes]);
 
     [Fact]
     public void TryCreate_TwoConcurrentRequestsForOneSlot_CreatesExactlyOne()
@@ -138,7 +145,11 @@ public class BookingConcurrencyTests
     /// exercise a shorter INSERT batch than the application ever runs.
     /// </summary>
     private static BookingWriter Writer(KairosDbContext context) =>
-        new(context, SystemClock.Instance, new OutboxWriter(context, SystemClock.Instance));
+        new(
+            context,
+            SystemClock.Instance,
+            new OutboxWriter(context, SystemClock.Instance),
+            new FollowUpWriter(context, new SecretProtector(TestKey), SystemClock.Instance));
 
     private static void Seed(KairosDbContext context, int consultingMarginMinutes)
     {
