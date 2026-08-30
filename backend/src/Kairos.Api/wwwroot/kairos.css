@@ -1419,13 +1419,10 @@
   /* ---- stacked field, and the checkbox list it holds ---------------------------
      A field whose control is a list of options cannot be a .field-row: the
      control is as wide as its longest label and has nothing to right-align
-     into. It keeps the row's vertical rhythm so a stack and a row read as one
-     set when they sit in the same group. */
-  .field-stack {
-    display: grid;
-    gap: var(--space-2);
-    padding-block: var(--space-3);
-  }
+     into. It is a .field — the same stacked grid every other label-over-control
+     field uses — and adds only the row's vertical rhythm, so a stack and a row
+     read as one set when they sit in the same group. */
+  .field-stack { padding-block: var(--space-3); }
 
   /* The options are one object rather than a run of loose rows, and they carry
      the same hairline, radius and raised fill as the controls beside them. */
@@ -1468,27 +1465,44 @@
     font-size: var(--text-sm);
     cursor: pointer;
   }
-  .check-row .detail { display: block; font-size: var(--text-xs); color: var(--text-tertiary); }
+  /* The detail line is .fine's size and colour and nothing else, so it wears
+     .fine and this rule carries only what .fine cannot: a second line under the
+     label rather than a run-on after it. */
+  .check-row .detail { display: block; }
   .check-row[data-disabled="true"] label { color: var(--text-tertiary); cursor: not-allowed; }
 
   /* A checkbox alone in a .field-row's control track, and the tap floor it
      could not otherwise have. The label naming the field is in the grid's other
      track, so — unlike .check-row above, where the label is the target — there
-     is nothing here to grow. The hit area is grown off the box instead: a
-     transparent ::after inset by half the difference reaches DESIGN.md's 44px
-     in both axes while the box stays the 18px the lists use. Nothing clips it;
-     .panel pads --space-5 and sets no overflow.
+     is nothing there to grow. An empty label wraps the box instead and becomes
+     the target itself: 44px in both axes, with the box still drawn at the 18px
+     the lists use.
+
+     A label rather than a transparent ::after on the input, which reaches the
+     same 44px and measures right in Chromium and WebKit. Whether a form control
+     generates a pseudo-element at all is the engine's business, and an engine
+     that declines leaves an 18px target with nothing to report it. Every engine
+     gives a label a box.
+
+     The negative inline margin pulls the box back out to where an 18px input
+     stood: flush with the right edge of the control track beside a select, and
+     flush with its left edge below 640px where that track left-aligns. 13px a
+     side, and nothing clips it — .panel pads --space-5 and sets no overflow.
 
      Not `.switch`: that name is already the design system's own toggle, a 40x24
      track driven by aria-checked on a button (docs/ui/admin.html), and it is
      declared later in this layer — a second `.switch` here would either lose to
      it or repaint it. */
-  .check-tap { position: relative; width: 18px; height: 18px; }
-  .check-tap::after {
-    content: "";
-    position: absolute;
-    inset: calc((18px - var(--tap)) / 2);
+  .check-tap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--tap);
+    height: var(--tap);
+    margin-inline: calc((18px - var(--tap)) / 2);
+    cursor: pointer;
   }
+  .check-tap input { width: 18px; height: 18px; flex: none; }
 
   /* A form that belongs to the row above it — an integration's settings, opened
      from its row in a table. Sunken rather than raised: it is a recess in the
