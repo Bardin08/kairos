@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Google;
 using Kairos.Api.Persistence.Entities;
@@ -26,12 +28,14 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
 
     private readonly KairosApp _app;
     private readonly IServiceScope _scope;
+    private readonly IntegrationSettingStore _settings;
 
     private GoogleAdapterHarness(KairosApp app, IServiceScope scope)
     {
         _app = app;
         _scope = scope;
         Adapter = scope.ServiceProvider.GetRequiredService<GoogleCalendarAdapter>();
+        _settings = scope.ServiceProvider.GetRequiredService<IntegrationSettingStore>();
     }
 
     public GoogleCalendarAdapter Adapter { get; }
@@ -54,6 +58,17 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
 
         return harness;
     }
+
+    /// <summary>Writes the saved selection the way the endpoint would, straight to the store.</summary>
+    public Task SaveBusyCalendarsAsync(params string[] calendars) =>
+        _settings.WriteAsync(
+            IntegrationProvider.Google,
+            new Dictionary<string, JsonElement>
+            {
+                [GoogleCalendarAdapter.BusyCalendarsKey] =
+                    JsonSerializer.SerializeToElement(calendars),
+            },
+            TestContext.Current.CancellationToken);
 
     public ValueTask DisposeAsync()
     {

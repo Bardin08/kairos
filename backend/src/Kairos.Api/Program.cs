@@ -231,17 +231,20 @@ builder.Services.AddScoped<IntegrationProviderResolver>();
 builder.Services.AddScoped<IntegrationSettingsReader>();
 builder.Services.AddScoped<IntegrationSettingsWriter>();
 
-// One adapter resolved through three interfaces, one instance per request rather than three:
+// One adapter resolved through four interfaces, one instance per request rather than four:
 // registering the class separately and handing the same instance to each role keeps a single Google
 // client per scope. Busy sources are a collection because every source has a say; the writer and
-// the conference creator are single because a meeting goes into one calendar. A second provider is
-// therefore a second IBusySource line beside this one and a replacement of the other two.
+// the conference creator are single because a meeting goes into one calendar. Settings are a
+// collection because the reader picks the one whose Provider matches the route. A second provider
+// is therefore a second IBusySource line beside this one and a replacement of the other two.
 builder.Services.AddScoped<GoogleCalendarAdapter>();
 builder.Services.AddScoped<IBusySource>(
     services => services.GetRequiredService<GoogleCalendarAdapter>());
 builder.Services.AddScoped<ICalendarWriter>(
     services => services.GetRequiredService<GoogleCalendarAdapter>());
 builder.Services.AddScoped<IConferenceCreator>(
+    services => services.GetRequiredService<GoogleCalendarAdapter>());
+builder.Services.AddScoped<IIntegrationSettings>(
     services => services.GetRequiredService<GoogleCalendarAdapter>());
 
 builder.Services.AddScoped<CalendarSyncService>();

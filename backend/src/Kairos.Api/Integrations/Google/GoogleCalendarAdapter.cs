@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
@@ -7,6 +9,7 @@ using Kairos.Api.Availability;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
+using Kairos.Api.Shared;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -23,7 +26,7 @@ using Settings = Kairos.Api.Persistence.Entities.Settings;
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
-/// One class because it is one account and one client; three interfaces because they are three
+/// One class because it is one account and one client; four interfaces because they are four
 /// capabilities and a provider that only did one of them would implement only that one.
 /// </summary>
 /// <remarks>
@@ -39,8 +42,10 @@ namespace Kairos.Api.Integrations.Google;
 public sealed class GoogleCalendarAdapter(
     GoogleClientFactory clients,
     KairosDbContext context,
+    IntegrationSettingStore settings,
     GoogleHttpFactory httpClients,
-    ILogger<GoogleCalendarAdapter> logger) : IBusySource, ICalendarWriter, IConferenceCreator
+    ILogger<GoogleCalendarAdapter> logger)
+    : IBusySource, ICalendarWriter, IConferenceCreator, IIntegrationSettings
 {
     /// <summary>The signed-in account's own calendar; its id is that account's address.</summary>
     private const string PrimaryCalendarId = "primary";
@@ -59,6 +64,40 @@ public sealed class GoogleCalendarAdapter(
 
     /// <summary>Of the entry points on a conference — the others are phone and SIP.</summary>
     private const string VideoEntryPoint = "video";
+
+    /// <summary>
+    /// Google's own ceiling on one freebusy query: <c>calendarExpansionMax</c> is documented with
+    /// a maximum value of 50. Enforced on save, where the operator is looking at the list and can
+    /// decide which calendars matter — never by truncating a read months later.
+    /// </summary>
+    public const int MaxFreebusyCalendars = 50;
+
+    /// <summary>The set busy time is read from, as the saved settings are keyed.</summary>
+    public const string BusyCalendarsKey = "busyCalendars";
+
+    /// <summary>The one bookings are written to.</summary>
+    public const string WriteCalendarKey = "writeCalendar";
+
+    private const string BusyCalendarsLabel = "Read busy time from";
+
+    private const string BusyCalendarsHelp =
+        "A slot is offered only when every calendar here is free. A calendar you add in Google "
+        + "later does not join by itself.";
+
+    private const string WriteCalendarLabel = "Write bookings to";
+
+    private const string WriteCalendarHelp = "Only calendars you can write to are offered.";
+
+    private const string PrimaryDetail = "Primary";
+
+    private const string ReadOnlyDetail = "Read-only subscription";
+
+    private const string DepartedDetail = "No longer reachable";
+
+    /// <summary>The two access roles that can hold an event, as Google spells them.</summary>
+    private const string OwnerRole = "owner";
+
+    private const string WriterRole = "writer";
 
     public IntegrationProvider Provider => IntegrationProvider.Google;
 
@@ -258,11 +297,217 @@ public sealed class GoogleCalendarAdapter(
         return new ConferenceDetails(conference.ConferenceId, new Uri(join));
     }
 
+    public async Task<IReadOnlyList<SettingField>> DescribeSettingsAsync(
+        CancellationToken cancellationToken)
+    {
+        var saved = await settings.ReadAsync(Provider, cancellationToken);
+        var chosen = Chosen(saved);
+        var entries = await ListCalendarsAsync(cancellationToken);
+
+        // Null and empty are different answers, and the field is where the difference is said:
+        // null is "Google could not be reached", so the panel keeps drawing the saved value
+        // instead of offering to clear a selection Kairos is still using.
+        IReadOnlyList<SettingOption>? readable = null;
+        IReadOnlyList<SettingOption>? writable = null;
+
+        if (entries is not null)
+        {
+            var offered = entries.Select(Option).ToList();
+
+            // A saved calendar Google no longer lists is still in force, so it is still shown.
+            // Synthesised here rather than left to the renderer: the frontend knows no provider,
+            // and a calendar id is a provider's fact about a provider's account.
+            offered.AddRange(chosen
+                .Where(id => entries.All(entry => entry.Id != id))
+                .Select(id => new SettingOption(id, id, DepartedDetail)));
+
+            readable = offered;
+            writable = entries.Where(CanWrite).Select(Option).ToList();
+        }
+
+        return
+        [
+            new SettingField(
+                BusyCalendarsKey,
+                SettingFieldKind.MultiSelect,
+                BusyCalendarsLabel,
+                BusyCalendarsHelp,
+                readable,
+                MaxFreebusyCalendars,
+                Required: false,
+                JsonSerializer.SerializeToElement(chosen)),
+
+            new SettingField(
+                WriteCalendarKey,
+                SettingFieldKind.Select,
+                WriteCalendarLabel,
+                WriteCalendarHelp,
+                writable,
+                MaxValues: null,
+                Required: true,
+                JsonSerializer.SerializeToElement(WriteTarget(saved))),
+        ];
+    }
+
+    /// <remarks>
+    /// Shape first, then the account. Everything a key or a value can get wrong on its own is
+    /// settled before Google is asked anything, so an unknown key is refused during an outage
+    /// rather than answered with a sentence about connectivity that has nothing to do with it.
+    /// </remarks>
+    public async Task SaveSettingsAsync(
+        IReadOnlyDictionary<string, JsonElement> values,
+        CancellationToken cancellationToken)
+    {
+        var chosen = new List<string>();
+        var target = default(string);
+
+        foreach (var (key, value) in values)
+        {
+            switch (key)
+            {
+                case BusyCalendarsKey:
+                    chosen = Ids(value, $"'{key}' takes a list of calendar ids.");
+
+                    if (chosen.Count > MaxFreebusyCalendars)
+                    {
+                        throw DomainException.Invalid(
+                            IIntegrationSettings.SettingTooManyCode,
+                            $"Kairos can read busy time from at most {MaxFreebusyCalendars} "
+                            + "calendars.");
+                    }
+
+                    break;
+
+                case WriteCalendarKey:
+                    target = Id(value, $"'{key}' takes one calendar id.");
+                    break;
+
+                default:
+                    // Unknown, not invalid. The writer forwards every key it does not own straight
+                    // here without inspecting it, so this adapter is the only thing in the process
+                    // that can tell a key nobody describes from a value nobody accepts — and
+                    // IIntegrationSettings gives those two different codes.
+                    throw DomainException.Invalid(
+                        IIntegrationSettings.SettingUnknownCode,
+                        $"Google has no setting called '{key}'.");
+            }
+        }
+
+        var entries = await ListCalendarsAsync(cancellationToken)
+            ?? throw DomainException.Invalid(
+                IIntegrationSettings.SettingInvalidCode,
+                "Google could not be reached, so there is nothing to check these against.");
+
+        var known = entries.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
+        var unknown = chosen.FirstOrDefault(id => !known.Contains(id));
+
+        if (unknown is not null)
+        {
+            throw DomainException.Invalid(
+                IIntegrationSettings.SettingInvalidCode,
+                $"'{unknown}' is not a calendar on this Google account.");
+        }
+
+        if (target is not null && !entries.Any(entry => CanWrite(entry) && entry.Id == target))
+        {
+            throw DomainException.Invalid(
+                IIntegrationSettings.SettingInvalidCode,
+                $"'{target}' is not a calendar Kairos can write bookings to.");
+        }
+
+        await settings.WriteAsync(Provider, values, cancellationToken);
+    }
+
     /// <summary>
     /// The booking id as Google spells an event id: thirty-two lowercase hex characters, which
     /// is a strict subset of the base32hex alphabet the API requires.
     /// </summary>
     private static string EventId(Guid bookingId) => bookingId.ToString("N");
+
+    private static SettingOption Option(CalendarListEntry entry) =>
+        new(entry.Id, entry.SummaryOverride ?? entry.Summary ?? entry.Id, Detail(entry));
+
+    /// <summary>
+    /// What the option says about itself under its own label. Primary first, because an operator
+    /// with a dozen calendars is looking for that one and it is also the only id that is always
+    /// right.
+    /// </summary>
+    private static string? Detail(CalendarListEntry entry)
+    {
+        if (entry.Primary == true)
+        {
+            return PrimaryDetail;
+        }
+
+        return CanWrite(entry) ? null : ReadOnlyDetail;
+    }
+
+    /// <summary>
+    /// Whether an event can be put in it. Busy time is readable from any calendar on the account;
+    /// an insert into a subscription is refused, so offering one to write to would be offering a
+    /// choice that cannot work.
+    /// </summary>
+    private static bool CanWrite(CalendarListEntry entry) =>
+        entry.AccessRole is OwnerRole or WriterRole;
+
+    private static List<string> Ids(JsonElement value, string complaint)
+    {
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            throw DomainException.Invalid(IIntegrationSettings.SettingInvalidCode, complaint);
+        }
+
+        return [.. value.EnumerateArray().Select(item => Id(item, complaint))];
+    }
+
+    private static string Id(JsonElement value, string complaint) =>
+        value.ValueKind == JsonValueKind.String
+            ? value.GetString()!
+            : throw DomainException.Invalid(IIntegrationSettings.SettingInvalidCode, complaint);
+
+    /// <summary>
+    /// The calendars busy time is read from, as saved. Anything malformed reads as nothing chosen
+    /// rather than throwing: this is on the path a stranger's page load takes, and a settings row
+    /// somebody edited by hand must not be able to stop availability answering.
+    /// </summary>
+    private static List<string> Chosen(IReadOnlyDictionary<string, JsonElement> saved) =>
+        saved.TryGetValue(BusyCalendarsKey, out var value) && value.ValueKind == JsonValueKind.Array
+            ? [.. value.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!)]
+            : [];
+
+    private static string? WriteTarget(IReadOnlyDictionary<string, JsonElement> saved) =>
+        saved.TryGetValue(WriteCalendarKey, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    /// <summary>
+    /// Every calendar on the account, or null when Google could not be asked. Null rather than an
+    /// exception because the caller describing settings has something useful to show without it.
+    /// </summary>
+    private async Task<IReadOnlyList<CalendarListEntry>?> ListCalendarsAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var credential = await clients.GetCredentialAsync(cancellationToken);
+            if (credential is null)
+            {
+                return null;
+            }
+
+            using var service = CreateService(credential);
+            var list = await service.CalendarList.List().ExecuteAsync(cancellationToken);
+
+            return list.Items?.Where(entry => entry.Deleted != true).ToList() ?? [];
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Reading the Google calendar list failed.");
+            return null;
+        }
+    }
 
     /// <remarks>
     /// The factory is injected rather than left to the client library's default, and the only
