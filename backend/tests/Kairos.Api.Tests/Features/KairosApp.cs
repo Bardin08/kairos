@@ -22,12 +22,17 @@ using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
 namespace Kairos.Api.Tests.Features;
 
 /// <summary>
-/// The application as it ships, over a throwaway SQLite file. Nothing is substituted unless a test
-/// asks for it: these tests are about the wiring — routing, binding, DataAnnotations, the exception
-/// handler, the composition root — so replacing any of it would test a program that does not exist.
-/// One substitution is offered, and <paramref name="google"/> documents why it has to be.
+/// The application as it ships, over a throwaway SQLite file. These tests are about the wiring —
+/// routing, binding, DataAnnotations, the exception handler, the composition root — so what is
+/// replaced is replaced for a reason written down beside it, and nothing else is.
 /// </summary>
 /// <remarks>
+/// Three substitutions, and two of them are unconditional — every test gets them whether it asked
+/// or not. <c>DbContextOptions&lt;KairosDbContext&gt;</c> is rebuilt by hand, and the hosted
+/// <see cref="FollowUpWorker"/> is removed and re-registered as a plain singleton; both reasons are
+/// written down in <see cref="ConfigureWebHost"/>. The third is optional and is
+/// <paramref name="google"/>.
+///
 /// Typed on <see cref="KairosDbContext"/> rather than Program: the factory needs any type from
 /// the application's assembly, and reusing one saves Program.cs a public partial class.
 /// </remarks>
@@ -38,9 +43,15 @@ namespace Kairos.Api.Tests.Features;
 /// with a page present <c>MapFallbackToFile</c> answers 200 for any unmapped extensionless path.
 /// </param>
 /// <param name="google">
-/// A stand-in for Google's HTTP, or null to leave the real one in place. The only substitution this
-/// harness makes: an adapter test has to see the request that went out, and a request that went out
-/// over the network went to somebody else's server.
+/// A stand-in for Google's HTTP, or null to leave the real one in place: an adapter test has to see
+/// the request that went out, and a request that went out over the network went to somebody else's
+/// server.
+///
+/// It does a second thing, and the second thing is observable. Passing a handler also sets the
+/// client id, secret and redirect URI, which flips <see cref="GoogleClientFactory.IsConfigured"/>
+/// and with it what the integrations surface reports. The two are welded together, so "configured
+/// but never connected" — a real state of a fresh deployment — cannot be asked for here without
+/// also faking the transport.
 /// </param>
 public sealed class KairosApp(
     string? webRoot = null,
@@ -177,21 +188,24 @@ public sealed class KairosApp(
             services.AddSingleton<FollowUpWorker>();
         });
 
-        if (google is null)
+        // A block rather than an early return, so what comes after it is unconditional by
+        // default. The return scoped everything below to "a fake Google was passed" without
+        // saying so, and nothing would have failed for the next thing appended here.
+        if (google is not null)
         {
-            return;
+            builder.UseSetting(
+                $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientId)}", GoogleClientId);
+            builder.UseSetting(
+                $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientSecret)}",
+                GoogleClientSecret);
+            builder.UseSetting(
+                $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.RedirectUri)}",
+                GoogleRedirectUri);
+
+            builder.ConfigureServices(services =>
+                services.Replace(ServiceDescriptor.Singleton<GoogleHttpFactory>(
+                    new FakeGoogleHttpFactory(google))));
         }
-
-        builder.UseSetting(
-            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientId)}", GoogleClientId);
-        builder.UseSetting(
-            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.ClientSecret)}", GoogleClientSecret);
-        builder.UseSetting(
-            $"{GoogleOptions.SectionName}:{nameof(GoogleOptions.RedirectUri)}", GoogleRedirectUri);
-
-        builder.ConfigureServices(services =>
-            services.Replace(ServiceDescriptor.Singleton<GoogleHttpFactory>(
-                new FakeGoogleHttpFactory(google))));
     }
 
     protected override void Dispose(bool disposing)
