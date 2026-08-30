@@ -77,7 +77,6 @@ public static class IntegrationEndpoints
     /// <summary>The exchange failed. The reason is in the log; there is nothing safe to put here.</summary>
     public const string ConnectFailedCode = "connect_failed";
 
-    private const string ProviderName = "Integration provider";
     private const string ConnectedParameter = "connected";
     private const string ErrorParameter = "error";
     private const char StateSeparator = ':';
@@ -251,7 +250,8 @@ public static class IntegrationEndpoints
     private static IIntegrationConnector Require(
         IEnumerable<IIntegrationConnector> connectors,
         string provider) =>
-        Find(connectors, provider) ?? throw DomainException.NotFound(ProviderName);
+        Find(connectors, provider)
+        ?? throw DomainException.NotFound(IntegrationProviderResolver.UnknownProviderName);
 
     /// <summary>
     /// Matched against the connectors rather than parsed into <see cref="IntegrationProvider"/> by

@@ -14,7 +14,13 @@ public sealed class IntegrationProviderResolver(
     IEnumerable<IIntegrationConnector> connectors,
     IntegrationCredentialStore credentials)
 {
-    private const string ProviderName = "Integration";
+    /// <summary>
+    /// The sentence <see cref="IntegrationEndpoints"/> answers for the same condition, held here
+    /// so the connect route and the settings routes cannot drift into naming it differently.
+    /// </summary>
+    public const string UnknownProviderName = "Integration provider";
+
+    private const string ConnectionName = "A connection to that integration";
 
     /// <summary>
     /// Matched against the registered connectors, case-insensitively, for the reasons
@@ -27,7 +33,7 @@ public sealed class IntegrationProviderResolver(
             .FirstOrDefault(connector =>
                 Name(connector.Provider).Equals(provider, StringComparison.OrdinalIgnoreCase))
             ?.Provider
-        ?? throw DomainException.NotFound(ProviderName);
+        ?? throw DomainException.NotFound(UnknownProviderName);
 
     /// <summary>
     /// The switch is a column on the credential row, so a provider with no row has nowhere to keep
@@ -39,8 +45,11 @@ public sealed class IntegrationProviderResolver(
     {
         var rows = await credentials.ListAsync(cancellationToken);
 
+        // Its own sentence, not the unknown provider's: a provider this build cannot name and one
+        // nobody has connected are different things to do about, and the code is not_found for
+        // both, so the title is all an operator reading a log has to tell them apart by.
         return rows.FirstOrDefault(candidate => candidate.Provider == provider)
-            ?? throw DomainException.NotFound(ProviderName);
+            ?? throw DomainException.NotFound(ConnectionName);
     }
 
     /// <summary>Lowercase, as every other enum this API returns — booking status set the shape.</summary>

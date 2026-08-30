@@ -56,7 +56,7 @@ public sealed class IntegrationSettingsReader(
     private static SettingFieldResponse Switch(bool enabled) =>
         new(
             IIntegrationSettings.EnabledKey,
-            IntegrationSettingKinds.Spell(SettingFieldKind.Toggle),
+            Spell(SettingFieldKind.Toggle),
             EnabledLabel,
             EnabledHelp,
             Options: null,
@@ -67,11 +67,26 @@ public sealed class IntegrationSettingsReader(
     private static SettingFieldResponse Describe(SettingField field) =>
         new(
             field.Key,
-            IntegrationSettingKinds.Spell(field.Kind),
+            Spell(field.Kind),
             field.Label,
             field.Help,
             field.Options,
             field.MaxValues,
             field.Required,
             field.Value);
+
+    /// <summary>The three strings the panel keys on, in one place.</summary>
+    /// <remarks>
+    /// A switch rather than a serializer naming policy: a global policy spells every enum in the
+    /// API at once, so a change made for one response silently rewrites the others. Here a reader
+    /// sees all three together and a rename cannot happen by accident. It is no argument against a
+    /// converter scoped to this one enum, which nothing has needed yet.
+    /// </remarks>
+    private static string Spell(SettingFieldKind kind) => kind switch
+    {
+        SettingFieldKind.Toggle => "toggle",
+        SettingFieldKind.Select => "select",
+        SettingFieldKind.MultiSelect => "multiSelect",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown setting field kind."),
+    };
 }

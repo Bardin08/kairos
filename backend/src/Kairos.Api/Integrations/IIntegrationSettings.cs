@@ -30,7 +30,10 @@ public interface IIntegrationSettings
     /// Throwable by a provider and not only by the endpoint, and that is the whole reason these
     /// three live here. The endpoint owns <see cref="EnabledKey"/> and forwards every other key
     /// straight to the provider without inspecting it, so the provider is the only thing in the
-    /// process that can tell a key nobody describes from a value nobody accepts.
+    /// process that can tell a key nobody describes from a value nobody accepts — except where
+    /// there is no capability to ask, which
+    /// <see cref="Features.Integrations.IntegrationSettingsWriter"/> answers with this code
+    /// itself, because a provider with no settings describes no key at all.
     /// </remarks>
     public const string SettingUnknownCode = "setting_unknown";
 
@@ -58,10 +61,10 @@ public interface IIntegrationSettings
     /// <param name="values">
     /// The whole of the provider's own settings as the operator is looking at them, never a delta:
     /// the panel has one Save and sends back everything it is showing. Never
-    /// <see cref="EnabledKey"/> — the endpoint peels the switch off and writes the column before
-    /// the provider is called, so a provider neither sees it nor can contradict it. A key that is
-    /// absent is left as it was: the store merges rather than replaces, so one caller's keys never
-    /// clear another's.
+    /// <see cref="EnabledKey"/> — the endpoint peels the switch off before calling the provider
+    /// and writes the column after this returns, so a provider neither sees it nor can contradict
+    /// it, and a refusal here leaves the switch where it was. A key that is absent is left as it
+    /// was: the store merges rather than replaces, so one caller's keys never clear another's.
     /// </param>
     public Task SaveSettingsAsync(
         IReadOnlyDictionary<string, JsonElement> values,
