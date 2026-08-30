@@ -40,6 +40,21 @@ public sealed class IntegrationCredential
     public CredentialHealth Health { get; set; } = CredentialHealth.Healthy;
 
     /// <summary>
+    /// The operator's switch. Off, the credential is kept and nothing is read or written with it —
+    /// which is not the same as disconnected, where the grant is revoked and the row is gone.
+    /// </summary>
+    /// <remarks>
+    /// Initialised true rather than left to <c>default(bool)</c>, which is false: a row written by
+    /// a path that never thought about the switch is a working integration, and an upgrade that
+    /// silently paused every connection would be the worst possible reading of this column. The
+    /// migration gives existing rows the same default.
+    ///
+    /// A column and not a described setting, because the generic layer queries it — the reason
+    /// this class already gives for keeping the queryable parts as columns.
+    /// </remarks>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
     /// Unix seconds of the last proven use, or null when there has not been one. It is what makes
     /// an alert actionable: "reconnect" without "it last worked in March" leaves the operator
     /// unable to tell a five-minute outage from a season of lost meetings.

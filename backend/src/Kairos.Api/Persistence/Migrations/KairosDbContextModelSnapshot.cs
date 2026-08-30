@@ -275,6 +275,9 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<long>("ConnectedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Health")
                         .HasColumnType("INTEGER");
 
@@ -300,6 +303,30 @@ namespace Kairos.Api.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("IntegrationCredentials");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.IntegrationSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Provider")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Values")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider")
+                        .IsUnique();
+
+                    b.ToTable("IntegrationSettings");
                 });
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Link", b =>
