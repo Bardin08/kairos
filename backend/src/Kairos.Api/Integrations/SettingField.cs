@@ -22,9 +22,17 @@ namespace Kairos.Api.Integrations;
 /// <param name="Value">
 /// A bool for <see cref="SettingFieldKind.Toggle"/>, a string or null for
 /// <see cref="SettingFieldKind.Select"/>, an array of strings for
-/// <see cref="SettingFieldKind.MultiSelect"/>. A <see cref="JsonElement"/> rather than three
-/// nullable properties of which exactly one is ever set: the union is real, and spelling it as a
-/// wide record with two dead members every time would be the dishonest half of the trade.
+/// <see cref="SettingFieldKind.MultiSelect"/>; for either of those two, every value is the
+/// <see cref="SettingOption.Value"/> of one of this field's own <paramref name="Options"/>.
+/// A <see cref="JsonElement"/> rather than three nullable properties of which exactly one is ever
+/// set: the union is real, and spelling it as a wide record with two dead members every time would
+/// be the dishonest half of the trade. What it costs instead is two failures that surface far from
+/// their cause — <c>default(JsonElement)</c> is <c>ValueKind.Undefined</c> and throws from the
+/// response writer rather than from the seam that built the field, and an element outliving its
+/// <see cref="JsonDocument"/> throws <see cref="ObjectDisposedException"/>. Building every value
+/// with <c>JsonSerializer.SerializeToElement(...)</c> avoids both, and the receiving side needs no
+/// defensive <c>Clone()</c>, because <c>System.Text.Json</c> clones when it deserializes into a
+/// <see cref="JsonElement"/>.
 /// </param>
 public sealed record SettingField(
     string Key,
