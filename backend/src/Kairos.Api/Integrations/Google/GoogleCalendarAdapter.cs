@@ -12,8 +12,11 @@ using Microsoft.EntityFrameworkCore;
 
 using NodaTime;
 
-// Both aliases disambiguate a Google type of the same name — Google.Apis.Calendar.v3.Data.Settings
-// is the account's calendar preferences, and NodaTime.Interval is not half-open.
+// The first two aliases disambiguate a Google type of the same name —
+// Google.Apis.Calendar.v3.Data.Settings is the account's calendar preferences, and NodaTime.Interval
+// is not half-open. The third names Google's factory interface, which collides with the one in
+// System.Net.Http.
+using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
 using Interval = Kairos.Api.Scheduling.Interval;
 using Settings = Kairos.Api.Persistence.Entities.Settings;
 
@@ -36,6 +39,7 @@ namespace Kairos.Api.Integrations.Google;
 public sealed class GoogleCalendarAdapter(
     GoogleClientFactory clients,
     KairosDbContext context,
+    GoogleHttpFactory httpClients,
     ILogger<GoogleCalendarAdapter> logger) : IBusySource, ICalendarWriter, IConferenceCreator
 {
     /// <summary>The signed-in account's own calendar; its id is that account's address.</summary>
@@ -260,11 +264,18 @@ public sealed class GoogleCalendarAdapter(
     /// </summary>
     private static string EventId(Guid bookingId) => bookingId.ToString("N");
 
-    private static CalendarService CreateService(UserCredential credential) =>
+    /// <remarks>
+    /// The factory is injected rather than left to the client library's default, and the only
+    /// reason is testability: it is the one hook the library offers for standing in front of the
+    /// network, and without it the code that builds a request — the code this class asks the wrong
+    /// question in — has no test that can see it. Production registers the library's own.
+    /// </remarks>
+    private CalendarService CreateService(UserCredential credential) =>
         new(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
             ApplicationName = ApplicationName,
+            HttpClientFactory = httpClients,
         });
 
     /// <summary>

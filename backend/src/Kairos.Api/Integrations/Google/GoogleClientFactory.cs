@@ -9,6 +9,9 @@ using Kairos.Api.Persistence.Entities;
 
 using Microsoft.Extensions.Options;
 
+// Aliased because Google's factory interface collides by name with the one in System.Net.Http.
+using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
+
 namespace Kairos.Api.Integrations.Google;
 
 /// <summary>
@@ -55,15 +58,20 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
 
     private readonly GoogleOptions _options;
     private readonly IServiceScopeFactory _scopes;
+    private readonly GoogleHttpFactory _httpClients;
     private readonly GoogleAuthorizationCodeFlow _flow;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private UserCredential? _credential;
 
-    public GoogleClientFactory(IOptions<GoogleOptions> options, IServiceScopeFactory scopes)
+    public GoogleClientFactory(
+        IOptions<GoogleOptions> options,
+        IServiceScopeFactory scopes,
+        GoogleHttpFactory httpClients)
     {
         _options = options.Value;
         _scopes = scopes;
+        _httpClients = httpClients;
         _flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
         {
             ClientSecrets = new ClientSecrets
@@ -75,6 +83,11 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
             // One scope, and the writable one: Part B creates the meeting as well as reading
             // busy time, and asking for read-only now would mean a second consent screen later.
             Scopes = [CalendarService.Scope.Calendar],
+
+            // The token refresh goes through this too. Given only to the adapter, a test would
+            // fake every Calendar call and still reach Google's real token endpoint to obtain the
+            // credential that makes them — a network call in a unit test, and a flaky one.
+            HttpClientFactory = httpClients,
         });
     }
 
@@ -208,6 +221,7 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         {
             HttpClientInitializer = new UserCredential(_flow, UserId, token),
             ApplicationName = ApplicationName,
+            HttpClientFactory = _httpClients,
         });
 
         var calendar = await service.Calendars.Get(PrimaryCalendarId).ExecuteAsync(cancellationToken);
