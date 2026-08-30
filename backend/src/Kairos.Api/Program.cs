@@ -227,6 +227,9 @@ builder.Services.AddScoped<BookingMover>();
 builder.Services.AddScoped<ProposalWriter>();
 builder.Services.AddScoped<InviteWriter>();
 builder.Services.AddScoped<InviteReader>();
+builder.Services.AddScoped<IntegrationProviderResolver>();
+builder.Services.AddScoped<IntegrationSettingsReader>();
+builder.Services.AddScoped<IntegrationSettingsWriter>();
 
 // One adapter resolved through three interfaces, one instance per request rather than three:
 // registering the class separately and handing the same instance to each role keeps a single Google
@@ -438,6 +441,7 @@ app.MapAdmin()
     .MapPatternsAdmin()
     .MapSettingsAdmin()
     .MapIntegrationsAdmin()
+    .MapIntegrationSettingsAdmin()
     .MapAlertsAdmin();
 
 // Said out loud because the middleware cannot say it. A RequireAssertion has no logger and

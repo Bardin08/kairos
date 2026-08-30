@@ -14,6 +14,12 @@ namespace Kairos.Api.Features.Integrations;
 /// One provider as the Integrations page renders it. Every field is provider-neutral, so the page
 /// lists whatever the backend returns instead of hard-coding a Google button.
 /// </summary>
+/// <param name="Enabled">
+/// The operator's switch. False is a stored credential nothing is read or written with, which is
+/// not <see cref="Connected"/> being false — there the grant is gone and the row with it. True for
+/// a provider nobody connected, because a connection that does not exist is not one somebody
+/// paused.
+/// </param>
 /// <param name="Fault">
 /// A code for a stored credential this deployment cannot use, null when there is nothing wrong. A
 /// code and never a sentence: the page turns codes into copy everywhere else, and prose from the
@@ -26,6 +32,7 @@ public sealed record IntegrationResponse(
     string? AccountLabel,
     string? ConnectedAt,
     bool ReconnectRequired,
+    bool Enabled,
     string? Fault);
 
 /// <summary>Where to send the browser. The page navigates to it; it does not fetch it.</summary>
@@ -147,6 +154,7 @@ public static class IntegrationEndpoints
                 row?.AccountLabel,
                 row is null ? null : Format(row.ConnectedAt),
                 reconnect,
+                row is null || row.Enabled,
                 fault));
         }
 

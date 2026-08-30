@@ -25,6 +25,21 @@ public interface IIntegrationSettings
     /// </summary>
     public const string EnabledKey = "enabled";
 
+    /// <summary>No field by that key on this provider.</summary>
+    /// <remarks>
+    /// Throwable by a provider and not only by the endpoint, and that is the whole reason these
+    /// three live here. The endpoint owns <see cref="EnabledKey"/> and forwards every other key
+    /// straight to the provider without inspecting it, so the provider is the only thing in the
+    /// process that can tell a key nobody describes from a value nobody accepts.
+    /// </remarks>
+    public const string SettingUnknownCode = "setting_unknown";
+
+    /// <summary>The wrong type for the kind, or a value that is not among the field's options.</summary>
+    public const string SettingInvalidCode = "setting_invalid";
+
+    /// <summary>More values than <see cref="SettingField.MaxValues"/> allows.</summary>
+    public const string SettingTooManyCode = "setting_too_many";
+
     public IntegrationProvider Provider { get; }
 
     /// <summary>
