@@ -40,8 +40,8 @@ public sealed class IntegrationCredential
     public CredentialHealth Health { get; set; } = CredentialHealth.Healthy;
 
     /// <summary>
-    /// The operator's switch. Off, the credential is kept and nothing is read or written with it —
-    /// which is not the same as disconnected, where the grant is revoked and the row is gone.
+    /// The operator's switch. Off is not disconnect: the credential stays and nothing is read or
+    /// written with it.
     /// </summary>
     /// <remarks>
     /// Initialised true rather than left to <c>default(bool)</c>, which is false: a row written by
@@ -49,8 +49,10 @@ public sealed class IntegrationCredential
     /// silently paused every connection would be the worst possible reading of this column. The
     /// migration gives existing rows the same default.
     ///
-    /// A column and not a described setting, because the generic layer queries it — the reason
-    /// this class already gives for keeping the queryable parts as columns.
+    /// A column and not a described setting, for the reason
+    /// <see cref="Integrations.IIntegrationSettings"/> gives: a provider that implements no
+    /// settings capability still has a switch, and one that does implement it can neither forget
+    /// the switch nor contradict it.
     /// </remarks>
     public bool Enabled { get; set; } = true;
 
