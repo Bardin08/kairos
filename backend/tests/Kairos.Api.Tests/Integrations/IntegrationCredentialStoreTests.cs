@@ -194,6 +194,81 @@ public class IntegrationCredentialStoreTests
                 IntegrationProvider.Google, TestContext.Current.CancellationToken));
     }
 
+    /// <summary>
+    /// The whole of the switch. Every adapter reaches its credential through this method, so a
+    /// paused provider goes quiet without a line of its own — and a provider added later inherits
+    /// that by existing rather than by remembering.
+    /// </summary>
+    [Fact]
+    public async Task ReadAsync_ForADisabledProvider_AnswersNullAsThoughNothingWereConnected()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        var payload = await store.ReadAsync<StoredPayload>(
+            IntegrationProvider.Google, TestContext.Current.CancellationToken);
+
+        payload.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The page has to tell Paused from Not connected, and it reads the row to do it. Gating the
+    /// listing as well would collapse the two states into one and lose the operator the sentence
+    /// explaining why nothing is syncing.
+    /// </summary>
+    [Fact]
+    public async Task ListAsync_ForADisabledProvider_StillReturnsTheRow()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        var rows = await store.ListAsync(TestContext.Current.CancellationToken);
+
+        rows.ShouldHaveSingleItem().Enabled.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Reconnecting is the operator fixing a grant, not resuming an integration they paused on
+    /// purpose. The switch is one control away on the same panel; guessing here would be the
+    /// upgrade quietly deciding what Kairos considers busy.
+    /// </summary>
+    [Fact]
+    public async Task WriteAsync_OverADisabledProvider_LeavesItDisabled()
+    {
+        using var database = new TestDatabase();
+        var clock = new MovableClock(Instant.FromUnixTimeSeconds(FirstSuccess));
+        await using var context = database.CreateContext();
+        var store = NewStore(context, clock);
+
+        await SeedConnectedAsync(store, context);
+
+        await store.SetEnabledAsync(
+            IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+        await store.WriteAsync(
+            IntegrationProvider.Google,
+            new StoredPayload(ReplacementToken),
+            AccountLabel,
+            TestContext.Current.CancellationToken);
+
+        var rows = await store.ListAsync(TestContext.Current.CancellationToken);
+        rows.ShouldHaveSingleItem().Enabled.ShouldBeFalse();
+    }
+
     /// <summary>Shaped like a provider's payload; nothing here reads what is inside it.</summary>
     private sealed record StoredPayload(string RefreshToken);
 
