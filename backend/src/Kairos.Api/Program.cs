@@ -257,6 +257,7 @@ builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection(Webh
 // independently of each other and of every request.
 builder.Services.AddHostedService<MeetingEndedPoller>();
 builder.Services.AddHostedService<OutboxDispatcher>();
+builder.Services.AddHostedService<FollowUpWorker>();
 
 // Beside them rather than inside that pair: it runs on the same minute and notices something only
 // a clock can notice, but what it produces is a mail rather than a queued event. Nothing depends on
