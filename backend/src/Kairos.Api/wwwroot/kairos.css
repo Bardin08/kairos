@@ -1416,6 +1416,67 @@
     .field-row-control > .prefix { width: 100%; }
   }
 
+  /* ---- stacked field, and the checkbox list it holds ---------------------------
+     A field whose control is a list of options cannot be a .field-row: the
+     control is as wide as its longest label and has nothing to right-align
+     into. It keeps the row's vertical rhythm so a stack and a row read as one
+     set when they sit in the same group. */
+  .field-stack {
+    display: grid;
+    gap: var(--space-2);
+    padding-block: var(--space-3);
+  }
+
+  /* The options are one object rather than a run of loose rows, and they carry
+     the same hairline, radius and raised fill as the controls beside them. */
+  .check-list {
+    background: var(--surface-raised);
+    border: var(--border-width) solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-4);
+  }
+
+  /* The row carries the tap floor, not the box: a UA checkbox draws at ~13px
+     and DESIGN.md's floor is 44px on every viewport. The label is inside the
+     row and bound to the box by `for`, so the whole 44px is the target.
+
+     No accent-color here. `body` sets the product's, and a ticked box is the
+     accent's first job — the selection.
+
+     Top-aligned rather than centred, because an option with a detail line is
+     two lines tall and a centred box would float against the middle of them.
+     18px is the box against --text-sm, and the 3px lift puts it on the label's
+     first baseline — measured the way .field-error's own 14px icon was. */
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    min-height: var(--tap);
+    padding-block: var(--space-2);
+  }
+  .check-row input { width: 18px; height: 18px; margin-top: 3px; flex: none; }
+  .check-row label { font-size: var(--text-sm); cursor: pointer; }
+  .check-row .detail { display: block; font-size: var(--text-xs); color: var(--text-tertiary); }
+  .check-row[data-disabled="true"] label { color: var(--text-tertiary); cursor: not-allowed; }
+
+  /* A form that belongs to the row above it — an integration's settings, opened
+     from its row in a table. Sunken rather than raised: it is a recess in the
+     surface it opened from, and DESIGN.md forbids nesting a card in a card. */
+  .panel {
+    background: var(--surface-sunken);
+    border: var(--border-width) solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+  }
+  .panel-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: var(--border-width) solid var(--border-subtle);
+  }
+
   /* Rows that are one set. Hairlines between them, never shadow — DESIGN.md
      reserves shadow for what floats. */
   .rowgroup {
