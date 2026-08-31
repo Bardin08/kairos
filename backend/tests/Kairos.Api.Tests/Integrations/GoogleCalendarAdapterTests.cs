@@ -210,6 +210,38 @@ public class GoogleCalendarAdapterTests
     }
 
     /// <summary>
+    /// Unticking everything is a decision, not a blank. It says Google contributes no busy time,
+    /// and it has to survive every load after the one that saved it — keying the default off an
+    /// empty list rather than an absent key read the decision as "never saved", worked the default
+    /// out again and put every calendar the operator had just removed straight back.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is stubbed, because nothing should be asked: no calendar list, since no default is
+    /// being worked out, and no freebusy, since a query naming no calendar has no answer to give.
+    /// <c>UnstubbedUris</c> is what makes that assertion mean something — <c>GetBusyAsync</c>
+    /// swallows a provider failure, so a call that did go out would come back as the same empty
+    /// list a correct one does.
+    /// </remarks>
+    [Fact]
+    public async Task GetBusyAsync_WithAnEmptySelectionSaved_AsksGoogleNothing()
+    {
+        var handler = new FakeGoogleHandler();
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveBusyCalendarsAsync();
+
+        for (var load = 0; load < PageLoads; load++)
+        {
+            var busy = await harness.Adapter.GetBusyAsync(
+                Window, TestContext.Current.CancellationToken);
+
+            busy.ShouldBeEmpty();
+        }
+
+        handler.Requests.ShouldBeEmpty();
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// Once, not per page load. <c>GetBusyAsync</c> runs on every view of an anonymous public
     /// page, so recomputing the default each time would pay a second Google round trip forever.
     /// The second query asking for the same calendars is what proves the first was written down.
@@ -272,10 +304,12 @@ public class GoogleCalendarAdapterTests
     /// <summary>
     /// Google shows nothing ticked, which is a state of the account rather than an answer about
     /// it. A freebusy query naming no calendar reports no busy time at all, so every slot in the
-    /// week would be offered — the account's own calendar is the floor under that.
+    /// week would be offered — the account's own calendar is the floor under that, under the
+    /// address Google lists it by rather than the alias, so the settings panel can match it to an
+    /// option it offers.
     /// </summary>
     [Fact]
-    public async Task GetBusyAsync_WithNoCalendarMarkedSelected_AsksAboutThePrimaryAlone()
+    public async Task GetBusyAsync_WithNoCalendarMarkedSelected_AsksAboutTheAccountsOwnCalendarAlone()
     {
         var handler = new FakeGoogleHandler()
             .Answering(CalendarListPath, NothingSelectedCalendarList)
@@ -286,8 +320,37 @@ public class GoogleCalendarAdapterTests
         var busy = await harness.Adapter.GetBusyAsync(
             Window, TestContext.Current.CancellationToken);
 
-        AskedFor(LastFreebusy(handler)).ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAlias);
+        AskedFor(LastFreebusy(handler)).ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAddress);
         busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+    }
+
+    /// <summary>
+    /// The floor is written down like any other default. Nothing ticked in Google is a state that
+    /// persists, so a fallback that answered without recording itself asked for the calendar list
+    /// on every view of the booking page — the one round trip per load the materialisation exists
+    /// to stop.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_CalledTwiceWithNoCalendarMarkedSelected_AsksForTheCalendarListOnlyOnce()
+    {
+        var handler = new FakeGoogleHandler()
+            .Answering(CalendarListPath, NothingSelectedCalendarList)
+            .Answering(FreebusyPath, OneBusyPeriod);
+
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        for (var load = 0; load < PageLoads; load++)
+        {
+            var busy = await harness.Adapter.GetBusyAsync(
+                Window, TestContext.Current.CancellationToken);
+
+            busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+        }
+
+        handler.Requests.Count(request => request.Path.Contains(CalendarListPath))
+            .ShouldBe(CalendarListCalls);
+
+        AskedFor(LastFreebusy(handler)).ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAddress);
     }
 
     /// <summary>
@@ -464,6 +527,31 @@ public class GoogleCalendarAdapterTests
 
         busy.Value.EnumerateArray().Select(value => value.GetString())
             .ShouldContain(DepartedCalendarAddress);
+    }
+
+    /// <summary>
+    /// The same for the calendar bookings are written to, whose options were the writable list
+    /// raw. A saved value no option carries renders the select blank and comes back
+    /// <c>setting_invalid</c> on the next save, over a choice the operator was never shown.
+    /// </summary>
+    [Fact]
+    public async Task DescribeSettingsAsync_WithASavedWriteCalendarGoogleNoLongerLists_StillOffersIt()
+    {
+        var handler = new FakeGoogleHandler().Answering(CalendarListPath, CalendarList);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveWriteCalendarAsync(DepartedCalendarAddress);
+
+        var fields = await harness.Adapter.DescribeSettingsAsync(
+            TestContext.Current.CancellationToken);
+
+        var write = fields.Single(field => field.Key == GoogleCalendarAdapter.WriteCalendarKey);
+        write.Options.ShouldNotBeNull();
+
+        var departed = write.Options.Single(option => option.Value == DepartedCalendarAddress);
+        departed.Detail.ShouldNotBeNullOrEmpty();
+
+        write.Value.GetString().ShouldBe(DepartedCalendarAddress);
+        handler.UnstubbedUris.ShouldBeEmpty();
     }
 
     /// <summary>
