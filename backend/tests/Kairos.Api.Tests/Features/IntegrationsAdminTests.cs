@@ -37,6 +37,13 @@ public class IntegrationsAdminTests
 
     private const string UnknownProvider = "bogus";
 
+    /// <summary>
+    /// What <see cref="IntegrationProviderResolver.UnknownProviderName"/> reads as once
+    /// <see cref="DomainException.NotFound"/> has made a sentence of it. Spelled out rather than
+    /// composed from the constant, so a change to either half has to be made on purpose.
+    /// </summary>
+    private const string UnknownProviderTitle = "Integration provider does not exist.";
+
     /// <summary>2026-08-15T22:29:14Z. Any instant; nothing here reads a clock.</summary>
     private const long ConnectedAt = 1_786_832_954;
 
@@ -146,8 +153,37 @@ public class IntegrationsAdminTests
         landing.ShouldContain(DomainException.NotFoundCode);
     }
 
+    /// <summary>
+    /// The connect route's own refusal, which nothing exercised until the provider match moved into
+    /// <see cref="IntegrationProviderResolver"/> and left one implementation where there had been
+    /// two. This route is fetched rather than navigated to, so it owes a named 404 the page's
+    /// Connect button can act on — not the empty 400 the enum binder would have produced, and not
+    /// the 500 a nullable lookup used without checking would.
+    /// </summary>
+    [Fact]
+    public async Task ConnectIntegration_ForAProviderThisBuildHasNoConnectorFor_IsNotFoundAboutTheProvider()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PostAsync(
+            $"{IntegrationsPath}/{UnknownProvider}/connect",
+            content: null,
+            TestContext.Current.CancellationToken);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemWithCode>(
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        problem!.Code.ShouldBe(DomainException.NotFoundCode);
+        problem.Title.ShouldBe(UnknownProviderTitle);
+    }
+
     /// <summary>Shape-compatible with what a provider stores; only the key differs.</summary>
     private sealed record StoredPayload(string RefreshToken, bool ReconnectRequired);
+
+    /// <summary>As every other admin suite spells it: the code the page keys on, and the sentence.</summary>
+    private sealed record ProblemWithCode(string Code, string Title);
 
     /// <summary>
     /// Exactly the state a laptop reaches by connecting under a real key and then running with

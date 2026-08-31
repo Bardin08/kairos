@@ -36,6 +36,22 @@ public sealed class IntegrationCredentialStore(
     public const string CredentialUnreadableCode = "credential_unreadable";
 
     /// <summary>
+    /// What a provider nobody has connected is called, in the one place both refusals of it can
+    /// read from. It lives on the store rather than beside either caller because the absent thing
+    /// is this table's row, and the two spellings it replaced — "Integration" here and a sentence
+    /// of its own in
+    /// <see cref="Features.Integrations.IntegrationProviderResolver.RequireConnectedAsync"/> — were
+    /// one condition answering to two names, with <c>not_found</c> on both and nothing else for an
+    /// operator reading a log to tell them apart by.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not <see cref="Features.Integrations.IntegrationProviderResolver.UnknownProviderName"/>.
+    /// A provider this build cannot name and a provider nobody has connected are different things
+    /// to do about, so they keep different titles.
+    /// </remarks>
+    public const string MissingConnectionName = "A connection to that integration";
+
+    /// <summary>
     /// How stale a proven success may get before a fresh one is worth a write. The success path
     /// runs on every token refresh, and a refresh runs on every booking page load, so an
     /// unthrottled stamp is a SQLite write per page view. Five minutes is finer than any screen.
@@ -182,7 +198,7 @@ public sealed class IntegrationCredentialStore(
         CancellationToken cancellationToken)
     {
         var row = await FindAsync(provider, cancellationToken)
-            ?? throw DomainException.NotFound("Integration");
+            ?? throw DomainException.NotFound(MissingConnectionName);
 
         row.Enabled = enabled;
         row.UpdatedAt = clock.GetCurrentInstant().ToUnixTimeSeconds();
