@@ -185,6 +185,7 @@ public sealed class GoogleCalendarAdapter(
         CancellationToken cancellationToken)
     {
         using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+        var calendar = await ResolveWriteCalendarAsync(cancellationToken);
 
         var body = new Event
         {
@@ -214,7 +215,7 @@ public sealed class GoogleCalendarAdapter(
             },
         };
 
-        var insert = service.Events.Insert(body, PrimaryCalendarId);
+        var insert = service.Events.Insert(body, calendar);
         insert.ConferenceDataVersion = ConferenceDataVersion;
 
         var created = await insert.ExecuteAsync(cancellationToken);
@@ -242,6 +243,7 @@ public sealed class GoogleCalendarAdapter(
         CancellationToken cancellationToken)
     {
         using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+        var calendar = await ResolveWriteCalendarAsync(cancellationToken);
 
         var moved = new Event
         {
@@ -252,14 +254,16 @@ public sealed class GoogleCalendarAdapter(
         };
 
         await service.Events
-            .Patch(moved, PrimaryCalendarId, externalEventId)
+            .Patch(moved, calendar, externalEventId)
             .ExecuteAsync(cancellationToken);
     }
 
     public async Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken)
     {
         using var service = CreateService(await RequireCredentialAsync(cancellationToken));
-        await service.Events.Delete(PrimaryCalendarId, externalEventId).ExecuteAsync(cancellationToken);
+        var calendar = await ResolveWriteCalendarAsync(cancellationToken);
+
+        await service.Events.Delete(calendar, externalEventId).ExecuteAsync(cancellationToken);
     }
 
     /// <summary>
@@ -274,9 +278,10 @@ public sealed class GoogleCalendarAdapter(
         CancellationToken cancellationToken)
     {
         using var service = CreateService(await RequireCredentialAsync(cancellationToken));
+        var calendar = await ResolveWriteCalendarAsync(cancellationToken);
 
         var created = await service.Events
-            .Get(PrimaryCalendarId, EventId(bookingId))
+            .Get(calendar, EventId(bookingId))
             .ExecuteAsync(cancellationToken);
 
         var conference = created.ConferenceData
@@ -550,6 +555,20 @@ public sealed class GoogleCalendarAdapter(
 
         return selected;
     }
+
+    /// <summary>
+    /// Which calendar a booking is put in, moved in, withdrawn from and read back out of — the
+    /// operator's choice, and the primary calendar until they make one.
+    /// </summary>
+    /// <remarks>
+    /// The fallback is not a default so much as the behaviour every deployment already has: before
+    /// this setting existed every booking went to the primary calendar, and a save nobody has made
+    /// must not move them. Nothing is written down here, unlike
+    /// <see cref="ResolveBusyCalendarsAsync"/> — a materialised default would be a second place the
+    /// answer lives, and there is no round trip to save by having one.
+    /// </remarks>
+    private async Task<string> ResolveWriteCalendarAsync(CancellationToken cancellationToken) =>
+        WriteTarget(await settings.ReadAsync(Provider, cancellationToken)) ?? PrimaryCalendarId;
 
     /// <summary>
     /// Every calendar on the account, or null when Google could not be asked. Null rather than an

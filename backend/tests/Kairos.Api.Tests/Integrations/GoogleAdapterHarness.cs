@@ -7,6 +7,8 @@ using Kairos.Api.Tests.Features;
 
 using Microsoft.Extensions.DependencyInjection;
 
+using NodaTime;
+
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
@@ -25,6 +27,19 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
     private const string AccountLabel = "operator@example.com";
 
     private const string RefreshToken = "1//not-a-real-token";
+
+    private const string MeetingTitle = "Intro call with Sam Rivers";
+
+    private const string MeetingDescription = "Booked from the intro link.";
+
+    private const string AttendeeName = "Sam Rivers";
+
+    private const string AttendeeEmail = "sam@example.com";
+
+    /// <summary>2026-09-14T09:00:00Z. Any instant; nothing about it decides a calendar.</summary>
+    private static readonly Instant MeetingStart = Instant.FromUtc(2026, 9, 14, 9, 0);
+
+    private const int MeetingMinutes = 30;
 
     private readonly KairosApp _app;
     private readonly IServiceScope _scope;
@@ -69,6 +84,28 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
                     JsonSerializer.SerializeToElement(calendars),
             },
             TestContext.Current.CancellationToken);
+
+    /// <summary>The calendar the operator picked to write bookings to, saved the same way.</summary>
+    public Task SaveWriteCalendarAsync(string calendar) =>
+        _settings.WriteAsync(
+            IntegrationProvider.Google,
+            new Dictionary<string, JsonElement>
+            {
+                [GoogleCalendarAdapter.WriteCalendarKey] =
+                    JsonSerializer.SerializeToElement(calendar),
+            },
+            TestContext.Current.CancellationToken);
+
+    /// <summary>A booking as the sync service would hand one over. Nothing here is under test.</summary>
+    public CalendarEventRequest SampleRequest(Guid bookingId) =>
+        new(
+            bookingId,
+            MeetingStart,
+            MeetingStart.Plus(Duration.FromMinutes(MeetingMinutes)),
+            MeetingTitle,
+            MeetingDescription,
+            AttendeeName,
+            AttendeeEmail);
 
     /// <summary>
     /// The operator's switch, thrown while this process is running. Written through the store for

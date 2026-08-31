@@ -26,6 +26,9 @@ public class GoogleCalendarAdapterTests
 
     private const string CalendarListPath = "/users/me/calendarList";
 
+    /// <summary>Shared by the insert, the patch, the delete and the read-back.</summary>
+    private const string EventsPath = "/events";
+
     /// <summary>Google's alias for the signed-in account's own calendar.</summary>
     private const string PrimaryCalendarAlias = "primary";
 
@@ -37,6 +40,10 @@ public class GoogleCalendarAdapterTests
     private const string PrimaryCalendarAddress = "operator@example.com";
 
     private const string SecondaryCalendarAddress = "side@example.com";
+
+    /// <summary>The same calendar as a request path spells it; Google escapes the address.</summary>
+    private static readonly string SecondaryCalendarInPath =
+        Uri.EscapeDataString(SecondaryCalendarAddress);
 
     private const string SubscribedCalendarAddress = "team@example.com";
 
@@ -116,6 +123,39 @@ public class GoogleCalendarAdapterTests
               "{{PrimaryCalendarAddress}}": {
                 "busy": [{ "start": "{{BusyFrom}}", "end": "{{BusyTo}}" }]
               }
+            }
+          }
+          """;
+
+    /// <summary>Any booking; the id only has to be a legal Google event id, which every GUID is.</summary>
+    private static readonly Guid BookingId = Guid.Parse("0f7b1c9a-6b2d-4e3f-8a1b-2c3d4e5f6071");
+
+    /// <summary>
+    /// The same booking as Google spells an event id — derived rather than retyped, because the
+    /// adapter asks for the event back under exactly this id and a second spelling of it could
+    /// drift from the first.
+    /// </summary>
+    private static readonly string ExternalEventId = BookingId.ToString("N");
+
+    private const string ConferenceId = "abc-defg-hij";
+
+    private const string JoinUrl = "https://meet.example.com/abc-defg-hij";
+
+    /// <summary>An event, as far as an insert and a patch need one back.</summary>
+    private static readonly string InsertedEvent =
+        $$"""{"id":"{{ExternalEventId}}","status":"confirmed"}""";
+
+    /// <summary>What a delete answers with: nothing at all.</summary>
+    private const string NoBody = "";
+
+    /// <summary>The same event once Google has finished provisioning the Meet on it.</summary>
+    private static readonly string EventWithConference =
+        $$"""
+          {
+            "id":"{{ExternalEventId}}",
+            "conferenceData":{
+              "conferenceId":"{{ConferenceId}}",
+              "entryPoints":[{"entryPointType":"video","uri":"{{JoinUrl}}"}]
             }
           }
           """;
@@ -274,6 +314,104 @@ public class GoogleCalendarAdapterTests
     }
 
     /// <summary>
+    /// The other half of the same defect. Reading five calendars and writing to one the operator
+    /// did not choose is a meeting that lands where nobody is looking for it.
+    /// </summary>
+    [Fact]
+    public async Task CreateEventAsync_WithAChosenCalendar_InsertsIntoIt()
+    {
+        var handler = new FakeGoogleHandler().Answering(EventsPath, InsertedEvent);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveWriteCalendarAsync(SecondaryCalendarAddress);
+
+        var placed = await harness.Adapter.CreateEventAsync(
+            harness.SampleRequest(BookingId), TestContext.Current.CancellationToken);
+
+        LastEventPath(handler).ShouldContain(SecondaryCalendarInPath);
+        placed.ExternalEventId.ShouldBe(ExternalEventId);
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Nothing chosen is the state of every deployment before the panel existed, and it must keep
+    /// meaning what it has always meant. A booking that stopped arriving because a setting was
+    /// added would be the worst thing this change could do.
+    /// </summary>
+    [Fact]
+    public async Task CreateEventAsync_WithNothingChosen_InsertsIntoThePrimaryCalendar()
+    {
+        // The calendar list is deliberately unstubbed: working out where to write must not depend
+        // on Google being reachable, or a booking would stop arriving during an outage.
+        var handler = new FakeGoogleHandler().Answering(EventsPath, InsertedEvent);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        var placed = await harness.Adapter.CreateEventAsync(
+            harness.SampleRequest(BookingId), TestContext.Current.CancellationToken);
+
+        LastEventPath(handler).ShouldContain(PrimaryCalendarAlias);
+        placed.ExternalEventId.ShouldBe(ExternalEventId);
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A reschedule has to find the event where the insert left it. Patching the primary calendar
+    /// for an event that lives elsewhere is a 404, and a booking stuck at its old time.
+    /// </summary>
+    [Fact]
+    public async Task UpdateEventAsync_WithAChosenCalendar_MovesTheEventInIt()
+    {
+        var handler = new FakeGoogleHandler().Answering(EventsPath, InsertedEvent);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveWriteCalendarAsync(SecondaryCalendarAddress);
+
+        await harness.Adapter.UpdateEventAsync(
+            ExternalEventId,
+            harness.SampleRequest(BookingId),
+            TestContext.Current.CancellationToken);
+
+        LastEventPath(handler).ShouldContain(SecondaryCalendarInPath);
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The same again for the withdrawal, and it fails worse: a delete aimed at the wrong calendar
+    /// reports success against nothing while the meeting stays in the operator's day.
+    /// </summary>
+    [Fact]
+    public async Task CancelEventAsync_WithAChosenCalendar_WithdrawsTheEventFromIt()
+    {
+        var handler = new FakeGoogleHandler().Answering(EventsPath, NoBody);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveWriteCalendarAsync(SecondaryCalendarAddress);
+
+        await harness.Adapter.CancelEventAsync(
+            ExternalEventId, TestContext.Current.CancellationToken);
+
+        LastEventPath(handler).ShouldContain(SecondaryCalendarInPath);
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The conference is read back off the event the insert created, so it is read out of the same
+    /// calendar the insert wrote to — otherwise every booking is confirmed with no join link.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_WithAChosenCalendar_ReadsTheConferenceBackFromIt()
+    {
+        var handler = new FakeGoogleHandler().Answering(EventsPath, EventWithConference);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveWriteCalendarAsync(SecondaryCalendarAddress);
+
+        var conference = await harness.Adapter.CreateAsync(
+            BookingId, TestContext.Current.CancellationToken);
+
+        LastEventPath(handler).ShouldContain(SecondaryCalendarInPath);
+        conference.ExternalId.ShouldBe(ConferenceId);
+        conference.JoinUrl.ShouldBe(new Uri(JoinUrl));
+        handler.UnstubbedUris.ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// Everything the operator can pick from, not everything they can write to. A subscription is
     /// legitimately readable and hopeless to insert into, and the write field filters it out on
     /// its own.
@@ -348,6 +486,11 @@ public class GoogleCalendarAdapterTests
         busy.Options.ShouldBeNull();
         busy.Value.EnumerateArray().Select(value => value.GetString())
             .ShouldBe([PrimaryCalendarAddress]);
+
+        // The outage is the calendar list and only the calendar list. DescribeSettingsAsync
+        // swallows a provider failure by design, so without this a call that drifted onto some
+        // other unstubbed path would fail here too and read as the same passing test.
+        handler.UnstubbedUris.ShouldHaveSingleItem().ShouldContain(CalendarListPath);
     }
 
     /// <summary>
@@ -433,6 +576,10 @@ public class GoogleCalendarAdapterTests
     /// </summary>
     private static string LastFreebusy(FakeGoogleHandler handler) =>
         handler.Requests.Last(request => request.Path.Contains(FreebusyPath)).Body;
+
+    /// <summary>The path of the last event call, which is the one naming the calendar written to.</summary>
+    private static string LastEventPath(FakeGoogleHandler handler) =>
+        handler.Requests.Last(request => request.Path.Contains(EventsPath)).Path;
 
     private static Dictionary<string, JsonElement> Values(string key, string[] values) =>
         new() { [key] = JsonSerializer.SerializeToElement(values) };
