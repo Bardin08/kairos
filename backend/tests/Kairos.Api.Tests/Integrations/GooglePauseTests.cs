@@ -33,8 +33,8 @@ public class GooglePauseTests
         }
         """;
 
-    /// <summary>What Google has been asked once the first query has gone out and no more.</summary>
-    private const int AskedOnce = 1;
+    /// <summary>Freebusy queries once the first has gone out: one, whatever else was asked.</summary>
+    private const int QueriedOnce = 1;
 
     /// <summary>2026-09-14T00:00:00Z, and a week of it. Any window; none of this reads a clock.</summary>
     private static readonly Instant WindowStart = Instant.FromUtc(2026, 9, 14, 0, 0);
@@ -65,7 +65,14 @@ public class GooglePauseTests
         var busy = warm.ShouldHaveSingleItem();
         busy.Interval.Start.ShouldBe(BusyStart);
         busy.Interval.End.ShouldBe(BusyEnd);
-        handler.Requests.Count.ShouldBe(AskedOnce);
+        handler.Requests.Count(request => request.Path.Contains(FreebusyPath))
+            .ShouldBe(QueriedOnce);
+
+        // Whatever else the warm call cost — a deployment that has never chosen its calendars
+        // works the default out from the calendar list, once — is the baseline the pause has to
+        // add nothing to. A total counted here rather than a literal, so this stays a test about
+        // pausing rather than one that fails whenever the first read's shape changes.
+        var askedWhileRunning = handler.Requests.Count;
 
         await harness.PauseAsync();
 
@@ -75,6 +82,6 @@ public class GooglePauseTests
         // what a refused query returns, and a request count is also unchanged by a query that went
         // out and was answered with nothing.
         paused.ShouldBeEmpty();
-        handler.Requests.Count.ShouldBe(AskedOnce);
+        handler.Requests.Count.ShouldBe(askedWhileRunning);
     }
 }

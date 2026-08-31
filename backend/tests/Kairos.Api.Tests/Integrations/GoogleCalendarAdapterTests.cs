@@ -6,6 +6,7 @@ using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
 
 using NodaTime;
+using NodaTime.Text;
 
 using Shouldly;
 
@@ -15,9 +16,9 @@ using Interval = Kairos.Api.Scheduling.Interval;
 namespace Kairos.Api.Tests.Integrations;
 
 /// <summary>
-/// The adapter against a canned Google. What these assert on is the outgoing request rather than
-/// the parsed answer: asking about one calendar when the operator keeps five is the whole of the
-/// defect this seam was built to expose.
+/// The adapter against a canned Google. What these assert on is the outgoing request as much as
+/// the parsed answer: asking about one calendar when the operator keeps five was the whole of the
+/// defect this seam was built to expose, and the question is where the fix for it lives.
 /// </summary>
 public class GoogleCalendarAdapterTests
 {
@@ -45,18 +46,11 @@ public class GoogleCalendarAdapterTests
     /// <summary>A key no field on any provider describes.</summary>
     private const string UnknownKey = "no-such-field";
 
-    /// <summary>
-    /// Nothing busy, keyed by the id that was asked for, which is how Google answers. These tests
-    /// are about the question, not the answer.
-    /// </summary>
-    private const string EmptyFreebusy =
-        $$"""
-          {
-            "calendars": {
-              "{{PrimaryCalendarAlias}}": { "busy": [] }
-            }
-          }
-          """;
+    /// <summary>Two views of the public booking page — the second is where a recompute shows.</summary>
+    private const int PageLoads = 2;
+
+    /// <summary>Once per deployment rather than once per page load, which is the whole design.</summary>
+    private const int CalendarListCalls = 1;
 
     /// <summary>
     /// One owned primary, one owned secondary Google does not currently show, and one read-only
@@ -74,6 +68,24 @@ public class GoogleCalendarAdapterTests
           ]}
           """;
 
+    /// <summary>The same account with nothing ticked in Google's own sidebar.</summary>
+    private const string NothingSelectedCalendarList =
+        $$"""
+          {"items":[
+            {"id":"{{PrimaryCalendarAddress}}","summary":"Operator","primary":true,
+             "selected":false,"accessRole":"owner"},
+            {"id":"{{SecondaryCalendarAddress}}","summary":"Side projects",
+             "selected":false,"accessRole":"owner"}
+          ]}
+          """;
+
+    /// <summary>
+    /// Every calendar ticked, one more than a single freebusy query may name. Built rather than
+    /// written out, because fifty-one literals would say the same thing fifty-one times.
+    /// </summary>
+    private static readonly string OverCapCalendarList =
+        SelectedCalendarList(GoogleCalendarAdapter.MaxFreebusyCalendars + 1);
+
     /// <summary>2026-09-14T00:00:00Z, and a week of it. Any window; none of this reads a clock.</summary>
     private static readonly Instant WindowStart = Instant.FromUtc(2026, 9, 14, 0, 0);
 
@@ -81,29 +93,184 @@ public class GoogleCalendarAdapterTests
 
     private static Interval Window => new(WindowStart, WindowEnd);
 
+    /// <summary>2026-09-15T13:00:00Z, and an hour of it. Inside <see cref="Window"/>, and any.</summary>
+    private static readonly Instant BusyStart = Instant.FromUtc(2026, 9, 15, 13, 0);
+
+    private static readonly Instant BusyEnd = Instant.FromUtc(2026, 9, 15, 14, 0);
+
+    /// <summary>The same two instants as Google writes them, so the fixture states them once.</summary>
+    private static readonly string BusyFrom = InstantPattern.ExtendedIso.Format(BusyStart);
+
+    private static readonly string BusyTo = InstantPattern.ExtendedIso.Format(BusyEnd);
+
     /// <summary>
-    /// Today's behaviour, written down before it changes: one freebusy call naming the primary
-    /// alias and nothing else, whatever the operator's other calendars hold. The assertion is
-    /// inverted rather than deleted when availability learns to read every chosen calendar.
+    /// One busy hour, under one calendar id, which is how Google keys its answer. These tests are
+    /// about the question rather than the answer — but a block has to come back, because the empty
+    /// list is also what <see cref="GoogleCalendarAdapter"/> returns when the call failed and a
+    /// suite that only asserted no exception would pass against a swallowed one.
+    /// </summary>
+    private static readonly string OneBusyPeriod =
+        $$"""
+          {
+            "calendars": {
+              "{{PrimaryCalendarAddress}}": {
+                "busy": [{ "start": "{{BusyFrom}}", "end": "{{BusyTo}}" }]
+              }
+            }
+          }
+          """;
+
+    /// <summary>
+    /// The reported bug, as a test. Kairos offered slots the operator was not free for because it
+    /// asked Google about one calendar out of several, and everything downstream was already
+    /// right — so what this asserts on is the question. It asserts on the answer as well, because
+    /// a request that went out and then failed would leave the first half of it true.
     /// </summary>
     [Fact]
-    public async Task GetBusyAsync_WithAConnectedAccount_AsksGoogleAboutThePrimaryCalendarAlone()
+    public async Task GetBusyAsync_WithSeveralCalendarsChosen_AsksFreebusyForEveryOneOfThem()
     {
-        var handler = new FakeGoogleHandler().Answering(FreebusyPath, EmptyFreebusy);
+        var handler = new FakeGoogleHandler().Answering(FreebusyPath, OneBusyPeriod);
         await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        await harness.SaveBusyCalendarsAsync(PrimaryCalendarAddress, SecondaryCalendarAddress);
 
-        await harness.Adapter.GetBusyAsync(Window, TestContext.Current.CancellationToken);
+        var busy = await harness.Adapter.GetBusyAsync(
+            Window, TestContext.Current.CancellationToken);
 
         var freebusy = handler.Requests.ShouldHaveSingleItem();
         freebusy.Path.ShouldContain(FreebusyPath);
+        AskedFor(freebusy.Body).ShouldBe(
+            [PrimaryCalendarAddress, SecondaryCalendarAddress],
+            ignoreOrder: true);
 
-        var asked = JsonDocument.Parse(freebusy.Body).RootElement
-            .GetProperty(ItemsProperty)
-            .EnumerateArray()
-            .Select(item => item.GetProperty(IdProperty).GetString())
+        busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+    }
+
+    /// <summary>
+    /// The upgrade path, and the reason this ships fixed rather than fixable: a deployment that
+    /// has never opened the panel reads every calendar Google itself shows as selected. The
+    /// secondary is <c>selected:false</c> in the fixture, so it is deliberately not among them.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_WithNothingSaved_UsesEveryCalendarGoogleMarksSelected()
+    {
+        var handler = new FakeGoogleHandler()
+            .Answering(CalendarListPath, CalendarList)
+            .Answering(FreebusyPath, OneBusyPeriod);
+
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        var busy = await harness.Adapter.GetBusyAsync(
+            Window, TestContext.Current.CancellationToken);
+
+        AskedFor(LastFreebusy(handler)).ShouldBe(
+            [PrimaryCalendarAddress, SubscribedCalendarAddress],
+            ignoreOrder: true);
+
+        busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+    }
+
+    /// <summary>
+    /// Once, not per page load. <c>GetBusyAsync</c> runs on every view of an anonymous public
+    /// page, so recomputing the default each time would pay a second Google round trip forever.
+    /// The second query asking for the same calendars is what proves the first was written down.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_CalledTwiceWithNothingSaved_AsksForTheCalendarListOnlyOnce()
+    {
+        var handler = new FakeGoogleHandler()
+            .Answering(CalendarListPath, CalendarList)
+            .Answering(FreebusyPath, OneBusyPeriod);
+
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        for (var load = 0; load < PageLoads; load++)
+        {
+            var busy = await harness.Adapter.GetBusyAsync(
+                Window, TestContext.Current.CancellationToken);
+
+            busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+        }
+
+        handler.Requests.Count(request => request.Path.Contains(CalendarListPath))
+            .ShouldBe(CalendarListCalls);
+
+        var asked = handler.Requests
+            .Where(request => request.Path.Contains(FreebusyPath))
+            .Select(request => AskedFor(request.Body))
             .ToList();
 
-        asked.ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAlias);
+        asked.Count.ShouldBe(PageLoads);
+
+        foreach (var calendars in asked)
+        {
+            calendars.ShouldBe(
+                [PrimaryCalendarAddress, SubscribedCalendarAddress],
+                ignoreOrder: true);
+        }
+    }
+
+    /// <summary>
+    /// Google would not say which calendars exist, so nothing is written down on a guess and the
+    /// next load asks again. The account's own calendar is the one id that is always right, and
+    /// falling back to it is exactly what every deployment did before this setting existed.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_WithNothingSavedAndNoCalendarList_AsksAboutThePrimaryAlone()
+    {
+        // Freebusy is canned and the calendar list is not, so the handler throws on the list and
+        // answers the query — which is what a half-reachable Google looks like from in here.
+        var handler = new FakeGoogleHandler().Answering(FreebusyPath, OneBusyPeriod);
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        var busy = await harness.Adapter.GetBusyAsync(
+            Window, TestContext.Current.CancellationToken);
+
+        AskedFor(LastFreebusy(handler)).ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAlias);
+        busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+    }
+
+    /// <summary>
+    /// Google shows nothing ticked, which is a state of the account rather than an answer about
+    /// it. A freebusy query naming no calendar reports no busy time at all, so every slot in the
+    /// week would be offered — the account's own calendar is the floor under that.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_WithNoCalendarMarkedSelected_AsksAboutThePrimaryAlone()
+    {
+        var handler = new FakeGoogleHandler()
+            .Answering(CalendarListPath, NothingSelectedCalendarList)
+            .Answering(FreebusyPath, OneBusyPeriod);
+
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        var busy = await harness.Adapter.GetBusyAsync(
+            Window, TestContext.Current.CancellationToken);
+
+        AskedFor(LastFreebusy(handler)).ShouldHaveSingleItem().ShouldBe(PrimaryCalendarAlias);
+        busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
+    }
+
+    /// <summary>
+    /// Google refuses a freebusy query naming more calendars than it allows, and a refused query
+    /// reads to availability as an organizer free all week. The cap is applied where the default
+    /// is worked out and written down, so the panel afterwards shows what Kairos is really using.
+    /// </summary>
+    [Fact]
+    public async Task GetBusyAsync_WithMoreCalendarsSelectedThanFreebusyAccepts_AsksAboutTheCap()
+    {
+        var handler = new FakeGoogleHandler()
+            .Answering(CalendarListPath, OverCapCalendarList)
+            .Answering(FreebusyPath, OneBusyPeriod);
+
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+
+        var busy = await harness.Adapter.GetBusyAsync(
+            Window, TestContext.Current.CancellationToken);
+
+        AskedFor(LastFreebusy(handler)).Count
+            .ShouldBe(GoogleCalendarAdapter.MaxFreebusyCalendars);
+
+        busy.ShouldHaveSingleItem().Interval.Start.ShouldBe(BusyStart);
     }
 
     /// <summary>
@@ -244,6 +411,28 @@ public class GoogleCalendarAdapterTests
         failure.Code.ShouldBe(IIntegrationSettings.SettingUnknownCode);
         handler.Requests.ShouldBeEmpty();
     }
+
+    /// <summary><paramref name="count"/> owned calendars, all of them ticked in Google.</summary>
+    private static string SelectedCalendarList(int count)
+    {
+        var entries = Enumerable.Range(0, count).Select(index =>
+            $$"""{"id":"calendar-{{index}}@example.com","selected":true,"accessRole":"owner"}""");
+
+        return $$"""{"items":[{{string.Join(",", entries)}}]}""";
+    }
+
+    /// <summary>The calendar ids one freebusy request body names.</summary>
+    private static List<string?> AskedFor(string body) =>
+        [.. JsonDocument.Parse(body).RootElement
+            .GetProperty(ItemsProperty)
+            .EnumerateArray()
+            .Select(item => item.GetProperty(IdProperty).GetString())];
+
+    /// <summary>
+    /// The freebusy body, picked out of whatever else the adapter asked Google on the way to it.
+    /// </summary>
+    private static string LastFreebusy(FakeGoogleHandler handler) =>
+        handler.Requests.Last(request => request.Path.Contains(FreebusyPath)).Body;
 
     private static Dictionary<string, JsonElement> Values(string key, string[] values) =>
         new() { [key] = JsonSerializer.SerializeToElement(values) };
