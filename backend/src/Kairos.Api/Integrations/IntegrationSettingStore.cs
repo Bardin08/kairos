@@ -35,7 +35,10 @@ namespace Kairos.Api.Integrations;
 /// need a column, a migration and a conflict the settings panel has no answer for. A writer that
 /// runs on its own schedule is the change that makes it necessary.
 /// </remarks>
-public sealed class IntegrationSettingStore(KairosDbContext context, IClock clock)
+public sealed class IntegrationSettingStore(
+    KairosDbContext context,
+    IServiceScopeFactory scopes,
+    IClock clock)
 {
     /// <summary>
     /// Empty when the provider has never been configured — not an error, a state, and the one the
@@ -66,12 +69,37 @@ public sealed class IntegrationSettingStore(KairosDbContext context, IClock cloc
     /// Writes the keys in <paramref name="values"/> and leaves every other key as it was. A key
     /// whose value is <see cref="JsonValueKind.Null"/> is deleted instead of written.
     /// </summary>
+    /// <remarks>
+    /// On a context of its own, and that is this method's correctness rather than a preference.
+    /// Materialising a default is a write on a READ path — <see cref="Google.GoogleCalendarAdapter"/>
+    /// works one out mid-freebusy — and availability is read from inside
+    /// <see cref="Features.Bookings.BookingMover.ReleaseAndCheckAsync"/>, where a booking has been
+    /// released and something has to put it back. Sharing the caller's context, this commit is the
+    /// caller's commit: it lands whatever they had staged and not yet decided to keep, and a failed
+    /// insert leaves an Added row in their change tracker that every later
+    /// <c>SaveChangesAsync</c> retries — so a settings write nobody asked for throws from
+    /// <see cref="Features.Bookings.BookingMover.RestoreAsync"/> and the booking stays Cancelled on
+    /// disk. Nothing is staged across that boundary today, which makes the first half a trap rather
+    /// than a bug; the second half needs only the insert to lose a race against another first load.
+    ///
+    /// <see cref="Google.GoogleClientFactory"/> reaches this store's neighbour through a scope for
+    /// the mirror-image reason: it is a singleton and has no request context to borrow. Here there
+    /// is one, and borrowing it is the fault.
+    ///
+    /// What a separate context costs is that the caller sees this write only by reading again —
+    /// true already, since <see cref="ReadAsync"/> is <c>AsNoTracking</c> — and that it commits
+    /// alone, which <see cref="Features.Integrations.IntegrationSettingsWriter"/> already documents
+    /// as the settings panel's behaviour.
+    /// </remarks>
     public async Task WriteAsync(
         IntegrationProvider provider,
         IReadOnlyDictionary<string, JsonElement> values,
         CancellationToken cancellationToken)
     {
-        var row = await context.IntegrationSettings
+        await using var scope = scopes.CreateAsyncScope();
+        var isolated = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
+
+        var row = await isolated.IntegrationSettings
             .FirstOrDefaultAsync(candidate => candidate.Provider == provider, cancellationToken);
 
         var merged = row is null
@@ -95,7 +123,7 @@ public sealed class IntegrationSettingStore(KairosDbContext context, IClock cloc
 
         if (row is null)
         {
-            context.IntegrationSettings.Add(new IntegrationSetting
+            isolated.IntegrationSettings.Add(new IntegrationSetting
             {
                 Provider = provider,
                 Values = json,
@@ -108,6 +136,6 @@ public sealed class IntegrationSettingStore(KairosDbContext context, IClock cloc
             row.UpdatedAt = now;
         }
 
-        await context.SaveChangesAsync(cancellationToken);
+        await isolated.SaveChangesAsync(cancellationToken);
     }
 }

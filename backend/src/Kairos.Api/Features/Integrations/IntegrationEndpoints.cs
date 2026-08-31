@@ -147,7 +147,7 @@ public static class IntegrationEndpoints
             }
 
             responses.Add(new IntegrationResponse(
-                Name(connector.Provider),
+                IntegrationProviderResolver.Name(connector.Provider),
                 connector.IsConfigured,
                 row is not null,
                 row?.AccountLabel,
@@ -162,11 +162,11 @@ public static class IntegrationEndpoints
 
     private static ConnectIntegrationResponse Connect(
         string provider,
-        IEnumerable<IIntegrationConnector> connectors,
+        IntegrationProviderResolver providers,
         SecretProtector protector,
         IClock clock)
     {
-        var connector = Require(connectors, provider);
+        var connector = providers.Require(provider);
         if (!connector.IsConfigured)
         {
             throw DomainException.Invalid(
@@ -183,7 +183,7 @@ public static class IntegrationEndpoints
         string? code,
         string? state,
         string? error,
-        IEnumerable<IIntegrationConnector> connectors,
+        IntegrationProviderResolver providers,
         SecretProtector protector,
         IClock clock,
         ILoggerFactory loggers,
@@ -191,12 +191,12 @@ public static class IntegrationEndpoints
     {
         var logger = loggers.CreateLogger(typeof(IntegrationEndpoints));
 
-        // Resolved inside the redirecting part of the handler rather than by the throwing helper
-        // the two operator routes use. Those are fetched and can be told about a 404; this one is
-        // a page navigation, and ProblemDetails in the address bar is a dead end with nothing on
-        // it to press. The code is the same not_found the helper would have thrown — the page
-        // renders a sentence for a code it does not recognise, which is what makes that safe.
-        var connector = Find(connectors, provider);
+        // Resolved through the nullable lookup rather than the throwing one the two operator routes
+        // use. Those are fetched and can be told about a 404; this one is a page navigation, and
+        // ProblemDetails in the address bar is a dead end with nothing on it to press. The code is
+        // the same not_found the other would have thrown — the page renders a sentence for a code it
+        // does not recognise, which is what makes that safe.
+        var connector = providers.Find(provider);
         if (connector is null)
         {
             logger.LogWarning("Discarded a callback for a provider this build has no connector for.");
@@ -239,32 +239,8 @@ public static class IntegrationEndpoints
             return RedirectToPage(ErrorParameter, ConnectFailedCode);
         }
 
-        return RedirectToPage(ConnectedParameter, Name(known));
+        return RedirectToPage(ConnectedParameter, IntegrationProviderResolver.Name(known));
     }
-
-    /// <summary>
-    /// For the routes a fetch calls, where "no such provider" is a 404 with <c>not_found</c> on it
-    /// that the page's Connect button can act on. The callback resolves through
-    /// <see cref="Find"/> instead, because a browser arrives there by navigation.
-    /// </summary>
-    private static IIntegrationConnector Require(
-        IEnumerable<IIntegrationConnector> connectors,
-        string provider) =>
-        Find(connectors, provider)
-        ?? throw DomainException.NotFound(IntegrationProviderResolver.UnknownProviderName);
-
-    /// <summary>
-    /// Matched against the connectors rather than parsed into <see cref="IntegrationProvider"/> by
-    /// the binder, for two reasons found by running it: the binder's enum parse is case-sensitive,
-    /// so <c>/integrations/google/connect</c> did not bind at all, and a binder rejection is an
-    /// empty 400 where an unimplemented provider owes a named answer. It also keeps the enum's
-    /// numeric spelling, which <c>Enum.TryParse</c> accepts, from being a second name for a route.
-    /// </summary>
-    private static IIntegrationConnector? Find(
-        IEnumerable<IIntegrationConnector> connectors,
-        string provider) =>
-        connectors.FirstOrDefault(connector =>
-            Name(connector.Provider).Equals(provider, StringComparison.OrdinalIgnoreCase));
 
     private static string MintState(SecretProtector protector, IntegrationProvider provider, IClock clock)
     {
@@ -309,10 +285,6 @@ public static class IntegrationEndpoints
 
     private static IResult RedirectToPage(string parameter, string value) =>
         Results.Redirect($"{ReturnPath}?{parameter}={Uri.EscapeDataString(value)}");
-
-    /// <summary>Lowercase, as every other enum this API returns — booking status set the shape.</summary>
-    private static string Name(IntegrationProvider provider) =>
-        provider.ToString().ToLowerInvariant();
 
     private static string Format(long unixSeconds) =>
         InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
