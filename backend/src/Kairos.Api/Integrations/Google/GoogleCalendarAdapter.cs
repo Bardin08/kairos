@@ -129,6 +129,13 @@ public sealed class GoogleCalendarAdapter(
             using var service = CreateService(credential);
 
             var calendars = await ResolveBusyCalendarsAsync(cancellationToken);
+            if (calendars.Count == 0)
+            {
+                // The operator unticked every calendar, which is them saying Google contributes
+                // no busy time. A freebusy query naming none would go out and come back saying
+                // nothing, so it does not go out.
+                return [];
+            }
 
             var response = await service.Freebusy
                 .Query(new FreeBusyRequest
@@ -308,7 +315,8 @@ public sealed class GoogleCalendarAdapter(
         CancellationToken cancellationToken)
     {
         var saved = await settings.ReadAsync(Provider, cancellationToken);
-        var chosen = Chosen(saved);
+        var chosen = Chosen(saved) ?? [];
+        var target = WriteTarget(saved);
         var entries = await ListCalendarsAsync(cancellationToken);
 
         // Null and empty are different answers, and the field is where the difference is said:
@@ -319,17 +327,10 @@ public sealed class GoogleCalendarAdapter(
 
         if (entries is not null)
         {
-            var offered = entries.Select(Option).ToList();
+            string[] savedTarget = target is null ? [] : [target];
 
-            // A saved calendar Google no longer lists is still in force, so it is still shown.
-            // Synthesised here rather than left to the renderer: the frontend knows no provider,
-            // and a calendar id is a provider's fact about a provider's account.
-            offered.AddRange(chosen
-                .Where(id => entries.All(entry => entry.Id != id))
-                .Select(id => new SettingOption(id, id, DepartedDetail)));
-
-            readable = offered;
-            writable = entries.Where(CanWrite).Select(Option).ToList();
+            readable = WithDeparted(entries.Select(Option), chosen);
+            writable = WithDeparted(entries.Where(CanWrite).Select(Option), savedTarget);
         }
 
         return
@@ -352,7 +353,7 @@ public sealed class GoogleCalendarAdapter(
                 writable,
                 MaxValues: null,
                 Required: true,
-                JsonSerializer.SerializeToElement(WriteTarget(saved))),
+                JsonSerializer.SerializeToElement(target)),
         ];
     }
 
@@ -457,6 +458,29 @@ public sealed class GoogleCalendarAdapter(
     private static bool CanWrite(CalendarListEntry entry) =>
         entry.AccessRole is OwnerRole or WriterRole;
 
+    /// <summary>
+    /// What Google offers, plus an option of its own for every saved value none of them carries.
+    /// A saved calendar Google no longer lists is still in force, so it is still shown — and
+    /// <see cref="SettingField"/> states that every value of a field is one of that field's own
+    /// options, which a value with no option breaks in a way the operator cannot act on: the
+    /// control renders blank and the save that follows is refused as invalid. Synthesised here
+    /// rather than left to the renderer, because the frontend knows no provider and a calendar id
+    /// is a provider's fact about a provider's account.
+    /// </summary>
+    private static List<SettingOption> WithDeparted(
+        IEnumerable<SettingOption> offered,
+        IEnumerable<string> saved)
+    {
+        var options = offered.ToList();
+        var known = options.Select(option => option.Value).ToHashSet(StringComparer.Ordinal);
+
+        options.AddRange(saved
+            .Where(value => !known.Contains(value))
+            .Select(value => new SettingOption(value, value, DepartedDetail)));
+
+        return options;
+    }
+
     private static List<string> Ids(JsonElement value, string complaint)
     {
         if (value.ValueKind != JsonValueKind.Array)
@@ -473,16 +497,23 @@ public sealed class GoogleCalendarAdapter(
             : throw DomainException.Invalid(IIntegrationSettings.SettingInvalidCode, complaint);
 
     /// <summary>
-    /// The calendars busy time is read from, as saved. Anything malformed reads as nothing chosen
-    /// rather than throwing: this is on the path a stranger's page load takes, and a settings row
-    /// somebody edited by hand must not be able to stop availability answering.
+    /// The calendars busy time is read from as saved, or null when nothing was saved to read. The
+    /// two are different answers and only the caller working out a default may conflate them: an
+    /// empty list is the operator having unticked everything, which is a deliberate "read no busy
+    /// time from Google".
     /// </summary>
-    private static List<string> Chosen(IReadOnlyDictionary<string, JsonElement> saved) =>
+    /// <remarks>
+    /// A value that is not a list reads as null rather than throwing, so it is treated as never
+    /// saved and the default is worked out again. This is on the path a stranger's page load
+    /// takes, and a settings row somebody edited by hand must not be able to stop availability
+    /// answering — nor to turn conflict detection off, which reading it as an empty list would do.
+    /// </remarks>
+    private static List<string>? Chosen(IReadOnlyDictionary<string, JsonElement> saved) =>
         saved.TryGetValue(BusyCalendarsKey, out var value) && value.ValueKind == JsonValueKind.Array
             ? [.. value.EnumerateArray()
                 .Where(item => item.ValueKind == JsonValueKind.String)
                 .Select(item => item.GetString()!)]
-            : [];
+            : null;
 
     private static string? WriteTarget(IReadOnlyDictionary<string, JsonElement> saved) =>
         saved.TryGetValue(WriteCalendarKey, out var value) && value.ValueKind == JsonValueKind.String
@@ -494,6 +525,11 @@ public sealed class GoogleCalendarAdapter(
     /// once and then written down.
     /// </summary>
     /// <remarks>
+    /// A saved key decides, never how many calendars are under it. An empty list is the operator
+    /// having unticked everything, and keying on the count would read that as never saved, work
+    /// the default out again and put the calendars they had just removed straight back — on the
+    /// next view of the booking page, silently.
+    ///
     /// The write is on a read path, and it is a cost taken deliberately. It happens once per
     /// deployment, it is idempotent, and failing it is not fatal — this request still uses the set
     /// it computed and the next load tries again. The alternative recomputes the default on every
@@ -507,8 +543,8 @@ public sealed class GoogleCalendarAdapter(
     private async Task<IReadOnlyList<string>> ResolveBusyCalendarsAsync(
         CancellationToken cancellationToken)
     {
-        var chosen = Chosen(await settings.ReadAsync(Provider, cancellationToken));
-        if (chosen.Count > 0)
+        var saved = await settings.ReadAsync(Provider, cancellationToken);
+        if (Chosen(saved) is { } chosen)
         {
             return chosen;
         }
@@ -532,7 +568,21 @@ public sealed class GoogleCalendarAdapter(
 
         if (selected.Count == 0)
         {
-            return [PrimaryCalendarId];
+            // Nothing ticked is a state of the account rather than an answer about it, and a
+            // freebusy query naming no calendar reports no busy time at all, so the account's own
+            // calendar is the floor under it. Written down like every other default: this branch
+            // is reached from a page a stranger loads, and returning without writing pays the
+            // calendar list round trip on every one of those loads forever. By the id Google
+            // lists it under rather than by the alias, so the settings panel can match it to an
+            // option it offers — and on the alias alone when Google listed no primary at all,
+            // which is nothing to write down.
+            var own = entries.FirstOrDefault(entry => entry.Primary == true)?.Id;
+            if (own is null)
+            {
+                return [PrimaryCalendarId];
+            }
+
+            selected.Add(own);
         }
 
         try
@@ -621,9 +671,9 @@ public sealed class GoogleCalendarAdapter(
         ?? throw new InvalidOperationException("No Google account is connected.");
 
     /// <summary>
-    /// Over <c>Values</c> rather than the <c>primary</c> key: the response is keyed by the id that
-    /// was asked for, and only one was, so iterating removes an assumption about how Google echoes
-    /// an alias back instead of restating it.
+    /// Iterated rather than indexed by id: the response is keyed by every id that was asked for,
+    /// and taking the entries as they come removes an assumption about how Google echoes an alias
+    /// such as <c>primary</c> back, instead of restating it.
     /// </summary>
     private List<BusyBlock> Translate(FreeBusyResponse response, int marginMinutes)
     {
