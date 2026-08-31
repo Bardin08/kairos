@@ -2,7 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import IntegrationSettingsPanel from '../src/components/IntegrationSettingsPanel'
-import { ApiError, saveIntegrationSettings, SETTING_TOO_MANY } from '../src/lib/api'
+import {
+  ApiError,
+  saveIntegrationSettings,
+  SETTING_TOO_MANY,
+  SETTING_UNKNOWN,
+} from '../src/lib/api'
 import type { IntegrationSettings, SettingField } from '../src/lib/api'
 
 // ApiError stays real: the panel reads a refusal through `asApiError`, which
@@ -28,6 +33,7 @@ const UNREACHABLE = /could not/i
 const AS_MANY_AS_ALLOWED = /as many as this allows/i
 const HAS_TO_BE_CHOSEN = /has to be chosen/i
 const CANNOT_DRAW = /cannot draw this setting/i
+const NOT_RECOGNISED = /does not recognise/i
 const MAX_VALUES = 1
 const BAD_REQUEST = 400
 const SERVER_SENTENCE = 'Too many.'
@@ -72,13 +78,28 @@ const settings: IntegrationSettings = {
   ],
 }
 
-/** The same description with one field replaced, so a fixture states only its difference. */
-function withField(key: string, change: Partial<SettingField>): IntegrationSettings {
+/** The same description with some fields replaced, so a fixture states only its difference. */
+function withFields(changes: Record<string, Partial<SettingField>>): IntegrationSettings {
   return {
     ...settings,
-    fields: settings.fields.map((field) => (field.key === key ? { ...field, ...change } : field)),
+    fields: settings.fields.map((field) => ({ ...field, ...changes[field.key] })),
   }
 }
+
+function withField(key: string, change: Partial<SettingField>): IntegrationSettings {
+  return withFields({ [key]: change })
+}
+
+/**
+ * The state an operator is stranded in: the integration is off, so nothing can
+ * be asked of the provider, so neither list came back — and the required field
+ * was never answered, because it never had a list to answer from.
+ */
+const pausedAndUnreachable = withFields({
+  [SWITCH_KEY]: { value: false },
+  [MULTI_KEY]: { options: null },
+  [SELECT_KEY]: { options: null, value: null },
+})
 
 beforeEach(() => {
   vi.mocked(saveIntegrationSettings).mockReset()
@@ -143,10 +164,36 @@ describe('IntegrationSettingsPanel', () => {
     expect(screen.getByText(UNREACHABLE)).not.toBeNull()
     // The saved value is still what the backend is using, so it is still shown.
     expect(control(new RegExp(FIRST_VALUE)).checked).toBe(true)
-    expect(saveButton().disabled).toBe(true)
-    // The switch is exactly what an operator reaches for when a provider is
-    // misbehaving, so it stays live while the rest of the panel cannot save.
+    // Its own boxes are dead, because there is no list to choose from — and
+    // nothing else is: the switch is exactly what an operator reaches for when a
+    // provider is misbehaving, and a Save it cannot press is no switch at all.
+    expect(control(new RegExp(FIRST_VALUE)).disabled).toBe(true)
     expect(control(SWITCH_LABEL).disabled).toBe(false)
+    expect(saveButton().disabled).toBe(false)
+  })
+
+  // The defect this file documented and passed over: pausing Google is what
+  // stops its lists coming back, so the panel that turned the integration off
+  // was the panel that could no longer turn it on. A field with no list opts out
+  // of the save instead of blocking it — absent keys are left as they were,
+  // which `saveIntegrationSettings` states and the store implements.
+  it('un-pauses a provider whose lists could not be read, sending the switch alone', async () => {
+    render(<IntegrationSettingsPanel settings={pausedAndUnreachable} onSaved={() => {}} />)
+
+    expect(control(SWITCH_LABEL).checked).toBe(false)
+    // Nothing is being sent for the required field, so there is nothing it has
+    // to answer: the value the server holds is the value it keeps.
+    expect(screen.queryByText(HAS_TO_BE_CHOSEN)).toBeNull()
+    expect(saveButton().disabled).toBe(false)
+
+    fireEvent.click(control(SWITCH_LABEL))
+    fireEvent.click(saveButton())
+
+    await waitFor(() =>
+      expect(vi.mocked(saveIntegrationSettings)).toHaveBeenCalledWith(PROVIDER, {
+        [SWITCH_KEY]: true,
+      }),
+    )
   })
 
   it('disables the unchosen once the cap is reached', () => {
@@ -242,20 +289,18 @@ describe('IntegrationSettingsPanel', () => {
     expect(screen.getByText(SELECT_LABEL)).not.toBeNull()
   })
 
-  // The re-read after a save is the case a `key` on the caller does not cover:
-  // same provider, new values, and a draft still holding what was typed before.
-  it('re-seeds its draft when the settings it was seeded from are replaced', () => {
-    const normalised = withField(MULTI_KEY, { value: [FIRST_VALUE, SECOND_VALUE] })
-    const { rerender } = render(
-      <IntegrationSettingsPanel settings={settings} onSaved={() => {}} />,
+  // Two refusals the operator can do nothing about would read alike under one
+  // sentence, and the generic one tells them to try again — which is the wrong
+  // instruction for a key the server will refuse every time it is sent.
+  it('tells a build mismatch apart from a value the server rejected', async () => {
+    vi.mocked(saveIntegrationSettings).mockRejectedValue(
+      new ApiError(BAD_REQUEST, SETTING_UNKNOWN, SERVER_SENTENCE),
     )
 
-    fireEvent.click(control(SWITCH_LABEL))
-    expect(control(SWITCH_LABEL).checked).toBe(false)
+    render(<IntegrationSettingsPanel settings={settings} onSaved={() => {}} />)
 
-    rerender(<IntegrationSettingsPanel settings={normalised} onSaved={() => {}} />)
+    fireEvent.click(saveButton())
 
-    expect(control(SWITCH_LABEL).checked).toBe(true)
-    expect(control(new RegExp(SECOND_OPTION)).checked).toBe(true)
+    expect(await screen.findByText(NOT_RECOGNISED)).not.toBeNull()
   })
 })
