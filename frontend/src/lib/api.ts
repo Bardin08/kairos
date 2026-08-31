@@ -512,9 +512,13 @@ export function readIntegrationSettings(
 }
 
 /**
- * The whole map, not a patch: the panel has one Save and sends what it is
- * showing. Answers 204, so nothing comes back — re-read after saving, because
- * options move when values do.
+ * What the panel is showing, minus any field whose list of legal values it could
+ * not be given: the store merges rather than replaces, so a key that is absent
+ * keeps the value the server already holds, and a field nothing can be chosen
+ * from is left alone instead of stopping the save it is part of.
+ *
+ * Answers 204, so nothing comes back. Anything still showing these values has to
+ * read them again, because options move when values do.
  */
 export function saveIntegrationSettings(
   provider: string,

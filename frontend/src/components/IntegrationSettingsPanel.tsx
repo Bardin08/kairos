@@ -4,6 +4,7 @@ import {
   asApiError,
   saveIntegrationSettings,
   SETTING_TOO_MANY,
+  SETTING_UNKNOWN,
   type IntegrationSettings,
   type SettingField,
   type SettingValue,
@@ -14,9 +15,12 @@ import AlertIcon from './AlertIcon'
 type Draft = Record<string, SettingValue>
 
 const UNREADABLE =
-  'Kairos could not read this list from the provider just now. What is shown is what it is using; nothing has changed.'
+  'Kairos could not read this list from the provider just now. What is shown is what it is using, and saving here leaves it exactly as it is.'
 
 const SAVE_FAILED = 'That could not be saved. Try again, and check the server log if it keeps happening.'
+
+const SENT_UNKNOWN =
+  'This build of Kairos sent a setting the server does not recognise. Trying again will not help; the server log names the key it refused.'
 
 const TOO_MANY = 'You have chosen as many as this allows. Untick one to choose another.'
 
@@ -47,23 +51,14 @@ export default function IntegrationSettingsPanel({
   // silently bind a label to the wrong control.
   const prefix = useId()
 
-  // The draft is seeded once and then edited, so it has to be re-seeded whenever
-  // the settings it was seeded from are replaced. Saving re-reads, and
-  // `saveIntegrationSettings` says why that matters: options move when values
-  // do. A draft left over from before the re-read would send the values the
-  // server has just normalised straight back on the next Save. Held here rather
-  // than left to a `key` on the caller, because a component that resets only
-  // when someone else remembers to remount it resets by luck.
-  const [source, setSource] = useState(settings)
+  // Seeded once, because nothing replaces `settings` under a mounted panel:
+  // `Integrations.tsx` closes the disclosure on a successful save, so the panel
+  // unmounts and the next disclosure reads the provider again and seeds a fresh
+  // draft from what came back. Re-seeding on a changed prop would be a branch
+  // the application has no way to reach.
   const [draft, setDraft] = useState<Draft>(() => seed(settings))
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState('')
-
-  if (source !== settings) {
-    setSource(settings)
-    setDraft(seed(settings))
-    setFailure('')
-  }
 
   function edit(key: string, value: SettingValue) {
     setDraft((previous) => ({ ...previous, [key]: value }))
@@ -72,31 +67,33 @@ export default function IntegrationSettingsPanel({
     setFailure('')
   }
 
-  // A list the provider could not give us is a list nothing can be chosen from,
-  // and saving would write whatever the browser happened to be holding. Named
-  // kinds only: a kind this build does not know carries no list this panel is
-  // able to judge, and blocking Save on it would strand the whole form.
-  const unreadable = settings.fields.some(
-    (field) =>
-      (field.kind === 'select' || field.kind === 'multiSelect') && field.options === null,
-  )
+  // What Save sends. A field whose list could not be read leaves the map rather
+  // than blocking it: `IIntegrationSettings.SaveSettingsAsync` documents an
+  // absent key as left as it was, because `IntegrationSettingStore` merges, and
+  // `IntegrationSettingsWriter` hands the provider nothing at all when the
+  // switch is the only key left — so a switch-only save never reaches the
+  // refusal an unreachable provider would answer with. Blocking Save instead is
+  // what stranded the operator: pausing a provider is what stops its lists
+  // coming back, and the switch that un-pauses it lives in this form.
+  const sending = settings.fields.filter((field) => !unreadable(field))
 
   // The cap is enforced here so that a save the server would refuse never leaves
   // the browser, and `required` is refused for exactly the same reason — but the
   // refusal that comes back cannot say which field was empty, so it is stopped
-  // here too, where the field has a name to give.
-  const missing = settings.fields.find((field) => unanswered(field, draft))
+  // here too, where the field has a name to give. Asked only of what is being
+  // sent: a field left out of the save has nothing to answer for, and the server
+  // keeps the value it already had.
+  const missing = sending.find((field) => unanswered(field, draft))
 
   async function save() {
     setSaving(true)
     setFailure('')
 
     try {
-      await saveIntegrationSettings(settings.provider, draft)
+      await saveIntegrationSettings(settings.provider, payload(sending, draft))
       onSaved()
     } catch (error: unknown) {
-      const failed = asApiError(error)
-      setFailure(failed.code === SETTING_TOO_MANY ? TOO_MANY : SAVE_FAILED)
+      setFailure(refusal(asApiError(error).code))
     } finally {
       setSaving(false)
     }
@@ -127,7 +124,7 @@ export default function IntegrationSettingsPanel({
         <button
           className="btn btn-primary"
           type="button"
-          disabled={unreadable || missing !== undefined || saving}
+          disabled={missing !== undefined || saving}
           data-loading={saving || undefined}
           onClick={() => void save()}
         >
@@ -140,6 +137,28 @@ export default function IntegrationSettingsPanel({
 
 function seed(settings: IntegrationSettings): Draft {
   return Object.fromEntries(settings.fields.map((field) => [field.key, field.value]))
+}
+
+/** The map Save sends: the fields still worth a value, holding what was typed into them. */
+function payload(fields: SettingField[], draft: Draft): Draft {
+  return Object.fromEntries(fields.map((field) => [field.key, draft[field.key]]))
+}
+
+/**
+ * A field offering a list the provider could not be asked for. Named kinds only:
+ * a kind this build cannot draw carries no list this panel is able to judge, and
+ * its value round-trips untouched.
+ */
+function unreadable(field: SettingField): boolean {
+  return (field.kind === 'select' || field.kind === 'multiSelect') && field.options === null
+}
+
+/** What a refused save means, in the operator's terms. `code` is null for a 400 with no code. */
+function refusal(code: string | null): string {
+  if (code === SETTING_TOO_MANY) return TOO_MANY
+  // Not "try again": every attempt sends the same key and every one is refused.
+  if (code === SETTING_UNKNOWN) return SENT_UNKNOWN
+  return SAVE_FAILED
 }
 
 /** A required field the operator has not answered. A toggle is answered either way. */
@@ -210,6 +229,8 @@ function renderSelect(
   value: string,
   set: (value: SettingValue) => void,
 ) {
+  const noList = unreadable(field)
+
   // With no list the saved value is all there is to offer, and it is offered as itself: a select
   // holding a value none of its options carries renders blank, which reads as a setting that has
   // been cleared rather than one whose choices could not be read.
@@ -221,7 +242,7 @@ function renderSelect(
       <div className="field-row-label">
         <label htmlFor={id}>{field.label}</label>
         {field.help !== null && <p className="fine">{field.help}</p>}
-        {field.options === null && (
+        {noList && (
           <p className="field-error">
             <AlertIcon />
             {UNREADABLE}
@@ -234,8 +255,8 @@ function renderSelect(
           className="select"
           value={value}
           // Null options are a list that could not be read, not an empty one. Offering an empty
-          // dropdown would invite a save that clears a setting nobody meant to touch.
-          disabled={field.options === null}
+          // dropdown would invite a choice made between nothing.
+          disabled={noList}
           // Out through the same door it came in through. The empty string is
           // this panel's stand-in for "nothing chosen" and is the one value a
           // select can hold that the contract does not define: every non-null
@@ -265,7 +286,7 @@ function renderMultiSelect(
   // A cap that is reached disables what is not chosen and never what is — disabling a ticked box
   // is a cap the operator cannot get back under.
   const full = field.maxValues !== null && chosen.length >= field.maxValues
-  const unreadable = field.options === null
+  const noList = unreadable(field)
 
   // With no list, the saved values are all there is to show, and they are shown as themselves
   // rather than hidden: they are what the backend is using right now.
@@ -300,13 +321,13 @@ function renderMultiSelect(
               // One mark for both ways a row can be dead. A cap-disabled row that
               // kept full ink beside a greyed unreadable one is two disabled
               // states with no difference the reader could infer.
-              data-disabled={unreadable || capped || undefined}
+              data-disabled={noList || capped || undefined}
             >
               <input
                 id={optionId}
                 type="checkbox"
                 checked={checked}
-                disabled={unreadable || capped}
+                disabled={noList || capped}
                 onChange={(event) => toggle(option.value, event.target.checked)}
               />
               <label htmlFor={optionId}>
@@ -321,9 +342,9 @@ function renderMultiSelect(
       {/* Which constraint closed the row, said where the rows are. Not shown
           beside UNREADABLE: there the list is every value already chosen, so
           the cap is not what is stopping anything. */}
-      {full && !unreadable && <p className="fine">{TOO_MANY}</p>}
+      {full && !noList && <p className="fine">{TOO_MANY}</p>}
 
-      {unreadable && (
+      {noList && (
         <p className="field-error">
           <AlertIcon />
           {UNREADABLE}
