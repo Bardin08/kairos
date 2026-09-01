@@ -66,6 +66,9 @@ public class ReminderSweeperTests
     private const string RelayRefused = "The relay dropped the connection.";
 
     private const int NoReminders = 0;
+
+    /// <summary>Nothing was tried, which is what an unconfigured relay leaves behind.</summary>
+    private const int NoAttempts = 0;
     private const int OneReminder = 1;
 
     /// <summary>The first send, and the retry that follows it.</summary>
@@ -403,27 +406,53 @@ public class ReminderSweeperTests
     }
 
     /// <summary>
-    /// The ordinary state of a fresh install: no relay at all. There is nothing to send, so the
-    /// row is done and must be marked done — <see cref="OperatorMailer"/> answers an unconfigured
-    /// relay with a true for exactly this reason. Left unmarked, every reminder due on a
-    /// relayless deployment is retried every minute until its meeting starts, and each retry logs.
+    /// No relay configured. The reminder is held, not spent: nothing is stamped, nothing is
+    /// counted, the secret stays, and the whole of it goes out on the first tick after somebody
+    /// fixes the configuration.
     /// </summary>
+    /// <remarks>
+    /// The case this is really about is not the fresh install where nobody is worse off. It is one
+    /// deploy with a missing Email__Host — a secret that failed to mount, a typo in a values file —
+    /// which <see cref="IOptions{TOptions}"/> holds for the life of the process. A sweeper that
+    /// marked those rows sent would record a delivery that never happened, on the one column whose
+    /// docstring promises the opposite, and destroy the token each held. Hence the second half:
+    /// what makes this path acceptable is that it is recoverable, and the manage link surviving
+    /// into the message is how that is visible rather than assumed.
+    /// </remarks>
     [Fact]
-    public async Task Sweep_NoRelayConfigured_MarksTheReminderDoneRatherThanRescanningIt()
+    public async Task Sweep_NoRelayConfigured_HoldsTheReminderUntilThereIsOne()
     {
         using var database = new TestDatabase();
-        var relay = new CollectingRelay();
-        await using var provider = NewHost(database, relay, new EmailOptions());
         var reminder = SeedReminder(database, JustDue);
 
-        await NewSweeper(provider).SweepAsync(TestContext.Current.CancellationToken);
+        var unreachable = new CollectingRelay();
+        await using (var unconfigured = NewHost(database, unreachable, new EmailOptions()))
+        {
+            await NewSweeper(unconfigured).SweepAsync(TestContext.Current.CancellationToken);
+        }
 
-        relay.Sent.Count.ShouldBe(NoReminders);
+        unreachable.Sent.Count.ShouldBe(NoReminders);
 
-        using var context = database.CreateContext();
-        var swept = context.Reminders.AsNoTracking().Single(row => row.Id == reminder);
-        swept.SentAt.ShouldNotBeNull();
-        swept.Secret.ShouldBeNull();
+        using (var held = database.CreateContext())
+        {
+            var stored = held.Reminders.AsNoTracking().Single(row => row.Id == reminder);
+            stored.SentAt.ShouldBeNull();
+            stored.Attempts.ShouldBe(NoAttempts);
+            stored.Secret.ShouldNotBeNull();
+            new SecretProtector(TestKey).Unprotect(stored.Secret).ShouldBe(ManageToken);
+        }
+
+        // The configuration is fixed and the process comes back with a relay behind it.
+        var relay = new CollectingRelay();
+        await using var configured = NewHost(database, relay);
+
+        await NewSweeper(configured).SweepAsync(TestContext.Current.CancellationToken);
+
+        var text = relay.Sent.ShouldHaveSingleItem().TextBody.ShouldNotBeNull();
+        text.ShouldContain($"{RelayBaseUrl}/manage/{ManageToken}");
+
+        using var sent = database.CreateContext();
+        sent.Reminders.AsNoTracking().Single(row => row.Id == reminder).SentAt.ShouldNotBeNull();
     }
 
     /// <summary>

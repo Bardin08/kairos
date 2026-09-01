@@ -76,13 +76,40 @@ public sealed class ReminderSweeper(
 
         await ForgetSpentSecretsAsync(context, now, cancellationToken);
 
+        // Before the batch and after the scrub. Whether a relay exists is a fact about the process
+        // rather than about any row, so it is not written onto rows: nothing is attempted, nothing
+        // is stamped, no secret is spent, and every due reminder goes out unchanged on the tick
+        // after the configuration is fixed. That recoverability is the whole point of returning
+        // here rather than finishing the rows. The case is not the relayless install where nobody
+        // is worse off — it is one deploy with a missing Email__Host, a secret that failed to
+        // mount or a typo in a values file, which IOptions holds for the life of the process.
+        // Stamping SentAt on that path would mark every reminder due in the window delivered,
+        // destroy the token each one needed, and leave nothing in the database saying it never
+        // went — the exact outcome this feature exists to prevent.
+        //
+        // The scrub still runs above: a row whose meeting has started is one nobody will ever send
+        // whatever the relay is doing, so its ciphertext is dead either way.
+        //
+        // Debug, and once per sweep rather than once per row, because Program.cs already logs this
+        // at Warning once at startup with the settings to fix it. A line a minute per row about a
+        // relay that does not exist is the noise this return exists to avoid; climbing Attempts
+        // for ever on rows nothing ever attempted is the record it exists to keep honest.
+        if (!email.Value.IsConfigured)
+        {
+            logger.LogDebug(
+                "{Section} is not configured; reminders are held until it is.",
+                EmailOptions.SectionName);
+            return;
+        }
+
         // Tracked, which is the one place rule 8's AsNoTracking() does not apply and for
         // ProposalSweeper's reason: this read decides about rows it then writes back through, and
         // the change tracker is what keeps that write to the columns this actually touched.
         //
-        // The two Includes are the message's own needs rather than the predicate's — the link for
-        // its name, the booker for the address and the zone the time is rendered in. Loaded here
-        // rather than per row, so the batch costs one round trip instead of one plus twice its size.
+        // The two included chains are the message's own needs rather than the predicate's — the
+        // link for its name, the booker for the address and the zone the time is rendered in.
+        // Loaded here rather than per row, so the batch costs one round trip instead of one plus
+        // twice its size.
         var due = await context.Reminders
             .Where(reminder =>
                 (reminder.SentAt == null)
@@ -109,10 +136,14 @@ public sealed class ReminderSweeper(
         //
         // A lookup rather than a dictionary because the unique index is over (BookingId, Provider):
         // two providers could each have placed a conference, and the notice offers one link.
+        // Ordered by provider so that which one is a fact rather than whatever the database
+        // happened to return — a retry after a refusal then offers the same link as the attempt
+        // the invitee never saw, instead of two reminders disagreeing about where to join.
         var bookingIds = due.Select(reminder => reminder.BookingId).ToList();
         var joins = (await context.ConferenceLinks
                 .AsNoTracking()
                 .Where(row => bookingIds.Contains(row.BookingId))
+                .OrderBy(row => row.Provider)
                 .Select(row => new { row.BookingId, row.JoinUrl })
                 .ToListAsync(cancellationToken))
             .ToLookup(row => row.BookingId, row => row.JoinUrl);
@@ -157,22 +188,6 @@ public sealed class ReminderSweeper(
         long now,
         CancellationToken cancellationToken)
     {
-        if (!email.Value.IsConfigured)
-        {
-            // Nothing to send, so the row is done and is marked done — OperatorMailer answers an
-            // unconfigured relay with a true for this reason. Left unmarked, every reminder due on
-            // a deployment with no relay is re-read and re-attempted every minute until its
-            // meeting starts, and logs a failure each time about a relay that does not exist.
-            logger.LogDebug(
-                "{Section} is not configured; reminder {Reminder} passed without being sent.",
-                EmailOptions.SectionName,
-                reminder.Id);
-
-            Finish(reminder, now);
-            await context.SaveChangesAsync(CancellationToken.None);
-            return;
-        }
-
         reminder.Attempts++;
 
         try
@@ -234,7 +249,9 @@ public sealed class ReminderSweeper(
     /// <remarks>
     /// An UPDATE rather than a read and a loop, and it runs before the tracked read above so the
     /// two cannot disagree about a row: ExecuteUpdate never loads anything and the change tracker
-    /// would not hear about it.
+    /// would not hear about it. It leads on Secret, which the (SentAt, DueAt) index does not cover,
+    /// so it scans — affordable because Reminders holds about one row per booking still ahead, and
+    /// the thing to reach for if that ever stops being true is an index, not a schedule.
     /// </remarks>
     private static Task ForgetSpentSecretsAsync(
         KairosDbContext context, long now, CancellationToken cancellationToken) =>
