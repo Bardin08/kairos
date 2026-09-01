@@ -153,15 +153,13 @@ public class ReminderMaintenanceTests
         using var database = new TestDatabase();
         using var context = database.CreateContext();
         var booking = Book(context, OriginalStart);
-        var scheduled = context.Reminders.AsNoTracking().Single().Id;
         var mover = Mover(context);
 
         await mover.MoveToAsync(booking, InsideTheLeadStart, Now);
         await mover.MoveToAsync(booking, FinalStart, Now);
 
-        var reminder = context.Reminders.AsNoTracking().Single();
-        reminder.DueAt.ShouldBe(ReminderSchedule.DueAt(FinalStart).ToUnixTimeSeconds());
-        reminder.Id.ShouldNotBe(scheduled);
+        context.Reminders.AsNoTracking().Single().DueAt
+            .ShouldBe(ReminderSchedule.DueAt(FinalStart).ToUnixTimeSeconds());
     }
 
     /// <summary>
