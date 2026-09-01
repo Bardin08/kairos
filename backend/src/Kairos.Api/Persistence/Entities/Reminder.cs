@@ -28,8 +28,11 @@ public sealed class Reminder
     /// schedules offers "Manage or cancel" beside the join link, and it is composed a day later by
     /// a sweeper that was not there when the token was minted — so the row has to carry the token
     /// itself, which is why this is ciphertext rather than the SHA-256
-    /// <see cref="Booking.ManageTokenHash"/> keeps. Null for a booking written before this column
-    /// existed, and that reminder goes out without the secondary link rather than not going.
+    /// <see cref="Booking.ManageTokenHash"/> keeps. Null two ways, and such a reminder goes out
+    /// without the secondary link rather than not going: a booking written before this column
+    /// existed, and a booking made INSIDE the lead and later moved outside it — that one never had
+    /// a row, so <see cref="Features.Bookings.BookingMover"/> has no ciphertext to carry across and
+    /// cannot mint one, for the reason its carry-forward states.
     /// </summary>
     public string? Secret { get; set; }
 

@@ -172,6 +172,11 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
         // SHA-256. The ciphertext is already here and it is the same token, so the meeting keeps
         // its manage link however it moved. Read before the Remove below, so the order of these
         // two statements is never what decides it.
+        //
+        // Null when there was no row to read: a booking made inside the lead schedules nothing, so
+        // moving it back out writes its first reminder here, with no secret and no way to get one.
+        // That reminder loses its manage link permanently. Degraded rather than broken, and the
+        // same shape the operator's own cancellation notice already has.
         var secret = existing?.Secret;
 
         if (existing is not null)
