@@ -16,12 +16,19 @@ public class ReminderScheduleTests
     private static readonly Duration Lead = ReminderSchedule.Lead;
     private static readonly Duration OneMinute = Duration.FromMinutes(1);
 
-    [Fact]
-    public void DueAt_IsTheStartLessTheLead()
-    {
-        var start = Now + Lead + OneMinute;
+    private static readonly Instant MeetingStart = Instant.FromUtc(2026, 9, 15, 12, 0);
+    private static readonly Instant ExpectedDueAt = Instant.FromUtc(2026, 9, 14, 12, 0);
 
-        ReminderSchedule.DueAt(start).ShouldBe(start - Lead);
+    /// <summary>
+    /// Pinned against instants written independently of <see cref="ReminderSchedule.Lead"/>, so
+    /// this is the one test in the class that notices the lead itself changing. Every other test
+    /// below builds its instants from that same field, which makes them agree with whatever value
+    /// it holds rather than checking it — this fails if the mail stops saying "tomorrow" and means it.
+    /// </summary>
+    [Fact]
+    public void DueAt_IsTwentyFourHoursBeforeTheStart()
+    {
+        ReminderSchedule.DueAt(MeetingStart).ShouldBe(ExpectedDueAt);
     }
 
     [Fact]
