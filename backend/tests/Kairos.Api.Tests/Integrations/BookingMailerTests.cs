@@ -86,6 +86,9 @@ public class BookingMailerTests
     /// <summary>A proposal's alternative: the two halves, and no calendar part at all.</summary>
     private const int ProposalParts = 2;
 
+    /// <summary>The class the HTML renderer puts only on the one accent button, never on a detail link.</summary>
+    private const string OnAccentClass = "k-on-accent";
+
     /// <summary>
     /// <see cref="PreviousStart"/> as the invitee reads it, spelled out for the reason
     /// <see cref="Deadline"/> is: formatting it here would pass whatever the patterns became.
@@ -465,6 +468,117 @@ public class BookingMailerTests
         Plain(await ComposeProposal()).ShouldContain(Deadline);
 
     /// <summary>
+    /// The one message where the join URL is the action rather than a detail. At 24 hours out,
+    /// joining is the next thing the invitee will do; at booking time it was checking or
+    /// cancelling. Pinned on the button's own class rather than on the URL appearing somewhere in
+    /// the document — that would also pass a build that put the same URL in a details row.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_AConferenceBooking_MakesTheJoinUrlTheAction()
+    {
+        var html = Html(await ComposeReminder(joinUrl: JoinUrl));
+
+        html.ShouldContain($"href=\"{JoinUrl}\" class=\"{OnAccentClass}\"");
+    }
+
+    /// <summary>
+    /// The join URL moved to the action, so it does not also appear as a details row — the two
+    /// halves of the message would otherwise repeat the one thing they most need to say once.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_AConferenceBooking_DropsTheJoinUrlFromTheDetails()
+    {
+        var message = await ComposeReminder(joinUrl: JoinUrl);
+
+        Plain(message).ShouldNotContain(WhereLabel);
+        Html(message).ShouldNotContain(WhereLabel);
+    }
+
+    /// <summary>
+    /// The manage link never disappears just because the join button took the primary slot — it
+    /// is still how the invitee reaches the booking to cancel it.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_AConferenceBooking_CarriesTheManageLinkAsASecondary()
+    {
+        var message = await ComposeReminder(joinUrl: JoinUrl);
+
+        Plain(message).ShouldContain($"{CancellationAction}:\n{BaseUrl}/manage/{ManageToken}");
+        Html(message).ShouldContain($"{BaseUrl}/manage/{ManageToken}");
+    }
+
+    /// <summary>
+    /// A booking with no conference has nothing to make the action, so the manage link takes the
+    /// slot instead — the same fallback every other notice already gives it — and there is
+    /// nothing left over to demote to a secondary.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_NoConference_MakesTheManageLinkTheAction()
+    {
+        var html = Html(await ComposeReminder(joinUrl: null));
+
+        html.ShouldContain($"href=\"{BaseUrl}/manage/{ManageToken}\" class=\"{OnAccentClass}\"");
+        html.ShouldNotContain(JoinUrl);
+    }
+
+    /// <summary>
+    /// A reminder whose row carries no secret: a booking written before the column existed, or one
+    /// whose encryption failed. It goes without the manage link rather than not going, exactly as
+    /// a cancellation the operator triggered already does.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_NoManageToken_KeepsTheJoinActionAndDropsTheSecondary()
+    {
+        var message = await ComposeReminder(joinUrl: JoinUrl, manageToken: null);
+
+        Html(message).ShouldContain($"href=\"{JoinUrl}\" class=\"{OnAccentClass}\"");
+        Plain(message).ShouldNotContain(ManageUrlFragment);
+        Html(message).ShouldNotContain(ManageUrlFragment);
+    }
+
+    /// <summary>
+    /// The same row on a booking with no conference, which is the one combination that leaves the
+    /// message nothing to press at all. It still composes — a reminder that threw here is an
+    /// invitee nobody reminds, over a link that was never the point of the message — and it leaves
+    /// no hole where the action was.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_NoManageTokenAndNoConference_ComposesWithNothingToPress()
+    {
+        var body = Plain(await ComposeReminder(joinUrl: null, manageToken: null));
+
+        body.ShouldNotContain(ManageUrlFragment);
+        body.ShouldNotContain(JoinUrl);
+        body.ShouldNotContain(BlankLineRun);
+    }
+
+    /// <summary>
+    /// A reminder changes nothing about the event. A text/calendar part restating an unchanged
+    /// meeting is how a client is talked into showing a second one, and this is the second of the
+    /// two notices that carry none at all.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_Always_CarriesNoCalendarPart()
+    {
+        var message = await ComposeReminder(joinUrl: JoinUrl);
+
+        message.BodyParts.OfType<TextPart>()
+            .ShouldNotContain(part => part.ContentType.MediaSubtype == "calendar");
+    }
+
+    /// <summary>
+    /// No date in the subject, unlike every other notice: "Tomorrow" already says which day, and
+    /// repeating the date would say it twice.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_Always_NamesTheLinkAndTimeInTheSubjectWithNoDate()
+    {
+        var message = await ComposeReminder();
+
+        message.Subject.ShouldBe($"Tomorrow: {LinkName}, 09:00 ({BookerZone})");
+    }
+
+    /// <summary>
     /// This deployment's state today, and the one that must never throw: no relay configured at
     /// all. The mailer is called on the booking's own request, so anything it raises here is a
     /// booking that answers 500 because nobody has set up SMTP yet.
@@ -617,6 +731,17 @@ public class BookingMailerTests
         var booking = Booking();
         var message = await Mailer(Options(BaseUrl)).ComposeProposalAsync(
             booking, Proposal(booking), ProposalToken, TestContext.Current.CancellationToken);
+
+        return RoundTrip(message);
+    }
+
+    /// <summary>Composed, written and parsed back, exactly as <see cref="ComposeProposal"/> is.</summary>
+    private static async Task<MimeMessage> ComposeReminder(
+        Booking? booking = null, string? joinUrl = null, string? manageToken = ManageToken)
+    {
+        var subject = booking ?? Booking();
+        var message = await Mailer(Options(BaseUrl)).ComposeReminderAsync(
+            subject, manageToken, joinUrl, TestContext.Current.CancellationToken);
 
         return RoundTrip(message);
     }

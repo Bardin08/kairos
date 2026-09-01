@@ -2,7 +2,8 @@ namespace Kairos.Api.Integrations.Email;
 
 /// <summary>
 /// One per thing that happens to a meeting the invitee has to be told about, each needing its own
-/// sentence and its own iCalendar METHOD — or, for a proposal, no calendar part at all.
+/// sentence and its own iCalendar METHOD — or, for a proposal or a reminder, no calendar part at
+/// all.
 /// </summary>
 /// <remarks>
 /// Passed in rather than inferred from the booking, which is the whole reason this type exists.
@@ -23,4 +24,11 @@ public enum BookingNotice
     /// iCalendar method, because a calendar part here would perform the move it is asking about.
     /// </summary>
     Proposal = 40,
+
+    /// <summary>
+    /// A day before, nothing has changed and nothing needs answering. The only invitee notice
+    /// besides <see cref="Proposal"/> with no calendar part, and for the opposite reason: a
+    /// proposal must not perform the move it asks about, and this has nothing to perform.
+    /// </summary>
+    Reminder = 50,
 }

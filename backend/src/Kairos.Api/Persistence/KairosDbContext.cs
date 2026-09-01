@@ -42,6 +42,8 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
 
+    public DbSet<Reminder> Reminders => Set<Reminder>();
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         optionsBuilder.AddInterceptors(PragmaInterceptor.Instance);
 

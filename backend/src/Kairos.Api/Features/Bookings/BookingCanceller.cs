@@ -70,6 +70,20 @@ public sealed class BookingCanceller(
         // operator that nobody answered a suggestion about a cancelled meeting.
         await proposals.WithdrawOpenAsync(booking.Id, now, cancellationToken);
 
+        // Here and NOT wherever Status becomes Cancelled, for the reason this class's own remarks
+        // give about the announcement: reschedule is release, re-check, re-place, so every meeting
+        // that merely moves passes through Cancelled. A hook on the status write would take the
+        // reminder off at the release, and only BookingMover.MoveToAsync writes one back — so a
+        // reschedule the re-check REFUSES would leave a meeting standing with nobody to remind,
+        // and nothing would say so. Staged, so it rides the save below.
+        var reminder = await context.Reminders
+            .SingleOrDefaultAsync(candidate => candidate.BookingId == booking.Id, cancellationToken);
+
+        if (reminder is not null)
+        {
+            context.Reminders.Remove(reminder);
+        }
+
         // One SaveChanges, so the cancellation and the announcement of it commit together or
         // neither does — the same rule BookingWriter follows for creation, for the same reason.
         outbox.Enqueue(

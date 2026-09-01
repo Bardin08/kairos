@@ -248,8 +248,12 @@ public class MailInvariantTests
     }
 
     /// <summary>
-    /// The enum drives the theory and the routing is the mailer's: a proposal carries no calendar
-    /// part, so it composes elsewhere, and <c>ComposeAsync</c> throws rather than build one.
+    /// The theories above are driven by <see cref="Enum.GetValues{TEnum}"/> through
+    /// <see cref="BookingNotices"/>; this routing is not. A proposal and a reminder both carry no
+    /// calendar part, so each composes elsewhere and <c>ComposeAsync</c> throws rather than build
+    /// one for them — but that is this switch's own hand-written knowledge, and a
+    /// <see cref="BookingNotice"/> added without a matching arm here falls into the default and
+    /// throws for every theory above it, not just the ones that would actually catch something.
     /// </summary>
     private static async Task<MimeMessage> ComposeBooking(BookingNotice notice)
     {
@@ -268,6 +272,8 @@ public class MailInvariantTests
                     PreviousStart,
                     notice,
                     TestContext.Current.CancellationToken),
+            BookingNotice.Reminder => await mailer.ComposeReminderAsync(
+                booking, ManageToken, JoinUrl, TestContext.Current.CancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
