@@ -118,6 +118,7 @@ public sealed class BookingWriter(
         Booking? pending = null;
         OutboxMessage? announcement = null;
         FollowUp? work = null;
+        Reminder? reminder = null;
         try
         {
             context.Database.ExecuteSqlRaw("BEGIN IMMEDIATE;");
@@ -163,7 +164,7 @@ public sealed class BookingWriter(
 
             if (clashes > 0)
             {
-                Abandon(started, pending, announcement, work);
+                Abandon(started, pending, announcement, work, reminder);
                 return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
             }
 
@@ -211,7 +212,7 @@ public sealed class BookingWriter(
 
                 if (spent != 1)
                 {
-                    Abandon(started, pending, announcement, work);
+                    Abandon(started, pending, announcement, work, reminder);
                     return new CreateBookingResult(false, Guid.Empty, null, InviteSpentReason);
                 }
             }
@@ -262,6 +263,19 @@ public sealed class BookingWriter(
             // encrypted — this method mints it, and it exists nowhere else.
             work = followUps.Enqueue(bookingId, FollowUpType.Created, manageToken);
 
+            // In this transaction and not after it, for the reason OutboxMessage states: a
+            // booking that exists while nothing will remind anybody is a state no retry recovers,
+            // because nothing knows to look for it.
+            if (ReminderSchedule.ShouldSchedule(start, Instant.FromUnixTimeSeconds(now)))
+            {
+                reminder = new Reminder
+                {
+                    BookingId = bookingId,
+                    DueAt = ReminderSchedule.DueAt(start).ToUnixTimeSeconds(),
+                };
+                context.Reminders.Add(reminder);
+            }
+
             context.SaveChanges();
             context.Database.ExecuteSqlRaw("COMMIT;");
 
@@ -270,12 +284,12 @@ public sealed class BookingWriter(
         catch (Exception exception) when (IsSlotAlreadyTaken(exception))
         {
             // The partial unique index fired — the backstop, not the mechanism.
-            Abandon(started, pending, announcement, work);
+            Abandon(started, pending, announcement, work, reminder);
             return new CreateBookingResult(false, Guid.Empty, null, SlotTakenReason);
         }
         catch
         {
-            Abandon(started, pending, announcement, work);
+            Abandon(started, pending, announcement, work, reminder);
             throw;
         }
         finally
@@ -299,10 +313,11 @@ public sealed class BookingWriter(
     /// Undoes what this call did, and nothing else. Both guards matter: a bare ROLLBACK after a
     /// BEGIN IMMEDIATE that never ran discards a transaction the caller opened — the shape a
     /// reschedule takes — and clearing the change tracker discards entities the caller holds. Left
-    /// tracked, the four failed inserts ride along on the caller's next SaveChanges and re-insert
-    /// the booking this method just refused, announcement and follow-up included.
+    /// tracked, the failed inserts ride along on the caller's next SaveChanges and re-insert the
+    /// booking this method just refused, announcement, follow-up and reminder included.
     /// </summary>
-    private void Abandon(bool started, Booking? pending, OutboxMessage? announcement, FollowUp? work)
+    private void Abandon(
+        bool started, Booking? pending, OutboxMessage? announcement, FollowUp? work, Reminder? reminder)
     {
         if (started)
         {
@@ -317,6 +332,11 @@ public sealed class BookingWriter(
         if (work is not null)
         {
             context.Entry(work).State = EntityState.Detached;
+        }
+
+        if (reminder is not null)
+        {
+            context.Entry(reminder).State = EntityState.Detached;
         }
 
         if (pending is null)

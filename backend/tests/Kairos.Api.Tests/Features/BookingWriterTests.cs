@@ -28,6 +28,14 @@ public class BookingWriterTests
     private const int SlotMinutes = 30;
     private const int MeetingMinutes = 60;
     private const int CallersMargin = 999;
+
+    /// <summary>
+    /// How far either side of <see cref="ReminderSchedule.DueAt"/> a fixed clock sits, for the two
+    /// cases that only care which side of the boundary "now" falls on — the boundary itself is
+    /// <see cref="ReminderScheduleTests"/>' job, not this file's.
+    /// </summary>
+    private const int HoursAcrossTheLeadBoundary = 1;
+
     private const string ConsultingSlug = "consulting";
     private const string MentorshipSlug = "mentorship";
 
@@ -298,6 +306,48 @@ public class BookingWriterTests
         context.OutboxMessages.AsNoTracking().Count().ShouldBe(1);
     }
 
+    /// <summary>
+    /// The reminder's whole claim, checked where it is actually made: a row is scheduled inside
+    /// the booking's own transaction whenever its due moment still lies ahead of "now".
+    /// </summary>
+    [Fact]
+    public void TryCreate_AMeetingFurtherOutThanTheLead_SchedulesOneReminder()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+        var now = ReminderSchedule.DueAt(MeetingStart) - Duration.FromHours(HoursAcrossTheLeadBoundary);
+        var writer = Writer(context, new FixedClock(now));
+
+        var result = writer.TryCreate(
+            ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+        result.Success.ShouldBeTrue();
+
+        var reminder = context.Reminders.Single();
+        reminder.BookingId.ShouldBe(result.Id);
+        reminder.DueAt.ShouldBe(ReminderSchedule.DueAt(MeetingStart).ToUnixTimeSeconds());
+        reminder.SentAt.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// The other half: a meeting inside the lead gets no row at all, because the confirmation the
+    /// booker is about to receive is the notice — see <see cref="Reminder"/>.
+    /// </summary>
+    [Fact]
+    public void TryCreate_AMeetingSoonerThanTheLead_SchedulesNothing()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+        var now = ReminderSchedule.DueAt(MeetingStart) + Duration.FromHours(HoursAcrossTheLeadBoundary);
+        var writer = Writer(context, new FixedClock(now));
+
+        writer.TryCreate(ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin)
+            .Success.ShouldBeTrue();
+
+        context.Reminders.ShouldBeEmpty();
+    }
+
     private static void Execute(SqliteConnection connection, string sql)
     {
         using var command = connection.CreateCommand();
@@ -310,12 +360,19 @@ public class BookingWriterTests
     /// booking and its announcement go in on one SaveChanges, so a test that left it out would
     /// exercise a shorter INSERT batch than the application ever runs.
     /// </summary>
-    private static BookingWriter Writer(KairosDbContext context) =>
+    private static BookingWriter Writer(KairosDbContext context) => Writer(context, SystemClock.Instance);
+
+    /// <summary>
+    /// The same composition root, taking the clock the case needs — the reminder tests have to
+    /// place "now" on a chosen side of <see cref="ReminderSchedule.DueAt"/>, which the real clock
+    /// cannot promise.
+    /// </summary>
+    private static BookingWriter Writer(KairosDbContext context, IClock clock) =>
         new(
             context,
-            SystemClock.Instance,
-            new OutboxWriter(context, SystemClock.Instance),
-            new FollowUpWriter(context, new SecretProtector(TestKey), SystemClock.Instance));
+            clock,
+            new OutboxWriter(context, clock),
+            new FollowUpWriter(context, new SecretProtector(TestKey), clock));
 
     private static void Seed(KairosDbContext context, int consultingMarginMinutes)
     {
