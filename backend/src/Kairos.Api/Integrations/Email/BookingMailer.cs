@@ -155,6 +155,19 @@ public sealed class BookingMailer(
             () => ComposeProposalAsync(booking, proposal, proposalToken, cancellationToken),
             cancellationToken);
 
+    /// <summary>The 24-hour notice — see <see cref="BookingNotice.Reminder"/>.</summary>
+    /// <returns>Whether the relay took it — see <see cref="SendConfirmationAsync"/>.</returns>
+    public Task<bool> SendReminderAsync(
+        Booking booking,
+        string manageToken,
+        string? joinUrl,
+        CancellationToken cancellationToken) =>
+        SendComposedAsync(
+            BookingNotice.Reminder,
+            booking,
+            () => ComposeReminderAsync(booking, manageToken, joinUrl, cancellationToken),
+            cancellationToken);
+
     private Task<bool> SendAsync(
         BookingNotice notice,
         Booking booking,
@@ -306,7 +319,8 @@ public sealed class BookingMailer(
             BookingNotice.Reschedule => Reschedule(booking, booker.Name, fact, manageUrl, joinUrl),
             BookingNotice.Cancellation => Cancellation(
                 booking, booker.Name, fact, manageUrl, BookUrl(settings.PublicBaseUrl!, booking.Link.Slug)),
-            BookingNotice.Proposal => throw ComposedElsewhere(notice),
+            BookingNotice.Proposal => throw ComposedElsewhere(notice, nameof(ComposeProposalAsync)),
+            BookingNotice.Reminder => throw ComposedElsewhere(notice, nameof(ComposeReminderAsync)),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
@@ -402,6 +416,60 @@ public sealed class BookingMailer(
 
         return OutgoingMail.Envelope(
             $"A new time for {booking.Link.Name}?",
+            new Multipart(AlternativeSubtype) { text, markup },
+            organizer,
+            Mailbox(booker));
+    }
+
+    /// <remarks>
+    /// No <c>text/calendar</c> part and no attachment, for the same structural reason as
+    /// <see cref="ComposeProposalAsync"/>: the meeting has not changed, so a calendar part here
+    /// would restate an event the invitee's client already holds rather than tell them anything.
+    ///
+    /// The join URL is the action here and nowhere else: this is the one message that arrives when
+    /// joining is the next thing the invitee does, where every other notice arrives when the next
+    /// thing is to check or cancel. A booking with no conference has nothing to make the action,
+    /// so the manage link takes its place — the same fallback <see cref="Manage"/> already gives
+    /// every other notice — and there is nothing left over to demote to a secondary.
+    /// </remarks>
+    public async Task<MimeMessage> ComposeReminderAsync(
+        Booking booking,
+        string manageToken,
+        string? joinUrl,
+        CancellationToken cancellationToken)
+    {
+        var settings = options.Value;
+        var booker = booking.Participants.First(participant => participant.Role == ParticipantRole.Booker);
+        var organizer = MailboxAddress.Parse(settings.From!);
+        var zone = DateTimeZoneProviders.Tzdb[booker.TimeZoneId];
+
+        var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
+        var end = Instant.FromUnixTimeSeconds(booking.EndUtc);
+        var local = start.InZone(zone);
+        var manageUrl = ManageUrl(settings.PublicBaseUrl!, manageToken);
+
+        var mail = new MailBody
+        {
+            Headline = "Tomorrow",
+            Fact = Fact(start, end, zone, previousStart: null),
+            Sentence =
+                $"Hi {booker.Name} — a reminder that this is tomorrow. Nothing to do; the joining "
+                + "link is below.",
+            Action = joinUrl is null
+                ? new MailAction(ManageLabel, manageUrl)
+                : new MailAction("Join the meeting", joinUrl),
+            Secondary = joinUrl is null ? null : new MailSecondary(ManageLabel, manageUrl),
+            Details = Details(booking, joinUrl: null),
+        };
+
+        var text = new TextPart(TextFormat.Plain);
+        text.SetText(Encoding.UTF8, MailTextRenderer.Render(mail));
+
+        var markup = new TextPart(TextFormat.Html);
+        markup.SetText(Encoding.UTF8, await html.RenderAsync(mail, cancellationToken));
+
+        return OutgoingMail.Envelope(
+            $"Tomorrow: {booking.Link.Name}, {OutgoingMail.Time(local)} ({zone.Id})",
             new Multipart(AlternativeSubtype) { text, markup },
             organizer,
             Mailbox(booker));
@@ -524,15 +592,13 @@ public sealed class BookingMailer(
         OutgoingMail.Url(baseUrl, $"{BookPath}/{Uri.EscapeDataString(slug)}");
 
     /// <summary>
-    /// Unreachable through <see cref="SendProposalAsync"/>, which routes to
-    /// <see cref="ComposeProposalAsync"/>. Spelled out anyway because the discard arm's "unknown
-    /// booking notice" is a lie here: the notice is known and this is the wrong composer for it.
+    /// Unreachable through <see cref="SendProposalAsync"/> or <see cref="SendReminderAsync"/>,
+    /// which route to <see cref="ComposeProposalAsync"/> and <see cref="ComposeReminderAsync"/>
+    /// respectively. Spelled out anyway because the discard arm's "unknown booking notice" is a
+    /// lie here: the notice is known and this is the wrong composer for it.
     /// </summary>
-    private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice) =>
-        new(
-            nameof(notice),
-            notice,
-            $"A proposal carries no calendar part; compose it with {nameof(ComposeProposalAsync)}.");
+    private static ArgumentOutOfRangeException ComposedElsewhere(BookingNotice notice, string composer) =>
+        new(nameof(notice), notice, $"{notice} carries no calendar part; compose it with {composer}.");
 
     /// <summary>
     /// A confirmation and a reschedule are both REQUEST — the second is the first at a new time,
@@ -555,7 +621,8 @@ public sealed class BookingMailer(
             BookingNotice.Confirmation => "Confirmed",
             BookingNotice.Reschedule => "Moved",
             BookingNotice.Cancellation => "Cancelled",
-            BookingNotice.Proposal => throw ComposedElsewhere(notice),
+            BookingNotice.Proposal => throw ComposedElsewhere(notice, nameof(ComposeProposalAsync)),
+            BookingNotice.Reminder => throw ComposedElsewhere(notice, nameof(ComposeReminderAsync)),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
         };
 
