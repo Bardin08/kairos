@@ -22,8 +22,8 @@ public class ReminderSchemaTests
 
     /// <summary>
     /// Cancelling a booking deletes its reminder, and the database agrees rather than leaving a
-    /// row pointing at a meeting that is gone. Cascade rather than Restrict, unlike every other
-    /// child here: a reminder is a scheduled intention, not a record of something that happened.
+    /// row pointing at a meeting that is gone: an intention to remind somebody about a meeting
+    /// that no longer exists is not one.
     /// </summary>
     /// <remarks>
     /// The write and the delete go through separate contexts, on purpose: a <see cref="Reminder"/>

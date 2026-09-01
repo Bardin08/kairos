@@ -14,9 +14,9 @@ public sealed class ReminderConfiguration : IEntityTypeConfiguration<Reminder>
         builder.Property(reminder => reminder.Id)
             .HasValueGenerator<Uuid7ValueGenerator>();
 
-        // Cascade, where Booking's other children Restrict. Those are records of things that
-        // happened and outlive the booking on purpose; this is an intention to send a mail, and
-        // an intention to remind somebody about a meeting that no longer exists is not one.
+        // Cascade: an intention to remind somebody about a meeting that no longer exists is
+        // not one. BookingProposalConfiguration is the one sibling that restricts instead,
+        // because a proposal is the record of an offer made and the offer stays made.
         builder.HasOne(reminder => reminder.Booking)
             .WithMany()
             .HasForeignKey(reminder => reminder.BookingId)
