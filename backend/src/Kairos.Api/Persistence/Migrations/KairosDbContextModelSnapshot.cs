@@ -574,6 +574,9 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<string>("LastError")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Secret")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("SentAt")
                         .HasColumnType("INTEGER");
 

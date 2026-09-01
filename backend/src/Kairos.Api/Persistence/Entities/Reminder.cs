@@ -24,6 +24,16 @@ public sealed class Reminder
     public long DueAt { get; set; }
 
     /// <summary>
+    /// The manage token, encrypted by <see cref="Security.SecretProtector"/>. The notice this row
+    /// schedules offers "Manage or cancel" beside the join link, and it is composed a day later by
+    /// a sweeper that was not there when the token was minted — so the row has to carry the token
+    /// itself, which is why this is ciphertext rather than the SHA-256
+    /// <see cref="Booking.ManageTokenHash"/> keeps. Null for a booking written before this column
+    /// existed, and that reminder goes out without the secondary link rather than not going.
+    /// </summary>
+    public string? Secret { get; set; }
+
+    /// <summary>
     /// Null until the relay accepted it. Stamped on the answer rather than on the attempt, so a
     /// tick that dies mid-send and a relay that refuses leave the same row and get the same
     /// answer: send again. A duplicate reminder is an annoyance; a missing one is the feature.
