@@ -272,6 +272,14 @@ public sealed class BookingWriter(
                 {
                     BookingId = bookingId,
                     DueAt = ReminderSchedule.DueAt(start).ToUnixTimeSeconds(),
+
+                    // The ciphertext the follow-up above already holds, rather than a second
+                    // encryption of the same token: it is the same secret, and taking it from
+                    // there is what spares this class a SecretProtector of its own. The sweeper
+                    // that sends this notice tomorrow needs the token to print "Manage or cancel",
+                    // and by then the plaintext is gone — this method mints it and nothing else
+                    // remembers it.
+                    Secret = work.Secret,
                 };
                 context.Reminders.Add(reminder);
             }

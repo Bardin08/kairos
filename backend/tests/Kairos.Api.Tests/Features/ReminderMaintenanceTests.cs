@@ -126,6 +126,34 @@ public class ReminderMaintenanceTests
     }
 
     /// <summary>
+    /// The new row carries the old row's secret, so the meeting keeps its manage link across a
+    /// move.
+    /// </summary>
+    /// <remarks>
+    /// Carried rather than re-encrypted, because one of the two callers has no plaintext to
+    /// encrypt: accepting a proposal arrives holding the PROPOSAL's token, and only the manage
+    /// token's SHA-256 is stored. Re-minting from what the caller happens to hold would leave that
+    /// path — and only that path — reminding an invitee with no way to cancel, which is the kind
+    /// of loss nothing reports.
+    /// </remarks>
+    [Fact]
+    public async Task MoveTo_ALaterTime_CarriesTheManageTokenOntoTheNewReminder()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Book(context, OriginalStart);
+        var protector = new SecretProtector(TestKey);
+        var scheduled = context.Reminders.AsNoTracking().Single();
+        var manageToken = protector.Unprotect(scheduled.Secret.ShouldNotBeNull());
+
+        await Mover(context).MoveToAsync(booking, LaterStart, Now);
+
+        var reminder = context.Reminders.AsNoTracking().Single();
+        reminder.Id.ShouldNotBe(scheduled.Id);
+        protector.Unprotect(reminder.Secret.ShouldNotBeNull()).ShouldBe(manageToken);
+    }
+
+    /// <summary>
     /// Moved inside the lead. The reschedule mail the invitee is about to receive IS the notice,
     /// and a reminder firing on the next tick would arrive a minute behind it saying "tomorrow"
     /// about a meeting today.

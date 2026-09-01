@@ -522,6 +522,37 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// A reminder whose row carries no secret: a booking written before the column existed, or one
+    /// whose encryption failed. It goes without the manage link rather than not going, exactly as
+    /// a cancellation the operator triggered already does.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_NoManageToken_KeepsTheJoinActionAndDropsTheSecondary()
+    {
+        var message = await ComposeReminder(joinUrl: JoinUrl, manageToken: null);
+
+        Html(message).ShouldContain($"href=\"{JoinUrl}\" class=\"{OnAccentClass}\"");
+        Plain(message).ShouldNotContain(ManageUrlFragment);
+        Html(message).ShouldNotContain(ManageUrlFragment);
+    }
+
+    /// <summary>
+    /// The same row on a booking with no conference, which is the one combination that leaves the
+    /// message nothing to press at all. It still composes — a reminder that threw here is an
+    /// invitee nobody reminds, over a link that was never the point of the message — and it leaves
+    /// no hole where the action was.
+    /// </summary>
+    [Fact]
+    public async Task ComposeReminderAsync_NoManageTokenAndNoConference_ComposesWithNothingToPress()
+    {
+        var body = Plain(await ComposeReminder(joinUrl: null, manageToken: null));
+
+        body.ShouldNotContain(ManageUrlFragment);
+        body.ShouldNotContain(JoinUrl);
+        body.ShouldNotContain(BlankLineRun);
+    }
+
+    /// <summary>
     /// A reminder changes nothing about the event. A text/calendar part restating an unchanged
     /// meeting is how a client is talked into showing a second one, and this is the second of the
     /// two notices that carry none at all.
@@ -706,11 +737,11 @@ public class BookingMailerTests
 
     /// <summary>Composed, written and parsed back, exactly as <see cref="ComposeProposal"/> is.</summary>
     private static async Task<MimeMessage> ComposeReminder(
-        Booking? booking = null, string? joinUrl = null)
+        Booking? booking = null, string? joinUrl = null, string? manageToken = ManageToken)
     {
         var subject = booking ?? Booking();
         var message = await Mailer(Options(BaseUrl)).ComposeReminderAsync(
-            subject, ManageToken, joinUrl, TestContext.Current.CancellationToken);
+            subject, manageToken, joinUrl, TestContext.Current.CancellationToken);
 
         return RoundTrip(message);
     }

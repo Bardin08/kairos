@@ -330,6 +330,52 @@ public class BookingWriterTests
     }
 
     /// <summary>
+    /// The row carries the manage token the booking issued, encrypted. Nothing else remembers it:
+    /// the database keeps only a SHA-256, and the sweeper that sends this notice a day later was
+    /// not running when the token was minted.
+    /// </summary>
+    /// <remarks>
+    /// Asserted as a round trip rather than as "not null". A column full of the word "encrypted"
+    /// passes a null check and would send every invitee the same dead link.
+    /// </remarks>
+    [Fact]
+    public void TryCreate_AMeetingFurtherOutThanTheLead_GivesTheReminderTheTokenItIssued()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+        var now = ReminderSchedule.DueAt(MeetingStart) - Duration.FromHours(HoursAcrossTheLeadBoundary);
+
+        var result = Writer(context, new FixedClock(now)).TryCreate(
+            ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+        result.Success.ShouldBeTrue();
+
+        var secret = context.Reminders.Single().Secret;
+        secret.ShouldNotBeNull();
+        new SecretProtector(TestKey).Unprotect(secret).ShouldBe(result.ManageToken);
+    }
+
+    /// <summary>
+    /// Rule 15, on the one column of this table that holds one: the manage token is a bearer
+    /// capability, and what SQLite writes — and what Litestream streams to object storage — must
+    /// not be the token itself.
+    /// </summary>
+    [Fact]
+    public void TryCreate_AMeetingFurtherOutThanTheLead_DoesNotStoreTheReminderSecretInTheClear()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context, NoMargin);
+        var now = ReminderSchedule.DueAt(MeetingStart) - Duration.FromHours(HoursAcrossTheLeadBoundary);
+
+        var result = Writer(context, new FixedClock(now)).TryCreate(
+            ConsultingId, ConsultingSlug, MeetingStart, SlotDuration, Booker, string.Empty, NoMargin);
+        result.Success.ShouldBeTrue();
+
+        context.Reminders.Single().Secret.ShouldNotBe(result.ManageToken);
+    }
+
+    /// <summary>
     /// The other half: a meeting inside the lead gets no row at all, because the confirmation the
     /// booker is about to receive is the notice — see <see cref="Reminder"/>.
     /// </summary>

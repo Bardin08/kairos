@@ -166,6 +166,14 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
         var existing = await context.Reminders
             .SingleOrDefaultAsync(reminder => reminder.BookingId == booking.Id, CancellationToken.None);
 
+        // Carried across the delete rather than re-encrypted from a plaintext this method could
+        // ask for, because one of its callers cannot supply one: accepting a proposal arrives
+        // holding the PROPOSAL's token, and the manage token exists in the database only as a
+        // SHA-256. The ciphertext is already here and it is the same token, so the meeting keeps
+        // its manage link however it moved. Read before the Remove below, so the order of these
+        // two statements is never what decides it.
+        var secret = existing?.Secret;
+
         if (existing is not null)
         {
             context.Reminders.Remove(existing);
@@ -177,6 +185,7 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
             {
                 BookingId = booking.Id,
                 DueAt = ReminderSchedule.DueAt(start).ToUnixTimeSeconds(),
+                Secret = secret,
             });
         }
 

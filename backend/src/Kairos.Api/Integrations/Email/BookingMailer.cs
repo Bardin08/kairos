@@ -156,10 +156,15 @@ public sealed class BookingMailer(
             cancellationToken);
 
     /// <summary>The 24-hour notice — see <see cref="BookingNotice.Reminder"/>.</summary>
+    /// <param name="manageToken">
+    /// Plaintext, decrypted from <see cref="Persistence.Entities.Reminder.Secret"/>. Nullable for
+    /// the reason a cancellation's is: a row written before that column existed carries nothing to
+    /// build a link from, and only the token's SHA-256 is stored, so none can be recovered.
+    /// </param>
     /// <returns>Whether the relay took it — see <see cref="SendConfirmationAsync"/>.</returns>
     public Task<bool> SendReminderAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         string? joinUrl,
         CancellationToken cancellationToken) =>
         SendComposedAsync(
@@ -431,10 +436,15 @@ public sealed class BookingMailer(
     /// thing is to check or cancel. A booking with no conference has nothing to make the action,
     /// so the manage link takes its place — the same fallback <see cref="Manage"/> already gives
     /// every other notice — and there is nothing left over to demote to a secondary.
+    ///
+    /// Either link can be missing, so the message has to read as one with neither. That is not a
+    /// hypothetical pair: a booking written before <see cref="Persistence.Entities.Reminder"/> had
+    /// a secret column has no token to build a manage link from, and a link with no conference has
+    /// no join URL.
     /// </remarks>
     public async Task<MimeMessage> ComposeReminderAsync(
         Booking booking,
-        string manageToken,
+        string? manageToken,
         string? joinUrl,
         CancellationToken cancellationToken)
     {
@@ -446,19 +456,26 @@ public sealed class BookingMailer(
         var start = Instant.FromUnixTimeSeconds(booking.StartUtc);
         var end = Instant.FromUnixTimeSeconds(booking.EndUtc);
         var local = start.InZone(zone);
-        var manageUrl = ManageUrl(settings.PublicBaseUrl!, manageToken);
+        var manageUrl = manageToken is null ? null : ManageUrl(settings.PublicBaseUrl!, manageToken);
 
         var mail = new MailBody
         {
             Headline = "Tomorrow",
             Fact = Fact(start, end, zone, previousStart: null),
-            Sentence =
-                $"Hi {booker.Name} — a reminder that this is tomorrow. Nothing to do; the joining "
-                + "link is below.",
-            Action = joinUrl is null
-                ? new MailAction(ManageLabel, manageUrl)
-                : new MailAction("Join the meeting", joinUrl),
-            Secondary = joinUrl is null ? null : new MailSecondary(ManageLabel, manageUrl),
+
+            // The closing clause is a promise about the rest of the message, so it is written only
+            // where the message keeps it: with no conference there is no joining link below.
+            Sentence = joinUrl is null
+                ? $"Hi {booker.Name} — a reminder that this is tomorrow. Nothing to do."
+                : $"Hi {booker.Name} — a reminder that this is tomorrow. Nothing to do; the joining "
+                    + "link is below.",
+            Action = joinUrl is null ? Manage(manageUrl) : new MailAction("Join the meeting", joinUrl),
+
+            // Null when the join URL took the action, and null again when there is no manage link
+            // to demote: a reminder whose row carries no secret keeps every other part of itself.
+            Secondary = (joinUrl is null) || (manageUrl is null)
+                ? null
+                : new MailSecondary(ManageLabel, manageUrl),
             Details = Details(booking, joinUrl: null),
         };
 
