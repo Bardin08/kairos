@@ -307,7 +307,7 @@ public static class BookingsEndpoints
         // second one the endpoint would have to open just to carry this row.
         var previousStart = Instant.FromUnixTimeSeconds(booking.StartUtc);
         followUps.Enqueue(booking.Id, FollowUpType.Rescheduled, token, previousStart);
-        await mover.MoveToAsync(booking, start);
+        await mover.MoveToAsync(booking, start, now);
         signal.Nudge();
 
         return await ToResponseAsync(context, booking, null, cancellationToken);
@@ -390,7 +390,7 @@ public static class BookingsEndpoints
         // token and only the manage token's SHA-256 is stored. The notice goes without a manage
         // link — exactly what the inline path used to send.
         followUps.Enqueue(booking.Id, FollowUpType.Rescheduled, manageToken: null, previousStart);
-        await mover.MoveToAsync(booking, start);
+        await mover.MoveToAsync(booking, start, now);
         signal.Nudge();
 
         return await ToResponseAsync(context, booking, null, cancellationToken);

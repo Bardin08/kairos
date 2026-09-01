@@ -142,13 +142,45 @@ public sealed class BookingMover(KairosDbContext context, SlotQuery slots)
     /// second invitation, and the length is carried over — a different duration is a different
     /// meeting.
     /// </remarks>
-    public Task MoveToAsync(Booking booking, Instant start)
+    /// <param name="now">
+    /// The caller's reading rather than a fresh one, so the release, the availability check and
+    /// the reminder below all answer the same instant.
+    /// </param>
+    public async Task MoveToAsync(Booking booking, Instant start, Instant now)
     {
         var seconds = booking.EndUtc - booking.StartUtc;
         booking.StartUtc = start.ToUnixTimeSeconds();
         booking.EndUtc = booking.StartUtc + seconds;
         booking.Sequence++;
-        return ConfirmAsync(booking);
+
+        // Here because this is the only place StartUtc changes — the reason Sequence is advanced
+        // here too. A reminder is a copy of the meeting's time, and this is where the original
+        // stops matching it. Deleted and rewritten rather than updated in place, which makes
+        // moved-later, moved-inside-the-lead and moved-back-out one path instead of three; a row
+        // already sent goes with the rest, and the reschedule mail naming the new hour is a better
+        // notice than a second "tomorrow". Staged, so it rides the save below and cannot commit
+        // apart from the move it belongs to.
+        //
+        // The read is uncancellable for ConfirmAsync's reason: by now the booking is Cancelled on
+        // disk, and a token firing here would leave it that way with nobody having cancelled it.
+        var existing = await context.Reminders
+            .SingleOrDefaultAsync(reminder => reminder.BookingId == booking.Id, CancellationToken.None);
+
+        if (existing is not null)
+        {
+            context.Reminders.Remove(existing);
+        }
+
+        if (ReminderSchedule.ShouldSchedule(start, now))
+        {
+            context.Reminders.Add(new Reminder
+            {
+                BookingId = booking.Id,
+                DueAt = ReminderSchedule.DueAt(start).ToUnixTimeSeconds(),
+            });
+        }
+
+        await ConfirmAsync(booking);
     }
 
     public Task RestoreAsync(Booking booking) => ConfirmAsync(booking);
