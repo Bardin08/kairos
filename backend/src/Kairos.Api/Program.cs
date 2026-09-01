@@ -282,6 +282,14 @@ builder.Services.AddHostedService<FollowUpWorker>();
 // has late mail, and a calendar and a workbench that are both correct.
 builder.Services.AddHostedService<ProposalSweeper>();
 
+// And beside that one, on the same minute and for the same kind of reason: it turns a clock into a
+// mail. What it does not share is the tolerance for never running. A hold that lapses stops holding
+// whether or not anything ticks, so ProposalSweeper only owes the operator a notice; a reminder
+// exists only because this sends it, and a deployment where this never ticks is the feature absent
+// rather than late. Late it survives — the due moment is a row, so a process down over one sends on
+// the tick after it returns, right up until the meeting itself starts.
+builder.Services.AddHostedService<ReminderSweeper>();
+
 builder.Services.AddRateLimitPolicies();
 
 builder.Services.AddHealthEndpoints();
