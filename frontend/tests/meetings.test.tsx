@@ -40,6 +40,8 @@ const ORGANIZER_START = '11:00'
 const BOOKER_TIME = '18:00'
 const BOOKER_ZONE = 'Asia/Tokyo'
 
+const JOIN_URL = 'https://meet.example.com/abc-defg-hij'
+
 const LINK_NAME = 'Mentorship'
 const SLUG = 'mentorship'
 
@@ -59,6 +61,14 @@ const synced: Meeting = {
   calendarProvider: 'google',
   calendarError: null,
   proposal: null,
+  conferenceUrl: null,
+}
+
+/** Held somewhere. Most deployments connect no conferencing at all, so this is the exception. */
+const withConference: Meeting = {
+  ...synced,
+  id: '0199a1f0-0000-7000-8000-000000000005',
+  conferenceUrl: JOIN_URL,
 }
 
 /** The provider was asked and refused. Part B recorded why; the row has to say it. */
@@ -120,6 +130,29 @@ test('every row carries the link it was booked through', async () => {
   // The one fact the calendar cannot supply, and the reason this tab exists
   // rather than deferring to Google Calendar.
   expect(within(row).getByText(LINK_NAME).className).toContain('badge')
+})
+
+test('a meeting held somewhere offers the way in', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([withConference]))
+
+  render(<Meetings />)
+
+  const row = await rowFor(withConference)
+
+  const join = within(row).getByRole('link', { name: 'Join' })
+  expect(join.getAttribute('href')).toBe(JOIN_URL)
+  // A join URL is somebody else's origin, and the workbench is not a place to lose.
+  expect(join.getAttribute('target')).toBe('_blank')
+})
+
+test('a meeting held nowhere offers nothing rather than an empty cell', async () => {
+  render(<Meetings />)
+
+  const row = await rowFor(synced)
+
+  // Absent, not blank. A deployment with no conferencing connected makes every row
+  // look like this, and an empty control reads as something that failed to load.
+  expect(within(row).queryByRole('link', { name: 'Join' })).toBeNull()
 })
 
 test('times are the organizer stored zone, with the booker own zone on the detail', async () => {

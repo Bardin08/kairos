@@ -258,6 +258,17 @@ export default function Meetings() {
       ),
     },
     {
+      // The invitee has this in their mail and their calendar. Until now the operator had it
+      // only by leaving Kairos and opening the event.
+      label: 'Where',
+      cell: (meeting) =>
+        meeting.conferenceUrl === null ? null : (
+          <a href={meeting.conferenceUrl} target="_blank" rel="noreferrer">
+            Join
+          </a>
+        ),
+    },
+    {
       label: 'Actions',
       kind: 'control',
       cell: (meeting) =>
