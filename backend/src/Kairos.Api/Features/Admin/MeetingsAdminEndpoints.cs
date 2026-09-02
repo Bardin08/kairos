@@ -118,7 +118,8 @@ public sealed record MeetingResponse(
     bool CalendarSynced,
     string? CalendarProvider,
     string? CalendarError,
-    MeetingProposalResponse? Proposal);
+    MeetingProposalResponse? Proposal,
+    string? ConferenceUrl);
 
 /// <summary>Everything one render of the tab needs, in one round trip.</summary>
 /// <remarks>
@@ -282,6 +283,11 @@ public static class MeetingsAdminEndpoints
                     .OrderByDescending(entry => entry.UpdatedAt)
                     .Select(entry => new { entry.State, entry.Provider, entry.LastError })
                     .FirstOrDefault(),
+                Conference = context.ConferenceLinks
+                    .Where(conference => conference.BookingId == booking.Id)
+                    .OrderByDescending(conference => conference.CreatedAt)
+                    .Select(conference => conference.JoinUrl)
+                    .FirstOrDefault(),
             })
             .ToListAsync(cancellationToken);
 
@@ -302,6 +308,7 @@ public static class MeetingsAdminEndpoints
                     ? null
                     : new CalendarFacts(row.Calendar.State, row.Calendar.Provider, row.Calendar.LastError),
                 row.Proposal,
+                row.Conference,
                 now)),
         ];
     }
@@ -571,6 +578,12 @@ public static class MeetingsAdminEndpoints
             .Select(row => new ProposalFacts(row.Id, row.StartUtc, row.ExpiresAt, row.State))
             .FirstOrDefaultAsync(cancellationToken);
 
+        var conference = await context.ConferenceLinks.AsNoTracking()
+            .Where(entry => entry.BookingId == booking.Id)
+            .OrderByDescending(entry => entry.CreatedAt)
+            .Select(entry => entry.JoinUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var booker = booking.Participants
             .FirstOrDefault(participant => participant.Role == ParticipantRole.Booker);
 
@@ -587,6 +600,7 @@ public static class MeetingsAdminEndpoints
             booker?.TimeZoneId ?? string.Empty,
             calendar,
             proposal,
+            conference,
             now);
     }
 
@@ -604,6 +618,7 @@ public static class MeetingsAdminEndpoints
         string bookerTimeZone,
         CalendarFacts? calendar,
         ProposalFacts? proposal,
+        string? conferenceUrl,
         Instant now) =>
         new(
             id,
@@ -631,7 +646,8 @@ public static class MeetingsAdminEndpoints
                     Format(proposal.StartUtc),
                     Format(proposal.ExpiresAt),
                     ProposalWriter.StateAt(proposal.State, proposal.ExpiresAt, now)
-                        .ToString().ToLowerInvariant()));
+                        .ToString().ToLowerInvariant()),
+            conferenceUrl);
 
     private static string Format(long unixSeconds) =>
         InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
