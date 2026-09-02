@@ -102,6 +102,42 @@ public class MeetingsAdminTests
     }
 
     /// <summary>
+    /// The one fact about a meeting the workbench could not show. The invitee has it in their
+    /// mail and their calendar; the operator had it only by leaving Kairos and opening the event.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_ForABookingWithAConference_CarriesItsJoinUrl()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        (await BookAsync(client)).StatusCode.ShouldBe(HttpStatusCode.Created);
+        SeedConference(app);
+
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.ConferenceUrl.ShouldBe(JoinUrl);
+    }
+
+    /// <summary>
+    /// Null, not an empty string. A meeting with nowhere to join is ordinary — a deployment with
+    /// no conferencing connected makes nothing else — and the row draws the absence of the action
+    /// off this rather than off a string it has to inspect.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_ForABookingWithNoConference_CarriesNull()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+
+        (await BookAsync(client)).StatusCode.ShouldBe(HttpStatusCode.Created);
+
+        var meeting = (await ReadAsync(client)).Meetings.ShouldHaveSingleItem();
+
+        meeting.ConferenceUrl.ShouldBeNull();
+    }
+
+    /// <summary>
     /// A booking made through a link, read back through the operator's list. The link's name is
     /// the reason this tab exists rather than deferring to the calendar, and the booker's own zone
     /// is what answers "what time did they think this was".
@@ -506,12 +542,30 @@ public class MeetingsAdminTests
     private static string Format(long unixSeconds) =>
         InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
 
+    private const string JoinUrl = "https://meet.example.com/abc-defg-hij";
+    private const string ConferenceExternalId = "abc-defg-hij";
+
     private static KairosApp NewApp()
     {
         var app = new KairosApp();
         app.Seed(Seed);
         return app;
     }
+
+    /// <summary>The conference a booking is held in, attached after the fact.</summary>
+    /// <remarks>
+    /// Seeded rather than created through an <see cref="IConferenceCreator"/>: the row is what the
+    /// list reads, and driving a provider to produce one would be testing the adapter on the way
+    /// past. <see cref="EndpointTests"/> attaches one the same way and for the same reason.
+    /// </remarks>
+    private static void SeedConference(KairosApp app) =>
+        app.Seed(context => context.ConferenceLinks.Add(new ConferenceLink
+        {
+            BookingId = context.Bookings.Select(booking => booking.Id).Single(),
+            Provider = IntegrationProvider.Google,
+            ExternalId = ConferenceExternalId,
+            JoinUrl = JoinUrl,
+        }));
 
     private static void Seed(KairosDbContext context)
     {

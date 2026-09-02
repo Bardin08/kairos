@@ -81,6 +81,8 @@ export type Meeting = {
   calendarError: string | null
   /** Null when nobody has ever suggested a new time for this meeting. */
   proposal: MeetingProposal | null
+  /** Where to join, or null when this meeting has nowhere to be held. */
+  conferenceUrl: string | null
 }
 
 /**

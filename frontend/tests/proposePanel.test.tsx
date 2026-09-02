@@ -65,6 +65,7 @@ const meeting: Meeting = {
   calendarProvider: 'google',
   calendarError: null,
   proposal: null,
+  conferenceUrl: null,
 }
 
 function renderPanel(onProposed = vi.fn(), onCancel = vi.fn()) {
