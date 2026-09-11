@@ -165,7 +165,7 @@ The same vocabulary carries the operator's workbench without a second design. De
 Cool neutrals at a single hue with one saturated accent; nothing else is coloured except status, and status is always double-coded.
 
 ### Primary
-- **Signal Indigo** (`{colors.signal}`): the selected time, the selected day, and the primary action. Nothing else. If it appears on a third kind of element, that is a defect, not a variation. In dark mode it lightens to `{colors.night-signal}`, which inverts what can legibly sit on it — labels there are `{colors.night-on-signal}`, not white.
+- **Signal Indigo** (`{colors.signal}`): the selected time, the selected day, the primary action, and the current tab in the phone tab bar. Nothing else — those are the three jobs the rule below names, and a fourth kind of element wearing this colour is a defect, not a variation. In dark mode it lightens to `{colors.night-signal}`, which inverts what can legibly sit on it — labels there are `{colors.night-on-signal}`, not white.
 - **Signal Wash** (`{colors.signal-wash}`): the confirmation summary panel and the avatar, where the accent needs to be present without competing with the selection.
 
 ### Neutral
@@ -238,7 +238,7 @@ A 4px base scale (`{spacing.1}`–`{spacing.10}`), applied with rhythm rather th
 
 The booking page is one card with two panes — details and calendar — collapsing to a single column at **860px**. Below that breakpoint the primary action leaves the card and becomes a sticky bar at the bottom edge, inside thumb reach, stating the choice in full rather than only offering the verb. The month is a fixed-width object capped at 300px, never a stretchy column; letting it take a free fraction is what turns a calendar into a wall of tiles.
 
-The admin shell is a 240px rail plus content, collapsing at **900px** to a bottom tab bar carrying the same three destinations. Tables become lists of records at **760px**, each cell keeping its column name so a value is never orphaned from its meaning.
+The admin shell is a 240px rail plus content, collapsing at **900px** to a bottom tab bar carrying the same three destinations, with Settings as a row of its own above them (see Navigation). Tables become lists of records at **760px**, each cell keeping its column name so a value is never orphaned from its meaning.
 
 Breakpoints: 640 (page padding and card insets), 760 (tables to records), 860 (booking panes, sticky action bar), 900 (admin rail to tab bar).
 
@@ -291,6 +291,7 @@ Gently rounded, never soft: 8px (`{rounded.md}`) is the default for controls, 12
 ### Navigation
 - **Desktop:** a rail of three destinations, active state as a filled inset with heavier weight.
 - **Phone:** a bottom tab bar, the same three destinations, accent used only for the current one.
+- **Settings:** the fourth surface, and deliberately not a fourth destination. The organizer's timezone, the four global limit defaults and the way through to Integrations have to live somewhere, and they are visited rarely, so Settings sits under the hairline at the foot of the rail, and on a phone as a single row at the tap floor above the tab grid, with a hairline under it saying it is not one of the three. The grid stays three equal columns — a fourth child drops into a ragged second row a third of the way across, so the layout says "three" as loudly as the design does.
 
 ### Slot grid (signature)
 The product's defining component. Times render as a 2-column grid on a phone and a scrolling 2-column column on desktop, each a 44px target in tabular figures. Selection is `aria-pressed`, painted with the accent. Availability is generated, not listed: a candidate `[start, start + duration)` is tested against each existing meeting padded by the resolved margin, with starts advancing on the increment grid. The margin pads the busy interval, never the candidate — padding both yields the sum of two margins instead of the larger of them.
@@ -323,8 +324,8 @@ A day is a number, not a tile. The 44px cell is a hit area; paint appears only o
 
 ## Open against the Two Jobs Rule
 
-Two accent uses were judged violations on 2026-08-23 and deliberately left standing by the pull request that judged them: in both the declaration is one line and the decision behind it is not. The third entry is not a violation at all — it is this document's own superseded wording, left standing in a file that copies it. They are listed here as well as in the verdicts under the rule, because a follow-up that lives only inside a paragraph is a follow-up nobody schedules.
+Two accent uses were judged violations on 2026-08-23 and deliberately left standing by the pull request that judged them: in both the declaration is one line and the decision behind it is not. They are listed here as well as in the verdicts under the rule, because a follow-up that lives only inside a paragraph is a follow-up nobody schedules.
 
 - **`kairos.css:526` — `a { color: var(--accent-text) }`.** The rule names a link. Closing it means deciding what a link looks like once it is not accent-tinted — ink, with the underline it already carries doing the work — and reading that on a real page in both themes before it is typed, because the declaration governs every link the product will ever have rather than the one inline prose anchor it has today — `Integrations.tsx:350`. The other two anchors wear `.btn`, which sets its own `--btn-fg` and never sees the tint, which is why the exposure looked smaller than the decision is.
 - **`kairos.css:1123` — `.slot:hover`.** The rule names a hover state, and this one is on the single control where the accent already means *chosen*. The defence — that a wash on hover is job one at lower intensity — is exactly the ambiguity the rule exists to prevent, on the one element that cannot afford it. Closing it means moving the hover into the neutral ramp and then showing that hover, selected and unavailable are still three legibly different things at a 44px target in both themes. That is a look at the signature component, not a token swap.
-- **`.impeccable/design.json:133`, `:135`, `:143` — the machine-readable sidecar, still saying two.** Not a violation of the rule but a copy of the superseded wording, in the one file another tool reads instead of this one. The open part is not what it should say — it should say what `:184`, `:151`, `:156` and `:307` now say — but whether it is regenerated from this document or corrected by hand, which nobody has established. Answer that first; the edit is the easy half.
+The sidecar entry that used to sit here — `.impeccable/design.json` still saying two — is closed. It was corrected by hand rather than regenerated: `document` rewrites the whole sidecar, including the component snippets and the ramps nothing had asked to change, and five strings edited in place is the smaller diff to read. Those five are the overview paragraph, the key characteristic, the rule body, the do, and the slot component's description, all now in the wording this document uses. The overview's other stale claim went with them — it still described the type as a system stack, which Typography superseded.
