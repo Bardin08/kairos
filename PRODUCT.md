@@ -2,7 +2,7 @@
 
 <!-- impeccable:product-schema 1 -->
 
-Kairos, the self-hosted booking-link scheduler. This file is the durable product truth the visual work is allowed to rely on. It lived at the vault root while Kairos had no repository; it moved here on 2026-08-16, as its own first paragraph said it would. The planning context it was extracted from stays in the vault at `efforts/kairos/` — `ground.md` for what is true, `roadmap.md` for what comes next.
+Kairos, the self-hosted booking-link scheduler. This file is the durable product truth the visual work is allowed to rely on. It was written before Kairos had a repository, and moved in with the code on 2026-08-16.
 
 ## Platform
 
@@ -22,7 +22,7 @@ Two audiences with opposite situations, and the design serves the first one firs
 
 **The invitee.** Someone the operator sent a link to — a mentee, a client, a collaborator. Anonymous, unauthenticated, arriving from a URL pasted into an email or a chat, shortened or not. Very likely on a phone, on mobile data, in a timezone that is not the organizer's. They visit once, for ninety seconds, to answer one question: *when can I talk to this person?* They will never learn the interface. Nothing may require a second visit to understand.
 
-**The operator.** The person the calendar belongs to, and the instance's only administrator. Signs in through whichever identity provider the deployment is wired to, on a desktop most of the time and on a phone when something needs checking away from the desk. Uses three surfaces: Links (the bookable event types), Availability (named reusable patterns plus the global margin/notice/cap/increment defaults), Meetings (every booking, past and upcoming, each row carrying the link it came through). Repeat user, high frequency, tolerant of density, intolerant of ceremony.
+**The operator.** The person the calendar belongs to, and the instance's only administrator. Signs in through whichever identity provider the deployment is wired to, on a desktop most of the time and on a phone when something needs checking away from the desk. Uses four surfaces: Links (the bookable event types), Availability (named reusable patterns), Meetings (every booking, past and upcoming, each row carrying the link it came through), and Settings (the organizer's timezone, the global margin/notice/cap/increment defaults, and the way through to integrations). The first three are daily; Settings is visited rarely, which is why the navigation carries it as a surface and not as a fourth destination. Repeat user, high frequency, tolerant of density, intolerant of ceremony.
 
 **One operator per instance today, and that is sequencing rather than a permanent shape.** Making every resource user-owned was designed and costed on 2026-08-14 and postponed to a later phase, not rejected. Teams, organizations and an admin hierarchy remain out.
 
@@ -46,7 +46,9 @@ Built because Calendly's self-hosted equivalent costs 1.2 Gi of RAM and drags Po
 
 **Confirmed in scope (phase 1):** multiple event types each with its own link and availability window; reusable named availability patterns; correct timezone and DST handling for both sides; margins, minimum notice, daily booking cap, constrained start increments; global conflict pool plus external busy check; Google Meet link created on booking; confirmation email with a working `.ics`; self-serve cancel and reschedule via signed tokens; Meetings list with source link per row; OIDC admin login; a narrow REST surface plus booking webhooks.
 
-**Later phases:** prefilled single-use personal links, custom booking questions, email reminders, Zoom, a clickable Meetings detail view (phase 3); recurring bookings as an RFC 5545 series with a customizable end date (phase 4); outbound triggers on meeting events (phase 5); user-owned resources, postponed rather than rejected.
+**Later phases:** custom booking questions, Zoom, a clickable Meetings detail view (phase 3) — prefilled single-use personal links and email reminders were on that list and have since shipped; public release — someone other than the author can run it, which means a README, a compose file and a documented backup and restore (phase 4); user-owned resources, postponed rather than rejected.
+
+**Backlog — wanted, not committed, in no phase:** recurring bookings as an RFC 5545 series with a customizable end date, and outbound triggers on meeting events. Neither gets a phase until one is chosen for it, and the questions each carries — how far a series runs, what a trigger's receiver needs — are settled then rather than now.
 
 **Outbound triggers are thin by design.** Kairos fires an HTTP call with configured headers when a meeting event happens, and that is the whole feature. Transcribing, recording and note-taking belong to whatever receives the call; Kairos never grows the ability to do any of them, and it is not a workflow engine.
 
@@ -54,11 +56,13 @@ Built because Calendly's self-hosted equivalent costs 1.2 Gi of RAM and drags Po
 
 **Out:** teams, round-robin, group events, payments, routing forms, polls, embeds, SMS, browser extension, SAML, SCIM, a general workflow engine, and PostgreSQL.
 
+**Meetings shows only the bookings Kairos made, permanently — decided 2026-08-16.** It never reads the calendar back. A meeting created directly in the calendar already blocks its slot through the busy check, so reading it back would prevent no conflict; what it would do is pull the contents of private events into the database.
+
+**Busy time is read from every calendar the operator grants, as opaque intervals only — decided 2026-08-16.** A start, an end and nothing else: no title, no attendees, no description. Which calendars are granted is configuration, not a phase.
+
 **Duration is a free per-link value, confirmed 2026-08-14.** Any whole number of minutes, configured on the link, not chosen from a menu of 15/30/45/60. A 25-minute call and a 50-minute call are ordinary cases, not exceptions — they are how an operator keeps a real gap without spending the whole hour. Consequences the slot generator must carry: the end time is arithmetic and often lands off the half hour; the interval a booking occupies is duration plus the resolved margin; and the next legal start is the following start-increment boundary after that, not the moment the previous meeting ends. No surface may hard-code a duration or assume a round one.
 
 **Terminology, fixed:** *Link* = a bookable event type. *Pattern* = a named reusable availability schedule. *Meeting* = a booking that exists. *Margin* = the required gap between two meetings. These four words appear in the UI exactly as written; they were confused repeatedly in discussion and the naming is now settled.
-
-**Undecided:** whether Meetings shows only app-created bookings or reads the calendar back; which note-taker (blocks phase 5); how far a recurring series runs.
 
 ## Brand Commitments
 
@@ -70,7 +74,7 @@ No logo, no wordmark, no palette, no typeface, and no requirement to match the o
 
 ## Evidence on Hand
 
-No customers, no testimonials, no benchmarks, no pricing, no screenshots of a running system. Nothing is deployed. The measured figures that may be stated are the ones in the vault's `efforts/kairos/kairos.md`: cal.diy at ~1.2 Gi steady with PostgreSQL, Kairos targeting ~120 Mi with SQLite. Everything else shown in a mockup is authored demonstration material and must be labelled as such. Invitee names, emails, and meeting subjects in any comp are invented.
+No customers, no testimonials, no pricing, no screenshots. One reference deployment, in use since 2026-08-28: a single arm64 container on a Raspberry Pi, running the image published at `ghcr.io/bardin08/kairos`. The measured figures that may be stated are the ones recorded in `docs/measurements.md` — idle memory inside a container held to the deployment's limit is under *The pod's limits*, and is quoted from there rather than restated here — plus the comparison Positioning draws: cal.diy at ~1.2 Gi steady with PostgreSQL. Everything else shown in a mockup is authored demonstration material and must be labelled as such. Invitee names, emails, and meeting subjects in any comp are invented.
 
 ## Product Principles
 

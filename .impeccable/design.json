@@ -83,7 +83,7 @@
       "name": "Time Slot",
       "kind": "custom",
       "refersTo": "slot",
-      "description": "One bookable start time. The selected state is the only place besides the primary action where the accent appears.",
+      "description": "One bookable start time. The selected state is the accent's first job; the action that commits the booking and the current tab are the other two.",
       "html": "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:320px\"><button class=\"ds-slot\">09:00</button><button class=\"ds-slot\" aria-pressed=\"true\">14:00</button></div>",
       "css": ".ds-slot { display:flex; align-items:center; justify-content:center; min-height:44px; padding:0 12px; background:var(--surface-raised,#fff); color:var(--text-primary,#171A20); border:1px solid var(--border-default,#E1E3EA); border-radius:8px; font:500 .875rem/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-variant-numeric:tabular-nums; cursor:pointer; transition:background 90ms cubic-bezier(.2,.7,.3,1), border-color 90ms cubic-bezier(.2,.7,.3,1), transform 90ms cubic-bezier(.16,1,.3,1); } @media (hover:hover) { .ds-slot:hover { background:#EEF0FE; border-color:#C3C9FA; color:#3E44C4; } } .ds-slot:active { transform:scale(.98); } .ds-slot[aria-pressed=\"true\"] { background:#4E56E3; border-color:#4E56E3; color:#fff; font-weight:600; } .ds-slot:focus-visible { outline:2px solid #737DEE; outline-offset:2px; }"
     },
@@ -130,9 +130,9 @@
   ],
   "narrative": {
     "northStar": "The Departure Board",
-    "overview": "A departure board exists for one reason: a stranger, under time pressure, in bad light, has to become certain of one thing. It does not decorate. Everything on it is either a time, a destination, or the mark showing which row is yours. Kairos is built to that standard. An invitee arrives from a link someone pasted into a message, on a phone, with ninety seconds of attention and no intention of ever learning the interface.\n\nThe system is quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, spent on exactly two things: the time the invitee has selected, and the action that commits it. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is a system stack, because an Operate surface is well served by one, it costs zero bytes on mobile data, and the device already has it in memory. The single place typography is load-bearing is numerals.\n\nThe same vocabulary carries the operator's workbench without a second design. Density rises but nothing new is introduced: the same ramp, the same hairlines, the same accent discipline, the same figures.",
+    "overview": "A departure board exists for one reason: a stranger, under time pressure, in bad light, has to become certain of one thing. It does not decorate. Everything on it is either a time, a destination, or the mark showing which row is yours. Kairos is built to that standard. An invitee arrives from a link someone pasted into a message, on a phone, with ninety seconds of attention and no intention of ever learning the interface.\n\nThe system is quiet on purpose, and its restraint is not timidity — it is the shape of the job. There is one accent colour, and it is spent on three things: the time the invitee has selected, the action that commits it, and the current tab in the operator's phone tab bar. Every other surface is a cool neutral, separated by hairlines rather than by shadow. Type is Source Sans 3, self-hosted and subset so that an English invitee pays 28.7 KB for it and a Polish one pays for the accents only when a Polish name is actually on the page. The single place typography is load-bearing is numerals, and it is treated that way: figures come from a 2.3 KB digits-only cut of IBM Plex Mono.\n\nThe same vocabulary carries the operator's workbench without a second design. Density rises but nothing new is introduced: the same ramp, the same hairlines, the same accent discipline, the same figures.",
     "keyCharacteristics": [
-      "One accent, spent only on the selection and the primary action",
+      "One accent, spent only on the selection, the primary action and the current tab",
       "Hairlines and tonal layering carry structure; shadow is reserved for what floats",
       "Tabular figures everywhere a number appears",
       "44px minimum touch target on every viewport, not only touch ones",
@@ -140,7 +140,7 @@
       "One authored motion moment in the entire product"
     ],
     "rules": [
-      { "name": "The Two Jobs Rule", "body": "The accent has exactly two jobs: mark the selected time, and mark the action that commits it. A hover state, a link, a badge, an icon or a heading tinted with the accent has taken a job that is not its own.", "section": "colors" },
+      { "name": "The Two Jobs Rule", "body": "The accent has exactly three jobs: mark the selected time, mark the action that commits it, and mark where you are — which on this product means the current tab in the phone tab bar, and nothing else that navigates. The rail marks its own current destination with an inset fill and heavier weight rather than with the accent. The wordmark is the single exemption: a brand mark is not a control and holds no state, so it takes no job at all. A hover state, a link, a badge, an icon or a heading tinted with the accent has still taken a job that is not its own. The name stays: the rule is known by it.", "section": "colors" },
       { "name": "The Second Channel Rule", "body": "No state is carried by hue alone. Every state must survive a monochrome screenshot.", "section": "colors" },
       { "name": "The Inversion Rule", "body": "Dark mode is not the light palette flipped. The accent lightens, so what sits on it must darken. White on the dark-mode accent measures ~3.5:1 and is prohibited.", "section": "colors" },
       { "name": "The Tabular Rule", "body": "Anything that is a time, a date, a duration or a count sets in tabular figures. A slot column whose digits change width is a column that jitters when the day changes.", "section": "typography" },
@@ -151,7 +151,7 @@
       { "name": "The Offset Rule", "body": "Every shadow carries an offset and a soft blur. A zero-offset halo is decoration wearing depth's clothes.", "section": "elevation" }
     ],
     "dos": [
-      "Do spend the accent only on the selected time and the primary action.",
+      "Do spend the accent only on the selected time, the action that commits it, and the tab the operator is currently on.",
       "Do set every time, date, duration and count in tabular figures.",
       "Do give every state a second channel — a dot, a shape, a weight, a message.",
       "Do keep 44px targets everywhere, and put the committing action at the bottom edge on phones.",
