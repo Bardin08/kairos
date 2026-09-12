@@ -333,6 +333,26 @@ public class BookingMailerTests
     }
 
     /// <summary>
+    /// A relay that rebuilds the message — Resend does — lifts the calendar part out of the
+    /// alternative and drops its method=, and the attachment's own label is then all a client has
+    /// to read. It says the same thing the inline part says, or a client discards both.
+    /// </summary>
+    [Theory]
+    [InlineData(BookingNotice.Confirmation)]
+    [InlineData(BookingNotice.Reschedule)]
+    [InlineData(BookingNotice.Cancellation)]
+    public async Task ComposeAsync_ACalendarNotice_LabelsTheAttachmentTextCalendarWithTheAlternativesMethod(
+        BookingNotice notice)
+    {
+        var message = await Compose(notice: notice);
+
+        var attachment = message.Attachments.OfType<MimePart>().Single();
+        attachment.ContentType.IsMimeType("text", "calendar").ShouldBeTrue();
+        attachment.ContentType.Parameters["method"]
+            .ShouldBe(CalendarPart(message).ContentType.Parameters["method"]);
+    }
+
+    /// <summary>
     /// The single riskiest change in this task, asserted rather than hoped for.
     /// </summary>
     /// <remarks>
@@ -786,8 +806,12 @@ public class BookingMailerTests
             .OfType<Multipart>()
             .Single(part => part.ContentType.IsMimeType("multipart", "alternative"));
 
+    /// <summary>
+    /// Down the alternative, not off <see cref="MimeMessage.BodyParts"/>: the attachment beside it
+    /// is text/calendar too.
+    /// </summary>
     private static TextPart CalendarPart(MimeMessage message) =>
-        message.BodyParts.OfType<TextPart>()
+        Alternative(message).OfType<TextPart>()
             .Single(part => part.ContentType.IsMimeType("text", "calendar"));
 
     /// <summary>

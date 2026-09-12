@@ -55,9 +55,8 @@ public sealed class BookingMailer(
 
     private const string WhereValue = "Video call";
 
+    private const string CalendarMediaType = "text";
     private const string CalendarSubtype = "calendar";
-    private const string AttachmentMediaType = "application";
-    private const string AttachmentSubtype = "ics";
     private const string AttachmentFileName = "invite.ics";
     private const string MethodParameter = "method";
     private const string AlternativeSubtype = "alternative";
@@ -262,10 +261,12 @@ public sealed class BookingMailer(
     /// │   ├── text/plain                          the body a filter and a watch read
     /// │   ├── text/html                           the same message, rendered
     /// │   └── text/calendar; method=REQUEST       what draws the accept/decline control
-    /// └── application/ics (attachment)            what clients that ignore the part above save
+    /// └── text/calendar; method=REQUEST           the attachment clients that ignore the part above save
     /// </code>
     /// The calendar part inside the alternative is what Gmail and Outlook.com read; the
-    /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes.
+    /// attachment is what Apple Mail and desktop clients act on. Both carry the same bytes and the
+    /// same method, because a relay that rebuilds the message — Resend does — moves the part above
+    /// out of the alternative and drops its method=, and the attachment's label is what survives.
     ///
     /// <paramref name="identity"/> is an argument rather than a lookup, exactly like
     /// <paramref name="joinUrl"/> beside it: this class composes and does not read, which is what
@@ -335,6 +336,8 @@ public sealed class BookingMailer(
         var markup = new TextPart(TextFormat.Html);
         markup.SetText(Encoding.UTF8, await html.RenderAsync(mail, cancellationToken));
 
+        var keyword = IcsBuilder.Keyword(method);
+
         var invitation = new TextPart(CalendarSubtype)
         {
             // Base64 rather than left to MimeKit's choice. The .ics is folded at 75 octets with a
@@ -342,16 +345,17 @@ public sealed class BookingMailer(
             // or line endings unfolds it into a file no client will parse.
             ContentTransferEncoding = ContentEncoding.Base64,
         };
-        invitation.ContentType.Parameters[MethodParameter] = IcsBuilder.Keyword(method);
+        invitation.ContentType.Parameters[MethodParameter] = keyword;
         invitation.SetText(Encoding.UTF8, ics);
 
-        var attachment = new MimePart(AttachmentMediaType, AttachmentSubtype)
+        var attachment = new MimePart(CalendarMediaType, CalendarSubtype)
         {
             Content = new MimeContent(new MemoryStream(Encoding.UTF8.GetBytes(ics))),
             ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
             ContentTransferEncoding = ContentEncoding.Base64,
             FileName = AttachmentFileName,
         };
+        attachment.ContentType.Parameters[MethodParameter] = keyword;
 
         return OutgoingMail.Envelope(
             Subject(notice, booking.Link.Name, start, zone),
