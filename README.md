@@ -35,8 +35,10 @@ You need Docker with Compose, and an OIDC provider you can register a client wit
 
    ```bash
    docker compose up -d
-   curl -s localhost:8080/readyz
+   curl -sS --retry 15 --retry-delay 1 --retry-all-errors localhost:8080/readyz
    ```
+
+   It prints `Healthy` once the container has started. A connection error or two before that, while it starts, is expected.
 
 4. Open <http://localhost:8080/admin/login>, sign in, and create a link under Links.
 5. Open the link's booking page in a private window and book a slot. The booking appears under Meetings.
