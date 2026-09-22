@@ -1,0 +1,21 @@
+# Kairos as a deployment runs it: the published image, its settings from .env,
+# its database on a named volume.
+#
+#   cp .env.example .env    # then fill in the four required settings
+#   docker compose up -d
+#
+# The port is bound to loopback. A reverse proxy on this host reaches it as is;
+# a proxy on another host needs "8080:8080" instead. TLS is the proxy's job, and
+# README.md says what Kairos needs to be told about it.
+services:
+  kairos:
+    image: ghcr.io/bardin08/kairos:latest
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - kairos-data:/var/lib/kairos
+    restart: unless-stopped
+
+volumes:
+  kairos-data:
