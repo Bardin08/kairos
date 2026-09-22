@@ -3,6 +3,9 @@ name: ci
 on:
   push:
     branches: [main]
+    # A release is a v* tag pushed by hand. The same jobs run on it, so a release
+    # image is published only from a tree that still passes.
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -129,13 +132,17 @@ jobs:
       # `on.push.branches`, and it is emitted only on a push because a pull
       # request's ref name is `104/merge` and a slash is not legal in a tag. The
       # `push:` flag below cannot save it: buildx validates every tag it is handed
-      # before deciding whether to push one.
+      # before deciding whether to push one. On a release tag the moving tag is
+      # the version, and `latest` follows the newest release.
       - id: image
         run: |
           echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "sha=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             echo "moving=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "latest=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_OUTPUT"
           fi
 
       # buildx supplies the driver that can emit a manifest list at all — the
@@ -168,12 +175,14 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           # Two tags on a push, and they answer different questions. The sha tag
           # is immutable and is what a deployment pins to; the branch tag moves
-          # and is what says which build is current. On a pull request the second
-          # is empty, which this action drops from the list — see the step above
-          # for why it cannot simply be written out and left to `push: false`.
+          # and is what says which build is current. A third, `latest`, only on
+          # a release tag. On a pull request the second and third are empty,
+          # which this action drops from the list — see the step above for why
+          # it cannot simply be written out and left to `push: false`.
           tags: |
             ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.sha }}
             ${{ steps.image.outputs.moving }}
+            ${{ steps.image.outputs.latest }}
           # Read always, written only from main. A pull request reuses the layers
           # main last published — npm ci and dotnet restore, which are the slow
           # ones — and cannot poison what the next one reads. An empty cache-to
