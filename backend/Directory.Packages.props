@@ -8,7 +8,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="[10.0.12]" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="[10.0.12]" />
     <PackageVersion Include="NodaTime" Version="[3.3.3]" />
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="[10.0.11]" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="[10.0.12]" />
     <!-- Pinned ahead of the tasks that reference them, so the version decision is made once
          and reviewed here rather than in whichever pull request happens to need it first. -->
     <PackageVersion Include="Google.Apis.Calendar.v3" Version="[1.75.0.4206]" />
