@@ -118,9 +118,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0.11-noble-chiseled@sha256:0839314d08bb6
 COPY --from=backend /app /app
 
 # The data, outside the image. SQLite in WAL mode writes kairos.db and its -wal and
-# -shm siblings, so what has to be writable is the DIRECTORY and not just the file
-# — and those three together are the whole of what a redeploy must not lose and a
-# backup has to take.
+# -shm siblings, so what has to be writable is the DIRECTORY and not just the file.
+# Those three and the data-protection key ring under .aspnet/ are the whole of what
+# a redeploy must not lose and a backup has to take.
 #
 # Created with WORKDIR rather than declared by VOLUME alone: WORKDIR gives the
 # directory to 1654, and Docker copies a fresh volume's ownership from the
@@ -139,6 +139,13 @@ WORKDIR /app
 # with no configuration at all, which would put the database on the container's
 # own writable layer and throw it away with the container.
 ENV ConnectionStrings__Db="Data Source=/var/lib/kairos/kairos.db"
+
+# The key ring that signs the operator's session cookie lives at
+# $HOME/.aspnet/DataProtection-Keys, and the base image sets no HOME of its own, so
+# without this it lands on the container's writable layer and every recreated
+# container signs the operator out. Pointed at the volume, it survives a redeploy
+# and goes into the backup with the database. Overridable the same way.
+ENV HOME=/var/lib/kairos
 
 # The port the base image already points Kestrel at through ASPNETCORE_HTTP_PORTS.
 # Stated here so `docker run -P` and anyone reading `docker image inspect` sees it.
