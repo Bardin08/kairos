@@ -161,7 +161,7 @@
 
     /* ---- primitives: accent ---------------------------------------------
        Three jobs: the selected time, the action that commits it, the current
-       destination. The wordmark is the one exemption; anywhere else, a bug. */
+       destination. The brand mark is the one exemption; anywhere else, a bug. */
     --indigo-50:  #EEF0FE;
     --indigo-100: #DFE3FD;
     --indigo-200: #C3C9FA;
@@ -691,13 +691,13 @@
     width: 22px;
     height: 22px;
     flex: none;
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--text-on-accent);
-    display: grid;
-    place-items: center;
   }
-  .wordmark-glyph svg { width: 14px; height: 14px; }
+  .wordmark-glyph svg { display: block; width: 100%; height: 100%; }
+  /* The mark's three colours are the accent pair and their midpoint, so the
+     dark theme's inverted pair redraws it with no value of its own. */
+  .mark-tile { fill: var(--accent); }
+  .mark-day { fill: color-mix(in srgb, var(--text-on-accent) 50%, var(--accent)); }
+  .mark-chosen { fill: var(--text-on-accent); }
 
   /* ---- button ------------------------------------------------------------
      One geometry, four intents. Height is the tap target on every viewport,

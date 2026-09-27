@@ -1,6 +1,8 @@
 import { useEffect, useState, useSyncExternalStore, type ReactElement } from 'react'
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter'
 
+import BrandMark from '../../components/BrandMark'
+
 import { getAlerts, type Alert } from './adminAlerts'
 import { getSettings } from './adminSettings'
 import { dismissedFor, forget, remember } from './conditionDismissal'
@@ -246,18 +248,7 @@ export default function AdminShell() {
       <div className="admin-shell">
         <aside className="rail">
           <span className="wordmark">
-            <span className="wordmark-glyph" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7.5V12l3 1.8" />
-              </svg>
-            </span>
+            <BrandMark />
             Kairos
           </span>
 

@@ -66,7 +66,7 @@ Built because Calendly's self-hosted equivalent costs 1.2 Gi of RAM and drags Po
 
 ## Brand Commitments
 
-No logo, no wordmark, no palette, no typeface, and no requirement to match the other homelab services. The name *Kairos* — Greek, the opportune moment as opposed to chronological time — is the only fixed asset, and its meaning is not binding on the design.
+The name *Kairos* — Greek, the opportune moment as opposed to chronological time — and, since 2026-09-27, one mark: nine days with the chosen one pushed into the top-right cell, drawn in the product's own accent. Its construction is in `docs/ui/DESIGN.md` under *Brand mark*. No separate brand palette, no typeface of its own, and no requirement to match the other homelab services.
 
 **Standing preference, recorded 2026-08-14.** After two re-rolls through assigned and challenger visual worlds, the user chose convention deliberately: *"I want more canonical experience but with a modern hand rather than some outstanding design that users won't understand."* Kairos ships the arrangement its audience already knows — the familiar booking-page and admin-shell layouts — executed at a named craft bar rather than dressed in a foreign visual world. This is a durable commitment, not a one-off: future surfaces inherit it and do not re-open the world question.
 

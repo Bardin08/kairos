@@ -238,3 +238,17 @@ test('the settings toggle is a tap-floor target through the label wrapping its b
   )
   expect(css).toContain('.check-tap input { width: 18px; height: 18px; flex: none; }')
 })
+
+// The brand mark is drawn from the accent pair and their midpoint, never from
+// a hex of its own. That is what lets the dark theme's inverted pair redraw it:
+// a white disc on the lightened dark accent is what the Inversion Rule forbids,
+// and a mark with its own hex would keep painting one.
+test('the brand mark takes every colour from the accent pair', () => {
+  const css = readFileSync(stylesheet, 'utf8')
+
+  expect(css).toContain('.mark-tile { fill: var(--accent); }')
+  expect(css).toContain(
+    '.mark-day { fill: color-mix(in srgb, var(--text-on-accent) 50%, var(--accent)); }',
+  )
+  expect(css).toContain('.mark-chosen { fill: var(--text-on-accent); }')
+})
