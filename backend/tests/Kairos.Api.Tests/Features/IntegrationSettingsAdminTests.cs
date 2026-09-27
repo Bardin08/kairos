@@ -314,11 +314,8 @@ public class IntegrationSettingsAdminTests
         $"{IntegrationsPath}/{provider}/settings";
 
     /// <summary>
-    /// A connected Google, and a client whose host can read it. Both come off one factory on
-    /// purpose: <c>WithWebHostBuilder</c> derives a container of its own and
-    /// <see cref="KairosApp"/> mints a fresh <c>Security:SecretKey</c> into every one, so a
-    /// payload sealed with the outer app's protector is ciphertext the routes under test cannot
-    /// open — which shows on the listing as a fault rather than as a failing test.
+    /// A connected Google, and an operator client whose host reads it with the same
+    /// <c>Security:SecretKey</c> that sealed it.
     /// </summary>
     private static HttpClient ConnectedGoogleClient(KairosApp app)
     {

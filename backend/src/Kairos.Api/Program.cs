@@ -68,6 +68,8 @@ builder.Services.AddSingleton(new SecretProtector(
         + $"rest and needs a base64 {SecretProtector.KeyBytes}-byte AES-GCM key. Generate one "
         + $"with: openssl rand -base64 {SecretProtector.KeyBytes}")));
 
+builder.Services.AddKeyRing();
+
 // Stateless and sealed — one instance, on the hot path of every booking page.
 builder.Services.AddSingleton<SlotGenerator>();
 

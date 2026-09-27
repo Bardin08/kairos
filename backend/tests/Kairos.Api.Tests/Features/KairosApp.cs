@@ -8,6 +8,7 @@ using Kairos.Api.Security;
 using Kairos.Api.Shared;
 using Kairos.Api.Tests.Integrations;
 
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -53,10 +54,22 @@ namespace Kairos.Api.Tests.Features;
 /// but never connected" — a real state of a fresh deployment — cannot be asked for here without
 /// also faking the transport.
 /// </param>
+/// <param name="keyRingDirectory">
+/// Where the data-protection keys go, for a test standing a second host on the first one's ring the
+/// way a redeploy stands a new container on the old volume. A directory passed in belongs to the
+/// caller and outlives this instance; left null, the instance makes one and deletes it.
+/// </param>
+/// <param name="secretKey">
+/// The <c>Security:SecretKey</c> this deployment runs under, passed with
+/// <paramref name="keyRingDirectory"/> when the second host is the same deployment. Left null, one is
+/// minted per instance.
+/// </param>
 public sealed class KairosApp(
     string? webRoot = null,
     string? publicBaseUrl = null,
-    FakeGoogleHandler? google = null)
+    FakeGoogleHandler? google = null,
+    string? keyRingDirectory = null,
+    string? secretKey = null)
     : WebApplicationFactory<KairosDbContext>
 {
     /// <summary>
@@ -81,7 +94,22 @@ public sealed class KairosApp(
     private readonly string _path =
         Path.Combine(Path.GetTempPath(), $"kairos-api-{Guid.CreateVersion7():N}.db");
 
+    private readonly bool _ownsKeyRing = keyRingDirectory is null;
+
     private HttpClient? _client;
+
+    /// <summary>
+    /// Once per instance rather than once per container: <c>WithWebHostBuilder</c> derives a
+    /// container over the same key ring, and two secret keys on one ring is a broken deployment,
+    /// not a test setup.
+    /// </summary>
+    public string SecretKey { get; } = secretKey ?? NewSecretKey();
+
+    public string KeyRingDirectory { get; } = keyRingDirectory
+        ?? Path.Combine(Path.GetTempPath(), $"kairos-keys-{Guid.CreateVersion7():N}");
+
+    public static string NewSecretKey() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(SecretProtector.KeyBytes));
 
     public HttpClient Client => _client ??= CreateClient();
 
@@ -133,10 +161,8 @@ public sealed class KairosApp(
         }
 
         // The application refuses to start without a key, so the harness supplies one as an
-        // operator does. Thrown away per run; nothing here reads a value an earlier run wrote.
-        builder.UseSetting(
-            "Security:SecretKey",
-            Convert.ToBase64String(RandomNumberGenerator.GetBytes(SecretProtector.KeyBytes)));
+        // operator does. Thrown away with the instance unless a test hands it to a second host.
+        builder.UseSetting("Security:SecretKey", SecretKey);
 
         // Same rule for Pocket ID: no issuer and client, no startup. Almost every test stays on
         // the anonymous side of the gate, and the one that challenges pins the handler's
@@ -166,6 +192,12 @@ public sealed class KairosApp(
 
         builder.ConfigureServices(services =>
         {
+            // The application keeps its ring where HOME points, which on a developer's machine is
+            // their real ~/.aspnet. Every run would leave keys there sealed under a secret key the
+            // next run never sees, so each instance gets a ring of its own.
+            services.AddDataProtection()
+                .PersistKeysToFileSystem(new DirectoryInfo(KeyRingDirectory));
+
             services.RemoveAll<DbContextOptions<KairosDbContext>>();
             services.AddSingleton(
                 new DbContextOptionsBuilder<KairosDbContext>().UseSqlite(connectionString).Options);
@@ -227,6 +259,11 @@ public sealed class KairosApp(
         foreach (var file in files)
         {
             File.Delete(file);
+        }
+
+        if (_ownsKeyRing && Directory.Exists(KeyRingDirectory))
+        {
+            Directory.Delete(KeyRingDirectory, recursive: true);
         }
     }
 }
