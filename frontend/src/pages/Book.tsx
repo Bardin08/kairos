@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useParams } from 'wouter'
 
 import AlertIcon from '../components/AlertIcon'
+import BrandMark from '../components/BrandMark'
 import BookingForm from '../components/BookingForm'
 import DurationPicker from '../components/DurationPicker'
 import MonthGrid from '../components/MonthGrid'
@@ -708,18 +709,7 @@ export default function Book() {
       <div className="page">
         <header className="appbar">
           <span className="wordmark">
-            <span className="wordmark-glyph" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7.5V12l3 1.8" />
-              </svg>
-            </span>
+            <BrandMark />
             Kairos
           </span>
         </header>

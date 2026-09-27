@@ -20,7 +20,8 @@ public sealed record MailPalette(
     string Hairline,
     string Accent,
     string OnAccent,
-    string Wash)
+    string Wash,
+    string MarkDay)
 {
     public static readonly MailPalette Light = new(
         Page: "#F6F7F9",
@@ -32,7 +33,8 @@ public sealed record MailPalette(
         Hairline: "#EDEEF2",
         Accent: "#4E56E3",
         OnAccent: "#FFFFFF",
-        Wash: "#EEF0FE");
+        Wash: "#EEF0FE",
+        MarkDay: "#A6AAF1");
 
     /// <summary>
     /// Not the light palette with its values flipped. The accent lightens so it holds against a
@@ -48,8 +50,9 @@ public sealed record MailPalette(
         Hairline: "#232730",
         Accent: "#737DEE",
         OnAccent: "#0B0D2B",
-        Wash: "#1B1F35");
+        Wash: "#1B1F35",
+        MarkDay: "#3F458C");
 
     public IEnumerable<string> Slots() =>
-        [Page, Card, Ink, Muted, Faint, Line, Hairline, Accent, OnAccent, Wash];
+        [Page, Card, Ink, Muted, Faint, Line, Hairline, Accent, OnAccent, Wash, MarkDay];
 }

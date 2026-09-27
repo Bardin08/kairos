@@ -19,6 +19,8 @@
     .k-wash { background: @Dark.Wash !important; }
     .k-accent { background: @Dark.Accent !important; }
     .k-on-accent { color: @Dark.OnAccent !important; }
+    .k-on-accent-fill { background: @Dark.OnAccent !important; }
+    .k-mark-day { background: @Dark.MarkDay !important; }
     .k-hair { border-color: @Dark.Hairline !important; }
   }
 </style>
@@ -29,11 +31,22 @@
 
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="k-card" style="width:600px;max-width:100%;background:@Light.Card;border:1px solid @Light.Line;border-radius:16px;">
 
-   @* Wordmark. The accent's brand exemption: identity, not a control. *@
+   @* The mark and the name. The accent's brand exemption: identity, not a control. The mark is
+      the four-cell drawing built from table cells — no SVG, no image — so it survives image
+      blocking: a 16px tile, three days and the chosen one in the top-right cell. *@
    <tr><td style="padding:24px 32px 0 32px;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-     <td class="k-accent" style="width:10px;height:10px;background:@Light.Accent;border-radius:3px;font-size:0;line-height:0;">&nbsp;</td>
-     <td class="k-ink" style="@(Cell)padding-left:8px;font-size:13px;font-weight:600;letter-spacing:0.14em;color:@Light.Ink;">KAIROS</td>
+     <td style="width:16px;vertical-align:middle;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>
+       <td class="k-accent" style="width:12px;height:12px;padding:2px;background:@Light.Accent;border-radius:3.5px;font-size:0;line-height:0;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+         <tr><td style="@(MarkCell)">@Day</td><td style="@(MarkCell)">@Chosen</td></tr>
+         <tr><td style="@(MarkCell)">@Day</td><td style="@(MarkCell)">@Day</td></tr>
+        </table>
+       </td>
+      </tr></table>
+     </td>
+     <td class="k-ink" style="@(Cell)padding-left:8px;vertical-align:middle;font-size:13px;line-height:16px;font-weight:600;letter-spacing:0.14em;color:@Light.Ink;">KAIROS</td>
     </tr></table>
    </td></tr>
 
@@ -147,6 +160,17 @@
 
     /// <summary>Dropped from a link's visible text. The scheme is noise the invitee does not read.</summary>
     private const string HttpsPrefix = "https://";
+
+    /// <summary>One of the mark's four cells: 6px square, and nothing a client could pad it with.</summary>
+    private const string MarkCell = "width:6px;height:6px;padding:0;font-size:0;line-height:0;";
+
+    /// <summary>An unchosen day: a 2px dot centred in its cell.</summary>
+    private static readonly RenderFragment Day =
+        @<div class="k-mark-day" style="width:2px;height:2px;margin:2px;background:@Light.MarkDay;border-radius:1px;font-size:0;line-height:0;">&nbsp;</div>;
+
+    /// <summary>The chosen day: a disc filling its cell, in the colour that sits on the accent.</summary>
+    private static readonly RenderFragment Chosen =
+        @<div class="k-on-accent-fill" style="width:6px;height:6px;background:@Light.OnAccent;border-radius:3px;font-size:0;line-height:0;">&nbsp;</div>;
 
     [Parameter, EditorRequired] public MailBody Body { get; set; } = null!;
 

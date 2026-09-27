@@ -23,8 +23,11 @@ public class MailHtmlRendererTests
     private const string ReasonText = "Something urgent came up.";
     private const string ReasonHeading = "Why";
 
-    /// <summary>The wordmark square and the action. Nothing else may be painted in the accent.</summary>
+    /// <summary>The mark's tile and the action. Nothing else may be painted in the accent.</summary>
     private const int AccentedElements = 2;
+
+    /// <summary>The mark's four cells less the chosen one, drawn at the size a mail header allows.</summary>
+    private const int UnchosenDays = 3;
 
     /// <summary>The four ways a message asks a mail client to go and fetch something.</summary>
     private const string Image = "<img";
@@ -56,6 +59,20 @@ public class MailHtmlRendererTests
         html.ShouldNotContain(FontFace);
         html.ShouldNotContain(Import);
         html.ShouldNotContain(BackgroundImage);
+    }
+
+    /// <summary>
+    /// The header draws the four-cell mark out of table cells: three days and the chosen one.
+    /// Counted by the days' own colour, which nothing else in a message wears.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_DrawsTheMarkAsThreeDaysAndTheChosenOne()
+    {
+        var html = await Render(Minimal());
+
+        var days = html.Split(MailPalette.Light.MarkDay).Length - 1;
+
+        days.ShouldBe(UnchosenDays);
     }
 
     [Fact]
