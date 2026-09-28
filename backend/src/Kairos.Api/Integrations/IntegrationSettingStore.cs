@@ -56,7 +56,7 @@ public sealed class IntegrationSettingStore(
             return ReadOnlyDictionary<string, JsonElement>.Empty;
         }
 
-        var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.Values);
+        var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.FieldValues);
         if (values is null)
         {
             return ReadOnlyDictionary<string, JsonElement>.Empty;
@@ -104,7 +104,7 @@ public sealed class IntegrationSettingStore(
 
         var merged = row is null
             ? new Dictionary<string, JsonElement>()
-            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.Values)
+            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(row.FieldValues)
               ?? new Dictionary<string, JsonElement>();
 
         foreach (var (key, value) in values)
@@ -126,13 +126,13 @@ public sealed class IntegrationSettingStore(
             isolated.IntegrationSettings.Add(new IntegrationSetting
             {
                 Provider = provider,
-                Values = json,
+                FieldValues = json,
                 UpdatedAt = now,
             });
         }
         else
         {
-            row.Values = json;
+            row.FieldValues = json;
             row.UpdatedAt = now;
         }
 

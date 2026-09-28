@@ -31,7 +31,7 @@ public sealed class IntegrationSetting
     /// a foreign key. Plaintext, because none of it is a secret — a calendar id is an address, and
     /// one is already stored in the clear as an account label.
     /// </summary>
-    public required string Values { get; set; }
+    public required string FieldValues { get; set; }
 
     /// <summary>
     /// Stamped when the row is written, and read by nothing — the state
