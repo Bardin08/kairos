@@ -127,8 +127,8 @@ public class SchemaTests
 
     /// <summary>
     /// The index asserted as enforcement, not declaration, on the foreign-key test's reasoning:
-    /// an index configured and never created refuses nothing. Two rows identical in all four
-    /// columns is what two writers who each passed ValidateDay produce.
+    /// an index configured and never created refuses nothing. Two identical windows on one date is
+    /// what two writers who each passed ValidateDay produce.
     /// </summary>
     [Fact]
     public void SaveChanges_WithTheSameWindowOnOneDateTwice_IsRejectedByTheUniqueIndex()
@@ -139,23 +139,37 @@ public class SchemaTests
         context.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
         context.SaveChanges();
 
+        context.PatternOverrides.Add(new PatternOverride
+        {
+            Id = Guid.CreateVersion7(),
+            PatternId = patternId,
+            Date = ContestedDate,
+            Windows =
+            [
+                new OverrideWindow { Id = Guid.CreateVersion7(), StartMinute = NineAm, EndMinute = FivePm },
+                new OverrideWindow { Id = Guid.CreateVersion7(), StartMinute = NineAm, EndMinute = FivePm },
+            ],
+        });
+
+        Should.Throw<DbUpdateException>(() => context.SaveChanges());
+    }
+
+    /// <summary>
+    /// One row per date is what lets a row with no windows mean blocked. Two rows for one date
+    /// would be two answers to one question, and nothing in the read path picks between them.
+    /// </summary>
+    [Fact]
+    public void SaveChanges_WithTheSameDateTwiceOnOnePattern_IsRejectedByTheUniqueIndex()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var patternId = Guid.CreateVersion7();
+        context.Patterns.Add(new Pattern { Id = patternId, Name = "Weekdays" });
+        context.SaveChanges();
+
         context.PatternOverrides.AddRange(
-            new PatternOverride
-            {
-                Id = Guid.CreateVersion7(),
-                PatternId = patternId,
-                Date = ContestedDate,
-                StartMinute = NineAm,
-                EndMinute = FivePm,
-            },
-            new PatternOverride
-            {
-                Id = Guid.CreateVersion7(),
-                PatternId = patternId,
-                Date = ContestedDate,
-                StartMinute = NineAm,
-                EndMinute = FivePm,
-            });
+            new PatternOverride { Id = Guid.CreateVersion7(), PatternId = patternId, Date = ContestedDate },
+            new PatternOverride { Id = Guid.CreateVersion7(), PatternId = patternId, Date = ContestedDate });
 
         Should.Throw<DbUpdateException>(() => context.SaveChanges());
     }
@@ -179,8 +193,7 @@ public class SchemaTests
                 Id = Guid.CreateVersion7(),
                 PatternId = patternId,
                 Date = ContestedDate,
-                StartMinute = NineAm,
-                EndMinute = FivePm,
+                Windows = [new OverrideWindow { Id = Guid.CreateVersion7(), StartMinute = NineAm, EndMinute = FivePm }],
             });
             seed.SaveChanges();
         }
@@ -188,13 +201,13 @@ public class SchemaTests
         // Both read before either writes, which is the whole of the race.
         using var first = database.CreateContext();
         using var second = database.CreateContext();
-        var firstRows = first.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
-        var secondRows = second.PatternOverrides.Where(row => row.Date == ContestedDate).ToList();
+        var firstRows = first.OverrideWindows.Where(window => window.PatternOverride.Date == ContestedDate).ToList();
+        var secondRows = second.OverrideWindows.Where(window => window.PatternOverride.Date == ContestedDate).ToList();
 
-        first.PatternOverrides.RemoveRange(firstRows);
+        first.OverrideWindows.RemoveRange(firstRows);
         first.SaveChanges();
 
-        second.PatternOverrides.RemoveRange(secondRows);
+        second.OverrideWindows.RemoveRange(secondRows);
         Should.Throw<DbUpdateConcurrencyException>(() => second.SaveChanges());
     }
 

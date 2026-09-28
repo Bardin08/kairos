@@ -45,6 +45,7 @@ public sealed class AvailabilityQuery(KairosDbContext context)
     private static readonly Func<KairosDbContext, Guid, DateOnly, DateOnly, IAsyncEnumerable<PatternOverride>> OverridesOfPattern =
         EF.CompileAsyncQuery((KairosDbContext database, Guid patternId, DateOnly from, DateOnly to) =>
             database.PatternOverrides.AsNoTracking()
+                .Include(replacement => replacement.Windows)
                 .Where(replacement => replacement.PatternId == patternId
                     && replacement.Date >= from
                     && replacement.Date <= to));
@@ -62,24 +63,13 @@ public sealed class AvailabilityQuery(KairosDbContext context)
             rules.Add(rule);
         }
 
-        var replacements = new Dictionary<DateOnly, List<PatternOverride>>();
+        // Sorted for the reason the rules below are: a date split into a morning and an afternoon
+        // comes back mornings first.
+        var replacements = new Dictionary<DateOnly, OverrideWindow[]>();
         await foreach (var replacement in OverridesOfPattern(context, patternId, from.ToDateOnly(), to.ToDateOnly())
                            .WithCancellation(cancellationToken))
         {
-            if (!replacements.TryGetValue(replacement.Date, out var forDate))
-            {
-                forDate = [];
-                replacements[replacement.Date] = forDate;
-            }
-
-            forDate.Add(replacement);
-        }
-
-        // Once per date rather than per day of the walk, and for the reason the rules below are
-        // sorted: a date split into a morning and an afternoon comes back mornings first.
-        foreach (var forDate in replacements.Values)
-        {
-            forDate.Sort((left, right) => Nullable.Compare(left.StartMinute, right.StartMinute));
+            replacements[replacement.Date] = [.. replacement.Windows.OrderBy(window => window.StartMinute)];
         }
 
         // Sorted here rather than in SQL so the compiled query keeps returning IQueryable, and
@@ -91,14 +81,11 @@ public sealed class AvailabilityQuery(KairosDbContext context)
         {
             if (replacements.TryGetValue(date.ToDateOnly(), out var forDate))
             {
-                // An override IS the day: the weekly rules are not merged in, and a date whose
-                // only row has no times leaves the day empty rather than falling back to them.
-                foreach (var replacement in forDate)
+                // An override IS the day: the weekly rules are not merged in, and a date with no
+                // windows is left empty rather than falling back to them.
+                foreach (var window in forDate)
                 {
-                    if (replacement.StartMinute is { } overrideStart && replacement.EndMinute is { } overrideEnd)
-                    {
-                        windows.Add(Window(patternId, date, overrideStart, overrideEnd));
-                    }
+                    windows.Add(Window(patternId, date, window.StartMinute, window.EndMinute));
                 }
 
                 continue;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -7,7 +8,11 @@ using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Shared;
 
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using NodaTime;
 using NodaTime.Text;
@@ -60,6 +65,14 @@ public class PatternsAdminTests
 
     /// <summary>Two tabs on one date, which is the smallest number that is a race at all.</summary>
     private const int RacingWriters = 2;
+
+    /// <summary>A save with no windows, which is how the operator blocks a date.</summary>
+    private const int NoWindows = 0;
+
+    private const int OneWindow = 1;
+
+    /// <summary>How EF's SQLite provider writes a DateOnly, and so the only spelling a DELETE by date matches.</summary>
+    private const string StoredDateFormat = "yyyy-MM-dd";
 
     /// <summary>
     /// How many times the rules race below is run. Whether two requests interleave is the
@@ -311,6 +324,33 @@ public class PatternsAdminTests
         offered.ShouldContain(NineAm);
         offered.ShouldContain(TwoPm);
         offered.ShouldAllBe(minute => minute < Noon || minute >= TwoPm);
+    }
+
+    /// <summary>
+    /// Removing a date is not blocking it: the weekly rules come back. The date's windows go by the
+    /// foreign key's cascade, since the route deletes with ExecuteDelete and loads nothing.
+    /// </summary>
+    [Fact]
+    public async Task RemoveOverride_OnASplitDate_PutsTheDateBackOnTheWeeklyRules()
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+        var weekly = await SlotsAsync(app, Formatted(day));
+        await SaveOverrideAsync(
+            client,
+            day,
+            [
+                new { startMinute = NineAm, endMinute = Noon },
+                new { startMinute = TwoPm, endMinute = FivePm },
+            ]);
+
+        var response = await client.DeleteAsync(
+            $"{PatternUrl}/overrides/{Formatted(day)}", TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await PatternOfAsync(response)).Overrides.ShouldBeEmpty();
+        (await SlotsAsync(app, Formatted(day))).ShouldBe(weekly);
     }
 
     /// <summary>
@@ -573,6 +613,43 @@ public class PatternsAdminTests
             var stored = (await StoredPatternAsync(client, created.Id)).Rules;
             stored.ShouldHaveSingleItem().IsoDayOfWeek.ShouldBeOneOf(Monday, Wednesday);
         }
+    }
+
+    /// <summary>
+    /// A save on a blocked date that another tab removed after this one read it. The date's row is
+    /// all the save stands on, and a removal does not raise the version, so the save itself has to
+    /// notice: otherwise windows land on a row that is gone, a foreign-key 500, or an empty save
+    /// answers 200 over a date that is no longer blocked.
+    /// </summary>
+    /// <remarks>
+    /// The removal is made by an interceptor between the save's read and its write, so the
+    /// interleave happens on every run rather than when the scheduler allows.
+    /// </remarks>
+    [Theory]
+    [InlineData(NoWindows)]
+    [InlineData(OneWindow)]
+    public async Task SaveOverride_OnABlockedDateRemovedUnderIt_IsRefusedAsChanged(int windows)
+    {
+        using var app = NewApp();
+        using var client = app.CreateOperatorClient();
+        var day = Day();
+        (await SaveOverrideAsync(client, day, OverrideWindows(NoWindows))).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var removal = new RemoveDateBeforeSave(app.ConnectionString, PatternId, day.ToDateOnly());
+        using var racedClient = app.CreateOperatorClient(services =>
+        {
+            services.RemoveAll<DbContextOptions<KairosDbContext>>();
+            services.AddSingleton(new DbContextOptionsBuilder<KairosDbContext>()
+                .UseSqlite(app.ConnectionString)
+                .AddInterceptors(removal)
+                .Options);
+        });
+
+        var response = await SaveOverrideAsync(racedClient, day, OverrideWindows(windows));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await CodeOfAsync(response)).ShouldBe(PatternsAdminEndpoints.PatternChangedCode);
+        (await SeededPatternAsync(client)).Overrides.ShouldBeEmpty();
     }
 
     /// <summary>
@@ -857,4 +934,33 @@ public class PatternsAdminTests
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+
+    /// <summary>The other tab's DELETE, landed once, just before the next save writes.</summary>
+    private sealed class RemoveDateBeforeSave(string connectionString, Guid patternId, DateOnly date)
+        : SaveChangesInterceptor
+    {
+        private bool _removed;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!_removed)
+            {
+                _removed = true;
+                await using var connection = new SqliteConnection(connectionString);
+                await connection.OpenAsync(cancellationToken);
+                SqlitePragmas.Apply(connection);
+                await using var command = connection.CreateCommand();
+                command.CommandText = "DELETE FROM PatternOverrides WHERE PatternId = $patternId AND Date = $date";
+                // Upper case, as EF's SQLite provider stores a Guid; any other spelling matches nothing.
+                command.Parameters.AddWithValue("$patternId", patternId.ToString().ToUpperInvariant());
+                command.Parameters.AddWithValue("$date", date.ToString(StoredDateFormat, CultureInfo.InvariantCulture));
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 }
