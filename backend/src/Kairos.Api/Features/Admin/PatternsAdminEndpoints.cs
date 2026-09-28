@@ -248,6 +248,7 @@ public static class PatternsAdminEndpoints
         var patterns = await context.Patterns.AsNoTracking()
             .Include(pattern => pattern.Rules)
             .Include(pattern => pattern.Overrides)
+                .ThenInclude(replacement => replacement.Windows)
             .OrderBy(pattern => pattern.Name)
             .ToListAsync(cancellationToken);
 
@@ -423,41 +424,38 @@ public static class PatternsAdminEndpoints
         var day = ParseDate(date);
 
         var pattern = await context.Patterns
-            .Include(candidate => candidate.Overrides)
+            .Include(candidate => candidate.Overrides.Where(row => row.Date == day))
+                .ThenInclude(replacement => replacement.Windows)
             .SingleOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
             ?? throw DomainException.NotFound(PatternName);
 
         ValidateDay(request.Windows.Select(window => (Start: window.StartMinute, End: window.EndMinute)));
 
-        // Materialized before anything is added, so the removal is not walking the collection the
-        // additions are growing.
-        var replaced = pattern.Overrides.Where(row => row.Date == day).ToList();
-        context.PatternOverrides.RemoveRange(replaced);
-
-        if (request.Windows.Count == 0)
+        // The date's row is replaced, not kept: a tracked delete of a row another tab's DELETE
+        // already removed raises, and nothing else in this save would notice that a blocked date,
+        // which has no windows to delete, is gone. An empty request leaves a row with no windows,
+        // which is what blocked means; DELETE on this route removes the row instead, which puts
+        // the date back on the weekly rules.
+        context.PatternOverrides.RemoveRange(pattern.Overrides);
+        pattern.Overrides.Add(new PatternOverride
         {
-            // One row with no times, rather than no rows at all: no rows is the date back on the
-            // weekly rules, which is what DELETE on this route means and not what was asked for.
-            pattern.Overrides.Add(new PatternOverride { PatternId = pattern.Id, Date = day });
-        }
+            PatternId = pattern.Id,
+            Date = day,
+            Windows =
+            [
+                .. request.Windows.Select(window => new OverrideWindow
+                {
+                    StartMinute = window.StartMinute,
+                    EndMinute = window.EndMinute,
+                }),
+            ],
+        });
 
-        foreach (var window in request.Windows)
-        {
-            pattern.Overrides.Add(new PatternOverride
-            {
-                PatternId = pattern.Id,
-                Date = day,
-                StartMinute = window.StartMinute,
-                EndMinute = window.EndMinute,
-            });
-        }
-
-        // The whole of what makes two tabs on one date safe. The unique index in
-        // PatternOverrideConfiguration catches only an identical pair, and the tracked delete only
-        // raises where there were rows to delete, so a date that held nothing yet let both writers
-        // insert and kept the union — neither operator's answer. Raising the number they both read
-        // means EF writes WHERE OverridesVersion = n, the second one matches nothing, and the loser
-        // is told.
+        // Two tabs on one date are refused by the row replacement above whatever this adds: the
+        // tracked delete of the row both read raises, or the unique date index where neither found
+        // one. The lock is still the pattern's, so two saves on one pattern collide even on
+        // different dates. Raising the number both read means EF writes WHERE OverridesVersion = n,
+        // the second one matches nothing, and the loser is told.
         pattern.OverridesVersion++;
 
         await ConcurrentWrite.NamedAsync(
@@ -506,6 +504,7 @@ public static class PatternsAdminEndpoints
         var pattern = await context.Patterns.AsNoTracking()
             .Include(candidate => candidate.Rules)
             .Include(candidate => candidate.Overrides)
+                .ThenInclude(replacement => replacement.Windows)
             .FirstOrDefaultAsync(candidate => candidate.Id == patternId, cancellationToken)
             ?? throw DomainException.NotFound(PatternName);
 
@@ -522,24 +521,18 @@ public static class PatternsAdminEndpoints
                 .Select(rule => new PatternRuleResponse(
                     rule.Id, rule.IsoDayOfWeek, rule.StartMinute, rule.EndMinute))],
             [.. pattern.Overrides
-                .GroupBy(row => row.Date)
-                .OrderBy(date => date.Key)
-                .Select(date => new PatternOverrideResponse(date.Key, [.. WindowsOf(date)]))],
+                .OrderBy(replacement => replacement.Date)
+                .Select(DescribeDate)],
             usedBy);
 
-    /// <summary>
-    /// A date's windows, mornings first. The row with no times is not one of them — it is the
-    /// date being blocked, and the empty list it leaves behind is what says so.
-    /// </summary>
-    private static IEnumerable<OverrideWindowResponse> WindowsOf(IEnumerable<PatternOverride> rows)
+    private static PatternOverrideResponse DescribeDate(PatternOverride replacement)
     {
-        foreach (var row in rows.OrderBy(candidate => candidate.StartMinute))
-        {
-            if (row.StartMinute is { } start && row.EndMinute is { } end)
-            {
-                yield return new OverrideWindowResponse(start, end);
-            }
-        }
+        var windows = replacement.Windows
+            .OrderBy(window => window.StartMinute)
+            .Select(window => new OverrideWindowResponse(window.StartMinute, window.EndMinute))
+            .ToList();
+
+        return new PatternOverrideResponse(replacement.Date, windows);
     }
 
     /// <summary>

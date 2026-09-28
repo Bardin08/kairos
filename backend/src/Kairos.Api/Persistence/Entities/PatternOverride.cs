@@ -1,9 +1,8 @@
 namespace Kairos.Api.Persistence.Entities;
 
 /// <summary>
-/// One window a date offers instead of its weekly rules. Several rows may share a date.
-/// A single row with both times null blocks the date; no rows at all means the date keeps
-/// the weekly rules. That distinction is the whole reason the null pair still exists.
+/// A date that does not follow its weekly rules. Its windows are what the date offers instead, so
+/// a date with none is blocked, and a date with no row keeps the weekly rules.
 /// </summary>
 public sealed class PatternOverride
 {
@@ -17,8 +16,5 @@ public sealed class PatternOverride
     /// <summary>The local date this replaces, in the organizer's zone.</summary>
     public DateOnly Date { get; set; }
 
-    /// <summary>Minutes from local midnight.</summary>
-    public int? StartMinute { get; set; }
-
-    public int? EndMinute { get; set; }
+    public ICollection<OverrideWindow> Windows { get; set; } = [];
 }

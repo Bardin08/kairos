@@ -67,7 +67,7 @@ public class AvailabilityQueryTests
         using var database = new TestDatabase();
         await using var context = database.CreateContext();
         Seed(context, Rule(MondayIso, NineAm, Noon), Rule(MondayIso, TwoPm, FivePm));
-        AddOverride(context, Monday, NineAm, NineAm + MinutesPerHour);
+        AddOverride(context, Monday, (NineAm, NineAm + MinutesPerHour));
 
         var windows = await new AvailabilityQuery(context)
             .GetWindowsAsync(PatternId, Monday, Monday, TestContext.Current.CancellationToken);
@@ -78,13 +78,12 @@ public class AvailabilityQueryTests
     }
 
     [Fact]
-    public async Task GetWindowsAsync_DateHasTwoOverrides_ReturnsBothInsteadOfTheWeeklyRule()
+    public async Task GetWindowsAsync_DateHasTwoWindows_ReturnsBothInsteadOfTheWeeklyRule()
     {
         using var database = new TestDatabase();
         await using var context = database.CreateContext();
         Seed(context, Rule(WednesdayIso, NineAm, FivePm));
-        AddOverride(context, Wednesday, NineAm, Noon);
-        AddOverride(context, Wednesday, TwoPm, FivePm);
+        AddOverride(context, Wednesday, (NineAm, Noon), (TwoPm, FivePm));
 
         var windows = await new AvailabilityQuery(context)
             .GetWindowsAsync(PatternId, Wednesday, Wednesday, TestContext.Current.CancellationToken);
@@ -98,13 +97,12 @@ public class AvailabilityQueryTests
     }
 
     [Fact]
-    public async Task GetWindowsAsync_OverridesStoredAfternoonFirst_ComeBackMorningFirst()
+    public async Task GetWindowsAsync_WindowsStoredAfternoonFirst_ComeBackMorningFirst()
     {
         using var database = new TestDatabase();
         await using var context = database.CreateContext();
         Seed(context, Rule(WednesdayIso, NineAm, FivePm));
-        AddOverride(context, Wednesday, TwoPm, FivePm);
-        AddOverride(context, Wednesday, NineAm, Noon);
+        AddOverride(context, Wednesday, (TwoPm, FivePm), (NineAm, Noon));
 
         var windows = await new AvailabilityQuery(context)
             .GetWindowsAsync(PatternId, Wednesday, Wednesday, TestContext.Current.CancellationToken);
@@ -113,12 +111,12 @@ public class AvailabilityQueryTests
     }
 
     [Fact]
-    public async Task GetWindowsAsync_OverrideWithNullTimes_BlocksTheDayAndLeavesTheRestAlone()
+    public async Task GetWindowsAsync_OverrideWithNoWindows_BlocksTheDayAndLeavesTheRestAlone()
     {
         using var database = new TestDatabase();
         await using var context = database.CreateContext();
         Seed(context, Rule(MondayIso, NineAm, Noon), Rule(WednesdayIso, TwoPm, FivePm));
-        AddOverride(context, Monday, null, null);
+        AddOverride(context, Monday);
 
         var windows = await new AvailabilityQuery(context)
             .GetWindowsAsync(PatternId, Monday, Sunday, TestContext.Current.CancellationToken);
@@ -136,7 +134,7 @@ public class AvailabilityQueryTests
 
         // "I am free this one Sunday" — an override that adds a day rather than trimming one.
         // Reading overrides only where rules already exist would drop it silently.
-        AddOverride(context, Sunday, TwoPm, FivePm);
+        AddOverride(context, Sunday, (TwoPm, FivePm));
 
         var windows = await new AvailabilityQuery(context)
             .GetWindowsAsync(PatternId, Monday, Sunday, TestContext.Current.CancellationToken);
@@ -175,15 +173,22 @@ public class AvailabilityQueryTests
         EndMinute = endMinute,
     };
 
-    private static void AddOverride(KairosDbContext context, LocalDate date, int? startMinute, int? endMinute)
+    private static void AddOverride(KairosDbContext context, LocalDate date, params (int Start, int End)[] windows)
     {
         context.PatternOverrides.Add(new PatternOverride
         {
             Id = Guid.CreateVersion7(),
             PatternId = PatternId,
             Date = date.ToDateOnly(),
-            StartMinute = startMinute,
-            EndMinute = endMinute,
+            Windows =
+            [
+                .. windows.Select(window => new OverrideWindow
+                {
+                    Id = Guid.CreateVersion7(),
+                    StartMinute = window.Start,
+                    EndMinute = window.End,
+                }),
+            ],
         });
         context.SaveChanges();
     }

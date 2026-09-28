@@ -19,18 +19,9 @@ public sealed class PatternOverrideConfiguration : IEntityTypeConfiguration<Patt
             .HasForeignKey(patternOverride => patternOverride.PatternId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Four columns, not two: what must not exist twice is a window, not a date. Only writers
-        // interleaving around the delete can produce one, and the violation comes back as a named
-        // 409 through ConcurrentWrite rather than a pre-check a second request races.
-        //
-        // The blocked-date row — both minute columns null — is outside this, SQLite treating nulls
-        // as distinct. Nothing needs it bounded: a request with no windows adds one row.
-        builder.HasIndex(patternOverride => new
-        {
-            patternOverride.PatternId,
-            patternOverride.Date,
-            patternOverride.StartMinute,
-            patternOverride.EndMinute,
-        }).IsUnique();
+        // One row per date is what lets a row with no windows mean blocked. A second row for the
+        // same date would be a second answer to one question, and no reader chooses between them.
+        builder.HasIndex(patternOverride => new { patternOverride.PatternId, patternOverride.Date })
+            .IsUnique();
     }
 }

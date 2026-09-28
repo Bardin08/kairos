@@ -18,6 +18,8 @@ public sealed class KairosDbContext(DbContextOptions<KairosDbContext> options) :
 
     public DbSet<PatternOverride> PatternOverrides => Set<PatternOverride>();
 
+    public DbSet<OverrideWindow> OverrideWindows => Set<OverrideWindow>();
+
     public DbSet<Link> Links => Set<Link>();
 
     public DbSet<LinkDuration> LinkDurations => Set<LinkDuration>();

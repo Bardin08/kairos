@@ -438,6 +438,29 @@ namespace Kairos.Api.Persistence.Migrations
                     b.ToTable("OutboxMessages");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.OverrideWindow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PatternOverrideId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PatternOverrideId", "StartMinute", "EndMinute")
+                        .IsUnique();
+
+                    b.ToTable("OverrideWindows");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Pattern", b =>
                 {
                     b.Property<Guid>("Id")
@@ -472,18 +495,12 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<DateOnly>("Date")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("EndMinute")
-                        .HasColumnType("INTEGER");
-
                     b.Property<Guid>("PatternId")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("StartMinute")
-                        .HasColumnType("INTEGER");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("PatternId", "Date", "StartMinute", "EndMinute")
+                    b.HasIndex("PatternId", "Date")
                         .IsUnique();
 
                     b.ToTable("PatternOverrides");
@@ -740,6 +757,17 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Navigation("Booking");
                 });
 
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.OverrideWindow", b =>
+                {
+                    b.HasOne("Kairos.Api.Persistence.Entities.PatternOverride", "PatternOverride")
+                        .WithMany("Windows")
+                        .HasForeignKey("PatternOverrideId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PatternOverride");
+                });
+
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.PatternOverride", b =>
                 {
                     b.HasOne("Kairos.Api.Persistence.Entities.Pattern", "Pattern")
@@ -799,6 +827,11 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Navigation("Overrides");
 
                     b.Navigation("Rules");
+                });
+
+            modelBuilder.Entity("Kairos.Api.Persistence.Entities.PatternOverride", b =>
+                {
+                    b.Navigation("Windows");
                 });
 #pragma warning restore 612, 618
         }
