@@ -391,7 +391,7 @@ public class SchemaTests
         context.IntegrationSettings.Add(new IntegrationSetting
         {
             Provider = IntegrationProvider.Google,
-            Values = SettingsValues,
+            FieldValues = SettingsValues,
         });
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -399,7 +399,7 @@ public class SchemaTests
         context.IntegrationSettings.Add(new IntegrationSetting
         {
             Provider = IntegrationProvider.Google,
-            Values = SettingsValues,
+            FieldValues = SettingsValues,
         });
 
         await Should.ThrowAsync<DbUpdateException>(

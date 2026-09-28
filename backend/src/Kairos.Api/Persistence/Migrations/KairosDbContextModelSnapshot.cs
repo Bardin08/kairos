@@ -15,7 +15,7 @@ namespace Kairos.Api.Persistence.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
             modelBuilder.Entity("Kairos.Api.Persistence.Entities.Booking", b =>
                 {
@@ -311,15 +311,15 @@ namespace Kairos.Api.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FieldValues")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Provider")
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("UpdatedAt")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Values")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
