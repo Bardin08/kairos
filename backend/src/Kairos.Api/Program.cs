@@ -5,6 +5,7 @@ using Kairos.Api.Features.Admin;
 using Kairos.Api.Features.Bookings;
 using Kairos.Api.Features.Integrations;
 using Kairos.Api.Features.Invites;
+using Kairos.Api.Features.Legal;
 using Kairos.Api.Features.Links;
 using Kairos.Api.Features.Slots;
 using Kairos.Api.Integrations;
@@ -434,6 +435,7 @@ v1.MapLinks();
 v1.MapSlots();
 v1.MapBookings();
 v1.MapInvites();
+v1.MapLegal();
 // Anonymous, and the whole reason it exists: the operator reading it has just been refused. It
 // answers one string — where to sign in — so the locked screen can draw a link without the URL
 // being baked into a bundle that is built once and deployed everywhere.

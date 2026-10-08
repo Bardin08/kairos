@@ -24,4 +24,16 @@ public sealed class Settings
 
     /// <summary>How long a proposed move holds its slot before it lapses. Hours, not minutes.</summary>
     public int ProposalHoldHours { get; set; }
+
+    /// <summary>
+    /// Who runs this instance, named on the landing page, the privacy policy and the terms. Null
+    /// until the operator says, and the pages fall back to neutral wording.
+    /// </summary>
+    public string? OperatorName { get; set; }
+
+    /// <summary>Where an invitee sends a privacy request. Google's consent-screen review needs one.</summary>
+    public string? ContactEmail { get; set; }
+
+    /// <summary>The country whose law governs the terms, as a name: <c>Poland</c>.</summary>
+    public string? Jurisdiction { get; set; }
 }

@@ -48,7 +48,10 @@ public sealed record SettingsResponse(
     int StartIncrementMinutes,
     int ProposalHoldHours,
     OverrideCountsResponse Overrides,
-    string? PublicBaseUrl);
+    string? PublicBaseUrl,
+    string? OperatorName,
+    string? ContactEmail,
+    string? Jurisdiction);
 
 /// <summary>
 /// One zone as the picker offers it. The offset is the zone's offset at this instant, a label
@@ -58,7 +61,7 @@ public sealed record SettingsResponse(
 /// </summary>
 public sealed record TimeZoneOptionResponse(string Id, string Offset);
 
-/// <summary>The six values the operator sets, all of them, every time.</summary>
+/// <summary>The values the operator sets, all of them, every time. A legal detail left out is cleared.</summary>
 /// <remarks>
 /// The four limits' floors are a link's overrides' floors, for the same reasons: a negative margin
 /// inverts the padded busy interval and starts creating overlaps that look like availability, and
@@ -90,10 +93,27 @@ public sealed record SaveSettingsRequest
     [Range(MinProposalHoldHours, int.MaxValue)]
     public required int ProposalHoldHours { get; init; }
 
+    [StringLength(MaxOperatorNameLength)]
+    public string? OperatorName { get; init; }
+
+    /// <summary>
+    /// Printed as a mail link on a public page, so it has to be one. Checked after trimming rather
+    /// than by attribute: an emptied box is how the operator clears it, and a blank string is not an
+    /// address.
+    /// </summary>
+    [StringLength(MaxEmailLength)]
+    public string? ContactEmail { get; init; }
+
+    [StringLength(MaxJurisdictionLength)]
+    public string? Jurisdiction { get; init; }
+
     private const int MinLimit = 0;
     private const int MinIncrementMinutes = 1;
     private const int MinProposalHoldHours = 1;
     private const int MaxTimeZoneIdLength = 100;
+    private const int MaxOperatorNameLength = 200;
+    private const int MaxEmailLength = 320;
+    private const int MaxJurisdictionLength = 100;
 }
 
 /// <summary>
@@ -113,6 +133,11 @@ public static class SettingsAdminEndpoints
 {
     /// <summary>A zone id this build's TZDB does not carry. Refused here rather than at the first booking.</summary>
     public const string TimeZoneUnknownCode = "time_zone_unknown";
+
+    /// <summary>A contact that cannot be mailed, refused before a public page prints it as a link.</summary>
+    public const string ContactEmailInvalidCode = "contact_email_invalid";
+
+    private static readonly EmailAddressAttribute EmailAddress = new();
 
     /// <summary>
     /// <c>+02:00</c>, sign always shown. Not the general pattern, which drops a zero minute field
@@ -155,6 +180,13 @@ public static class SettingsAdminEndpoints
                 $"'{request.TimeZoneId}' is not a zone this Kairos knows. Pick one from the list.");
         }
 
+        var contactEmail = OrNull(request.ContactEmail);
+        if (contactEmail is not null && !EmailAddress.IsValid(contactEmail))
+        {
+            throw DomainException.Invalid(
+                ContactEmailInvalidCode, $"'{contactEmail}' is not an email address.");
+        }
+
         // Tracked, because this is the one row in the table and the write is a plain update of it.
         var settings = await context.Settings
             .SingleAsync(row => row.Id == Settings.SingletonId, cancellationToken);
@@ -165,6 +197,9 @@ public static class SettingsAdminEndpoints
         settings.DailyCap = request.DailyCap;
         settings.StartIncrementMinutes = request.StartIncrementMinutes;
         settings.ProposalHoldHours = request.ProposalHoldHours;
+        settings.OperatorName = OrNull(request.OperatorName);
+        settings.ContactEmail = contactEmail;
+        settings.Jurisdiction = OrNull(request.Jurisdiction);
 
         await context.SaveChangesAsync(cancellationToken);
 
@@ -200,8 +235,14 @@ public static class SettingsAdminEndpoints
             settings.StartIncrementMinutes,
             settings.ProposalHoldHours,
             await CountOverridesAsync(context, cancellationToken),
-            app.Value.PublicBaseUrl);
+            app.Value.PublicBaseUrl,
+            settings.OperatorName,
+            settings.ContactEmail,
+            settings.Jurisdiction);
     }
+
+    /// <summary>An emptied box clears the value rather than storing whitespace a public page would print.</summary>
+    private static string? OrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// <see cref="ClaimsIdentity.Name"/> is the id token's <c>name</c> claim, which the OIDC

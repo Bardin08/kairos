@@ -104,6 +104,10 @@ public class EndpointPolicySweepTests
         // holds the URL gets the prefill.
         ApiVersions.V1 + "/invites/{token}",
 
+        // Who runs this instance, for the privacy policy and terms. Read by whoever opens them, an
+        // invitee or Google's reviewer, and neither holds a session.
+        ApiVersions.V1 + "/legal",
+
         // Neither is a feature. One refuses an unmapped API path, the other serves the page React
         // routes from; a literal segment beats a wildcard, so neither shadows a route above it.
         UnmappedApiPath,
