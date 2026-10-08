@@ -49,6 +49,9 @@ const settings: Settings = {
   dailyCap: 4,
   startIncrementMinutes: 30,
   proposalHoldHours: 48,
+  operatorName: null,
+  contactEmail: null,
+  jurisdiction: null,
   overrides: { marginMinutes: 0, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
 }
 

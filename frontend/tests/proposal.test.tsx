@@ -284,3 +284,10 @@ test('every class the page renders exists in kairos.css', async () => {
   // test can see.
   expect([...used].filter((name) => !css.includes(`.${name}`))).toEqual([])
 })
+
+test('the proposal page links the privacy policy and the terms', async () => {
+  renderProposal()
+
+  expect((await screen.findByRole('link', { name: 'Privacy' })).getAttribute('href')).toBe('/privacy')
+  expect(screen.getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms')
+})

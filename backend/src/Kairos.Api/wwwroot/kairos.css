@@ -816,6 +816,16 @@
   /* A single-column step: the details form and the confirmation both sit at
      reading width rather than filling the card the calendar needed. */
   .card-narrow { max-width: 560px; margin-inline: auto; }
+
+  /* The legal pages. The card is the column, so paragraphs inside it take its
+     full width rather than a ch cap of their own. */
+  .legal { max-width: 760px; margin-inline: auto; margin-top: var(--space-6); }
+  .legal section { margin-top: var(--space-6); }
+  .legal p, .legal li { margin-top: var(--space-3); line-height: var(--leading-normal); }
+  .legal ul { padding-left: var(--space-5); list-style: disc; }
+  /* The scope URL is one unbreakable token wider than a phone's card. */
+  .legal code { overflow-wrap: anywhere; }
+  .legal-head { padding-top: var(--space-6); display: flex; justify-content: center; }
   @media (max-width: 640px) { .card-pad { padding: var(--space-5); } }
 
   /* Every page in the admin opens with a title and one action. */

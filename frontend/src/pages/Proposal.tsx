@@ -10,6 +10,7 @@ import {
   type Proposal as Offer,
 } from '../lib/api'
 import { localZone, longDate, zonedDate, zonedTime } from '../lib/time'
+import LegalFooter from '../components/LegalFooter'
 
 const NOT_FOUND = 404
 
@@ -66,7 +67,7 @@ function Page({ children }: { children: ReactNode }) {
   return (
     <div className="page">
       <main className="card card-lg card-pad card-narrow mt-6">{children}</main>
-      <footer className="fine page-foot">Scheduled with Kairos</footer>
+      <LegalFooter />
     </div>
   )
 }

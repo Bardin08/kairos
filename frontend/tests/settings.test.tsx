@@ -45,7 +45,14 @@ const settings: OperatorSettings = {
   startIncrementMinutes: 30,
   proposalHoldHours: SEEDED_HOLD_HOURS,
   overrides: { marginMinutes: 3, minNoticeMinutes: 0, dailyCap: 0, startIncrementMinutes: 0 },
+  operatorName: null,
+  contactEmail: null,
+  jurisdiction: null,
 }
+
+const OPERATOR = 'Ada Operator'
+const CONTACT = 'privacy@kairos.test'
+const JURISDICTION = 'Poland'
 
 const zones = [
   { id: UTC, offset: '+00:00' },
@@ -94,6 +101,9 @@ test('changing the zone and saving sends the chosen id with every other value', 
       dailyCap: 4,
       startIncrementMinutes: 30,
       proposalHoldHours: SEEDED_HOLD_HOURS,
+      operatorName: '',
+      contactEmail: '',
+      jurisdiction: '',
     }),
   )
 })
@@ -244,4 +254,41 @@ test('every class this page renders exists in kairos.css', async () => {
   // stops keeping its shape, in a viewport no unit test can see.
   const missing = [...used].filter((name) => !css.includes(`.${name}`))
   expect(missing).toEqual([])
+})
+
+test('the legal details load into their fields and are saved with the rest', async () => {
+  vi.mocked(getSettings).mockResolvedValue({ ...settings, operatorName: OPERATOR, jurisdiction: JURISDICTION })
+  render(<Settings />)
+
+  const name = await screen.findByLabelText('Your name')
+  expect((name as HTMLInputElement).value).toBe(OPERATOR)
+  fireEvent.change(screen.getByLabelText('Contact email'), { target: { value: CONTACT } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() =>
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith(
+      expect.objectContaining({ operatorName: OPERATOR, contactEmail: CONTACT, jurisdiction: JURISDICTION }),
+    ),
+  )
+})
+
+test('the legal section opens each public page in a new tab', async () => {
+  render(<Settings />)
+
+  await screen.findByLabelText('Your name')
+  for (const [name, href] of [
+    ['Privacy policy', '/privacy'],
+    ['Terms of service', '/terms'],
+    ['Landing page', '/'],
+  ]) {
+    const link = screen.getByRole('link', { name: new RegExp(name) })
+    expect(link.getAttribute('href')).toBe(href)
+    expect(link.getAttribute('target')).toBe('_blank')
+  }
+})
+
+test('a missing contact says what it costs', async () => {
+  render(<Settings />)
+
+  expect(await screen.findByText(/Google's consent-screen review/)).toBeDefined()
 })

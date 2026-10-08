@@ -520,3 +520,6 @@ appsettings.Local.json
 
 # Brainstorming mockups from the visual companion. Session artefacts, not source.
 .superpowers/
+
+# tsc -b incremental state
+*.tsbuildinfo

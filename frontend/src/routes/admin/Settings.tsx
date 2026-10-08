@@ -4,11 +4,13 @@ import { Link } from 'wouter'
 import AlertIcon from '../../components/AlertIcon'
 import { applyChoice, readChoice, type ThemeChoice } from '../../lib/theme'
 import Failure from './Failure'
+import LegalSection from './LegalSection'
 import {
   getSettings,
   listTimeZones,
   saveSettings,
   type Settings as OperatorSettings,
+  type LegalDraft,
   type SettingsDraft,
   type TimeZoneOption,
 } from './adminSettings'
@@ -81,6 +83,14 @@ function overrideNote(count: number): string | null {
     : `${count} links set their own and will ignore this.`
 }
 
+function legalDraftOf(settings: OperatorSettings): LegalDraft {
+  return {
+    operatorName: settings.operatorName ?? '',
+    contactEmail: settings.contactEmail ?? '',
+    jurisdiction: settings.jurisdiction ?? '',
+  }
+}
+
 function draftOf(settings: OperatorSettings): Draft {
   return {
     marginMinutes: String(settings.marginMinutes),
@@ -104,6 +114,7 @@ export default function Settings() {
   const [zones, setZones] = useState<TimeZoneOption[]>([])
   const [zone, setZone] = useState('')
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [legal, setLegal] = useState<LegalDraft | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(readChoice)
   const [phase, setPhase] = useState<Phase>('loading')
   // The error itself, not a sentence made from it: `Failure` branches on the
@@ -120,6 +131,7 @@ export default function Settings() {
         setSettings(read)
         setZone(read.timeZone)
         setDraft(draftOf(read))
+        setLegal(legalDraftOf(read))
         setPhase('ready')
       })
       .catch((error: unknown) => {
@@ -145,6 +157,11 @@ export default function Settings() {
     setDraft((current) => (current === null ? current : { ...current, [key]: value }))
   }
 
+  function changeLegal(key: keyof LegalDraft, value: string) {
+    setSaved(false)
+    setLegal((current) => (current === null ? current : { ...current, [key]: value }))
+  }
+
   function chooseTheme(choice: ThemeChoice) {
     setTheme(choice)
     // Painted immediately rather than on save: this one is a preference of this
@@ -164,7 +181,7 @@ export default function Settings() {
     parsed !== null && FIELD_KEYS.every((key) => parsed[key] !== null && parsed[key] !== undefined)
 
   function save() {
-    if (draft === null || parsed === null || !complete) return
+    if (draft === null || legal === null || parsed === null || !complete) return
 
     const body: SettingsDraft = {
       timeZoneId: zone,
@@ -173,6 +190,7 @@ export default function Settings() {
       dailyCap: parsed.dailyCap as number,
       startIncrementMinutes: parsed.startIncrementMinutes as number,
       proposalHoldHours: parsed.proposalHoldHours as number,
+      ...legal,
     }
 
     setSaving(true)
@@ -187,6 +205,7 @@ export default function Settings() {
         setSettings(written)
         setZone(written.timeZone)
         setDraft(draftOf(written))
+        setLegal(legalDraftOf(written))
         setSaving(false)
         setSaved(true)
       })
@@ -226,7 +245,7 @@ export default function Settings() {
 
       {phase === 'loading' ? (
         <p className="prose t-sm">Reading your settings…</p>
-      ) : settings === null || draft === null ? null : (
+      ) : settings === null || draft === null || legal === null ? null : (
         <>
           <div className="card card-pad">
             <h2 className="title-section mb-3">Time zone</h2>
@@ -306,6 +325,11 @@ export default function Settings() {
               })}
             </div>
           </div>
+
+          <div className="page-header section-break">
+            <h2 className="title-section">Legal pages</h2>
+          </div>
+          <LegalSection draft={legal} onChange={changeLegal} />
 
           <div className="page-header section-break">
             <h2 className="title-section">Appearance</h2>

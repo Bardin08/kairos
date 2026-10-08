@@ -1,5 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Route, Switch } from 'wouter'
+import LegalFooter from './components/LegalFooter'
+import { LANDING_PATH, PRIVACY_PATH, TERMS_PATH } from './lib/legal'
 import Book from './pages/Book'
 import Integrations from './pages/Integrations'
 import Manage from './pages/Manage'
@@ -8,6 +10,10 @@ import Proposal from './pages/Proposal'
 // Lazy so the admin surface stays out of the booking route's bundle. Import it
 // statically and Rollup folds all four admin pages back in, over budget.
 const AdminShell = lazy(() => import('./routes/admin/AdminShell'))
+// Lazy for the same reason: three pages of text nobody booking a time downloads.
+const LegalShell = lazy(() => import('./routes/legal/LegalShell'))
+
+const LEGAL_PATHS = [LANDING_PATH, PRIVACY_PATH, TERMS_PATH]
 
 export default function App() {
   return (
@@ -41,7 +47,21 @@ export default function App() {
           <AdminShell />
         </Suspense>
       </Route>
-      <Route>This link does not lead anywhere.</Route>
+      {LEGAL_PATHS.map((path) => (
+        <Route key={path} path={path}>
+          <Suspense fallback={null}>
+            <LegalShell />
+          </Suspense>
+        </Route>
+      ))}
+      <Route>
+        <div className="page">
+          <main className="card card-lg card-pad card-narrow mt-6">
+            <p>This link does not lead anywhere.</p>
+          </main>
+          <LegalFooter attribution={false} />
+        </div>
+      </Route>
     </Switch>
   )
 }

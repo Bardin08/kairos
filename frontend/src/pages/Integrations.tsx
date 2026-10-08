@@ -13,6 +13,7 @@ import {
   type IntegrationSettings,
 } from '../lib/api'
 import { localZone, shortDate, zonedDate, zonedTime } from '../lib/time'
+import LegalFooter from '../components/LegalFooter'
 
 // The only two status shapes kairos.css draws, and the Second Channel Rule is
 // why they are shapes: `live` fills the 7px dot, `paused` leaves it hollow at
@@ -549,9 +550,10 @@ export default function Integrations() {
           </p>
         )}
       </main>
-      {/* No `page-foot` here, deliberately. "Scheduled with Kairos" is the
-          invitee's attribution line — it belongs on the booking page and the
-          manage page, the surfaces a stranger holding a link reads. */}
+      {/* No attribution here, deliberately. "Scheduled with Kairos" is the
+          invitee's line — it belongs on the surfaces a stranger holding a link
+          reads. The legal links stay: this page is public too. */}
+      <LegalFooter attribution={false} />
     </div>
   )
 }
