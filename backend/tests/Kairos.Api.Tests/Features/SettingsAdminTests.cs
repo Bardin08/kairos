@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 
 using Kairos.Api.Features.Admin;
+using Kairos.Api.Features.Legal;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Scheduling;
 using Kairos.Api.Shared;
@@ -34,6 +35,13 @@ public class SettingsAdminTests
     private const int NewDailyCap = 6;
     private const int NewStartIncrement = 10;
     private const int NewProposalHold = 12;
+
+    private const string OperatorName = "Ada Operator";
+    private const string ContactEmail = "privacy@kairos.test";
+    private const string Jurisdiction = "Poland";
+    private const string Blank = "  ";
+    private const string NotAnAddress = "privacy at kairos";
+    private const string LegalPath = $"{ApiVersions.V1}/legal";
 
     /// <summary>Not a shorter hold. A proposal that lapsed before it was sent holds nothing.</summary>
     private const int NoHold = 0;
@@ -117,6 +125,71 @@ public class SettingsAdminTests
         // rides on this response with no count beside it. A fifth entry here would mean the link
         // editor had grown a control for something the schema does not model.
         payload.GetProperty("overrides").TryGetProperty("proposalHoldHours", out _).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Who runs this instance, saved with everything else on the screen and read back by the
+    /// public route the privacy policy and terms draw from.
+    /// </summary>
+    [Fact]
+    public async Task SaveSettings_WithLegalDetails_ReturnsThemOnTheReadAndOnThePublicRoute()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        await client.PutAsJsonAsync(
+            SettingsPath,
+            Body(Warsaw) with { OperatorName = OperatorName, ContactEmail = ContactEmail, Jurisdiction = Jurisdiction },
+            TestContext.Current.CancellationToken);
+
+        var settings = await ReadAsync(client);
+        settings.OperatorName.ShouldBe(OperatorName);
+        settings.ContactEmail.ShouldBe(ContactEmail);
+        settings.Jurisdiction.ShouldBe(Jurisdiction);
+        var legal = await app.Client.GetFromJsonAsync<LegalResponse>(
+            LegalPath, TestContext.Current.CancellationToken);
+        legal.ShouldBe(new LegalResponse(OperatorName, ContactEmail, Jurisdiction));
+    }
+
+    /// <summary>An emptied box clears the value rather than storing whitespace the pages would print.</summary>
+    [Fact]
+    public async Task SaveSettings_WithBlankLegalDetails_ClearsWhatWasSaved()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+        await client.PutAsJsonAsync(
+            SettingsPath,
+            Body(Warsaw) with { OperatorName = OperatorName, ContactEmail = ContactEmail, Jurisdiction = Jurisdiction },
+            TestContext.Current.CancellationToken);
+
+        var response = await client.PutAsJsonAsync(
+            SettingsPath,
+            Body(Warsaw) with { OperatorName = Blank, ContactEmail = Blank, Jurisdiction = Blank },
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var settings = await ReadAsync(client);
+        settings.OperatorName.ShouldBeNull();
+        settings.ContactEmail.ShouldBeNull();
+        settings.Jurisdiction.ShouldBeNull();
+    }
+
+    /// <summary>The contact is printed as a mail link on a public page; one that cannot be mailed is refused.</summary>
+    [Fact]
+    public async Task SaveSettings_WithAContactThatIsNotAnAddress_IsRefused()
+    {
+        using var app = new KairosApp();
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PutAsJsonAsync(
+            SettingsPath, Body(Warsaw) with { ContactEmail = NotAnAddress }, TestContext.Current.CancellationToken);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemWithCode>(
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        problem!.Code.ShouldBe(SettingsAdminEndpoints.ContactEmailInvalidCode);
+        (await ReadAsync(client)).ContactEmail.ShouldBeNull();
     }
 
     /// <summary>

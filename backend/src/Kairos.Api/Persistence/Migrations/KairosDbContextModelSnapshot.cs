@@ -611,14 +611,23 @@ namespace Kairos.Api.Persistence.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ContactEmail")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("DailyCap")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Jurisdiction")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("MarginMinutes")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("MinNoticeMinutes")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("OperatorName")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("ProposalHoldHours")
                         .HasColumnType("INTEGER");
