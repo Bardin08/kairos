@@ -70,6 +70,10 @@ Every setting is an environment variable in `.env`. A configuration path's `:` i
 | `Webhooks__Url` | none | Receives a POST for each booking event |
 | `Webhooks__Secret` | none | HMAC-SHA256 key; the signature is in `X-Kairos-Signature` |
 
+## Legal pages
+
+Every instance serves a landing page at `/`, a privacy policy at `/privacy` and terms of service at `/terms`, linked from the footer of every public page. Those are the three URLs Google asks for on the OAuth consent screen. Their text describes what Kairos itself does with data; who you are — your name, a contact address and the country whose law governs the terms — is set under **Settings → Legal pages** in the admin, and the pages fall back to neutral wording for anything left empty. The text is a template that you, as the operator, are responsible for — it is not legal advice. If your proxy or access gate protects the whole host, leave these three paths and `/api/v1/legal` public, or Google's reviewer cannot read them.
+
 ## Behind a reverse proxy
 
 Kairos listens on plain HTTP on 8080 and expects a proxy in front of it to terminate TLS. The session cookie is always `Secure`, so anything other than `localhost` needs HTTPS.

@@ -33,6 +33,7 @@ import {
   zonedTime,
 } from '../lib/time'
 import { applyPrefill, FILLABLE, type Details } from './bookPrefill'
+import LegalFooter from '../components/LegalFooter'
 
 // One corrupt stored availability rule kills every range containing that
 // weekday, so there is no day to mark and no month to page to. It is the whole
@@ -741,7 +742,7 @@ export default function Book() {
           {body()}
         </main>
 
-        <footer className="fine page-foot">Scheduled with Kairos</footer>
+        <LegalFooter />
       </div>
 
       {/* Phone only, by media query. It states the choice rather than only the

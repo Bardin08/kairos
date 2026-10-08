@@ -226,12 +226,13 @@ test('the callback reports success and refusal from the query string', async () 
 // the invitee's attribution line returns. This page renders outside the admin
 // shell — no rail, no tab bar — so the link it draws itself is the whole of the
 // first, and the operator is not the reader the second was written for.
-test('offers the way back to Settings and carries no invitee footer', async () => {
+test('offers the way back to Settings and the legal links, but no invitee footer', async () => {
   renderPage()
 
   const back = await screen.findByRole('link', { name: 'Back to Settings' })
   expect(back.getAttribute('href')).toBe('/admin/settings')
   expect(screen.queryByText('Scheduled with Kairos')).toBeNull()
+  expect(screen.getByRole('link', { name: 'Privacy' }).getAttribute('href')).toBe('/privacy')
 })
 
 // Breaks if a credential this deployment cannot decrypt goes back to being a

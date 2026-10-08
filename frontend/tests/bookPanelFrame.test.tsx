@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Route, Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -121,4 +121,11 @@ test('the error state renders inside the frame', async () => {
   await waitFor(() =>
     expect(within(frame()).getByRole('button', { name: 'Try again' })).toBeTruthy(),
   )
+})
+
+test('the booking page links the privacy policy and the terms', async () => {
+  renderBook({ status: OK, body: SLOTS })
+
+  expect((await screen.findByRole('link', { name: 'Privacy' })).getAttribute('href')).toBe('/privacy')
+  expect(screen.getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms')
 })

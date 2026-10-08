@@ -224,3 +224,12 @@ test('the reschedule CTA sets its date in the numeric face, beside the button', 
     expect(cta?.getAttribute('aria-describedby')).toBe(describes?.id)
   }
 })
+
+test('the manage page links the privacy policy and the terms', async () => {
+  vi.mocked(getBooking).mockResolvedValue(confirmed)
+
+  renderManage()
+
+  expect((await screen.findByRole('link', { name: 'Privacy' })).getAttribute('href')).toBe('/privacy')
+  expect(screen.getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms')
+})

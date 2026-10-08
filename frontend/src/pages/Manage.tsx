@@ -27,6 +27,7 @@ import {
   zonedDate,
   zonedTime,
 } from '../lib/time'
+import LegalFooter from '../components/LegalFooter'
 
 const NOT_FOUND = 404
 const PREVIOUS_MONTH = -1
@@ -80,7 +81,7 @@ function Page({ children, wide = false }: { children: ReactNode; wide?: boolean 
       {/* The calendar needs the card's full width; everything else reads better
           at measure. */}
       <main className={`card card-lg card-pad mt-6${wide ? '' : ' card-narrow'}`}>{children}</main>
-      <footer className="fine page-foot">Scheduled with Kairos</footer>
+      <LegalFooter />
     </div>
   )
 }

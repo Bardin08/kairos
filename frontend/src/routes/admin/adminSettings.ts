@@ -45,6 +45,10 @@ export type Settings = {
   /** How long a proposed move holds its slot before it lapses. */
   proposalHoldHours: number
   overrides: OverrideCounts
+  /** Who runs this instance, for the legal pages. Null until the operator says. */
+  operatorName: string | null
+  contactEmail: string | null
+  jurisdiction: string | null
 }
 
 /**
@@ -53,6 +57,13 @@ export type Settings = {
  * `+01:00` in January. It is there because `Europe/Warsaw` means nothing to
  * somebody scanning for `+02:00`, and nothing sends it back.
  */
+/** The legal fields as typed; the server stores an emptied box as null. */
+export type LegalDraft = {
+  operatorName: string
+  contactEmail: string
+  jurisdiction: string
+}
+
 export type TimeZoneOption = { id: string; offset: string }
 
 /** The six values the operator sets, all of them, every time. */
@@ -64,6 +75,10 @@ export type SettingsDraft = {
   startIncrementMinutes: number
   /** How long a proposed move holds its slot before it lapses. */
   proposalHoldHours: number
+  /** Blank or null clears the value; the legal pages then fall back to neutral wording. */
+  operatorName: string | null
+  contactEmail: string | null
+  jurisdiction: string | null
 }
 
 const SETTINGS = '/admin/settings'
