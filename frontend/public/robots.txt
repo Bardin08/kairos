@@ -1,0 +1,10 @@
+# Kairos: only the landing page, the privacy policy and the terms are meant to be
+# found. Booking links are handed out by the operator, and every other route is a
+# token, an operator surface or the API.
+User-agent: *
+Disallow: /book/
+Disallow: /manage/
+Disallow: /proposal/
+Disallow: /integrations
+Disallow: /admin
+Disallow: /api/
