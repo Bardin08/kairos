@@ -46,6 +46,20 @@ public class CalendarSyncTests
     private const long MovedStartUtc = 1_788_007_200;
     private const long MovedEndUtc = 1_788_010_800;
 
+    private const long OneDaySeconds = 86_400;
+
+    /// <summary>A day before the meeting, so the seeded booking is upcoming.</summary>
+    private static readonly Instant Now = Instant.FromUnixTimeSeconds(MeetingStartUtc - OneDaySeconds);
+
+    /// <summary>A day before <see cref="Now"/>: a meeting already under way or over.</summary>
+    private const long StartedUtc = MeetingStartUtc - (2 * OneDaySeconds);
+
+    /// <summary>Spacing between seeded meetings, so their order is unambiguous.</summary>
+    private const long StartStepSeconds = 3_600;
+
+    private const int OneMeeting = 1;
+    private const int NoMeetings = 0;
+
     /// <summary>
     /// The decision this task had to make, pinned so it cannot be undone by accident: a deployment
     /// that never connected a calendar gets no rows. A <c>Failed</c> row would be a permanent red
@@ -475,6 +489,167 @@ public class CalendarSyncTests
         context.ConferenceLinks.AsNoTracking().Single().JoinUrl.ShouldBe(JoinUrl);
     }
 
+    /// <summary>
+    /// The incident: a dead grant refused the event, the grant now works, and the meeting gets its
+    /// event and join link without anybody rebooking it.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_AMeetingTheCalendarRefused_PlacesItWithAJoinUrl()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(OneMeeting);
+        context.CalendarEntries.AsNoTracking().Single().State.ShouldBe(CalendarSyncState.Synced);
+        context.ConferenceLinks.AsNoTracking().Single().JoinUrl.ShouldBe(JoinUrl);
+
+        // D1, option A: the invitee already holds this meeting under the booking's own UID.
+        context.CalendarEntries.AsNoTracking().Single().CalendarUid.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// One more refused meeting than a pass takes: the pass stops at the cap. This pins the cap,
+    /// not the order: SQLite returns these bookings in start order even without the OrderBy.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_MoreRefusedMeetingsThanOnePass_StopsAtTheCap()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        var total = CalendarSyncService.MaxResyncPerPass + OneMeeting;
+        var link = SeedLink(context);
+        var bookings = new List<Booking>();
+        for (var index = total; index >= OneMeeting; index--)
+        {
+            // Descending, so insertion order is the reverse of start order.
+            bookings.Add(Seed(context, startUtc: MeetingStartUtc + (index * StartStepSeconds), existingLink: link));
+        }
+
+        foreach (var booking in bookings)
+        {
+            await Service(context, calendar, new StubConference())
+                .SyncAsync(booking, TestContext.Current.CancellationToken);
+        }
+
+        calendar.Failure = null;
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(CalendarSyncService.MaxResyncPerPass);
+        var stateByStart = context.CalendarEntries.AsNoTracking()
+            .Join(context.Bookings.AsNoTracking(), entry => entry.BookingId, booking => booking.Id,
+                (entry, booking) => new { booking.StartUtc, entry.State })
+            .ToDictionary(row => row.StartUtc, row => row.State);
+        stateByStart[MeetingStartUtc + (OneMeeting * StartStepSeconds)].ShouldBe(CalendarSyncState.Synced);
+        stateByStart[MeetingStartUtc + (total * StartStepSeconds)].ShouldBe(CalendarSyncState.Failed);
+    }
+
+    [Fact]
+    public async Task ResyncAsync_TheMeetingAlreadyStarted_LeavesItAlone()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context, startUtc: StartedUtc);
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(NoMeetings);
+        calendar.Creates.ShouldBe(ReachedOnce);
+    }
+
+    [Fact]
+    public async Task ResyncAsync_TheBookingIsCancelled_LeavesItAlone()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context, status: BookingStatus.Cancelled);
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(NoMeetings);
+        calendar.Creates.ShouldBe(ReachedOnce);
+    }
+
+    /// <summary>
+    /// A Failed row that holds an event id is a refused move: the event exists, so placing it
+    /// again would put a second one in the calendar.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_AMoveWasRefused_DoesNotPlaceASecondEvent()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar();
+        var service = Service(context, calendar, new StubConference());
+        await service.SyncAsync(booking, TestContext.Current.CancellationToken);
+        await MoveAsync(context, booking);
+        calendar.Failure = new InvalidOperationException(Refusal);
+        await service.RescheduleAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        var placed = await service.ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(NoMeetings);
+        calendar.Creates.ShouldBe(ReachedOnce);
+    }
+
+    /// <summary>
+    /// No row means no calendar was connected when the booking was made; placing it now is the
+    /// decision <see cref="RescheduleAsync_NothingWasEverPlaced_LeavesTheCalendarAlone"/> refuses.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_NothingWasEverAttempted_LeavesTheCalendarAlone()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        Seed(context);
+        var calendar = new FakeCalendar();
+
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(NoMeetings);
+        calendar.Creates.ShouldBe(NeverReached);
+    }
+
+    [Fact]
+    public async Task ResyncAsync_ScopedToAnotherLink_LeavesThisLinksMeetingAlone()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        var placed = await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: Guid.CreateVersion7(), TestContext.Current.CancellationToken);
+
+        placed.ShouldBe(NoMeetings);
+        calendar.Creates.ShouldBe(ReachedOnce);
+    }
+
     private static CalendarSyncService Service(
         KairosDbContext context,
         ICalendarWriter calendars,
@@ -484,7 +659,7 @@ public class CalendarSyncTests
             conferences,
             new IntegrationCredentialStore(context, new SecretProtector(TestKey()), SystemClock.Instance),
             context,
-            SystemClock.Instance,
+            new FixedClock(Now),
             NullLogger<CalendarSyncService>.Instance);
 
     /// <summary>
@@ -525,11 +700,7 @@ public class CalendarSyncTests
         return context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
-    /// <summary>
-    /// Returned with its link and participants loaded, because that is the state the create
-    /// endpoint hands the service a booking in.
-    /// </summary>
-    private static Booking Seed(KairosDbContext context)
+    private static Link SeedLink(KairosDbContext context)
     {
         var pattern = new Pattern { Id = Guid.CreateVersion7(), Name = "Weekdays" };
         context.Patterns.Add(pattern);
@@ -543,15 +714,30 @@ public class CalendarSyncTests
         };
         context.Links.Add(link);
 
+        return link;
+    }
+
+    /// <summary>
+    /// Returned with its link and participants loaded, because that is the state the create
+    /// endpoint hands the service a booking in.
+    /// </summary>
+    private static Booking Seed(
+        KairosDbContext context,
+        long startUtc = MeetingStartUtc,
+        BookingStatus status = BookingStatus.Confirmed,
+        Link? existingLink = null)
+    {
+        var link = existingLink ?? SeedLink(context);
+
         var bookingId = Guid.CreateVersion7();
         context.Bookings.Add(new Booking
         {
             Id = bookingId,
             LinkId = link.Id,
-            StartUtc = MeetingStartUtc,
-            EndUtc = MeetingEndUtc,
-            Status = BookingStatus.Confirmed,
-            ManageTokenHash = "hash",
+            StartUtc = startUtc,
+            EndUtc = startUtc + (MeetingEndUtc - MeetingStartUtc),
+            Status = status,
+            ManageTokenHash = bookingId.ToString(),
             CreatedAt = MeetingStartUtc,
             Participants =
             [
@@ -572,7 +758,7 @@ public class CalendarSyncTests
         return context.Bookings
             .Include(booking => booking.Link)
             .Include(booking => booking.Participants)
-            .Single();
+            .Single(booking => booking.Id == bookingId);
     }
 
     /// <summary>

@@ -34,12 +34,56 @@ public sealed class CalendarSyncService(
     private const string TitleJoiner = " with ";
 
     /// <summary>
+    /// How many meetings one resync will attempt. Each placement saves on its own, so this bounds
+    /// how long one pass runs; a long outage drains over successive passes.
+    /// </summary>
+    public const int MaxResyncPerPass = 25;
+
+    /// <summary>
     /// <paramref name="booking"/> must arrive with its link and participants loaded — this reads a
     /// meeting, not a row, and re-fetching what the caller already has would be a second query on
     /// the create path for nothing.
     /// </summary>
     public Task SyncAsync(Booking booking, CancellationToken cancellationToken) =>
-        GuardedAsync(booking.Id, () => PlaceAsync(booking, cancellationToken));
+        GuardedAsync(booking.Id, () => PlaceAsync(booking, keepIdentity: false, cancellationToken));
+
+    /// <summary>
+    /// Places every upcoming meeting whose event the calendar refused and never created, and
+    /// returns how many it attempted. A booking with no entry is left alone, for the reason
+    /// <see cref="MoveAsync"/> gives; so is a Failed entry holding an event id, which is a refused
+    /// move or withdrawal whose event still exists, and placing it would create a second one.
+    /// </summary>
+    /// <remarks>
+    /// Bookings are read once, so one cancelled or moved while the pass is still placing earlier
+    /// ones can be placed as it was read. Re-reading each booking before placing narrows that; it
+    /// is worth doing once a pass is long enough for it to happen.
+    /// </remarks>
+    public async Task<int> ResyncAsync(Guid? linkId, CancellationToken cancellationToken)
+    {
+        var now = Now();
+        var bookings = await context.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.Status == BookingStatus.Confirmed)
+            .Where(booking => booking.StartUtc > now)
+            .Where(booking => (linkId == null) || (booking.LinkId == linkId))
+            .Where(booking => context.CalendarEntries.Any(entry =>
+                (entry.BookingId == booking.Id)
+                && (entry.Provider == calendars.Provider)
+                && (entry.State == CalendarSyncState.Failed)
+                && (entry.ExternalEventId == null)))
+            .OrderBy(booking => booking.StartUtc)
+            .Take(MaxResyncPerPass)
+            .Include(booking => booking.Link)
+            .Include(booking => booking.Participants)
+            .ToListAsync(cancellationToken);
+
+        foreach (var booking in bookings)
+        {
+            await GuardedAsync(booking.Id, () => PlaceAsync(booking, keepIdentity: true, cancellationToken));
+        }
+
+        return bookings.Count;
+    }
 
     /// <summary>
     /// Same loading requirement as <see cref="SyncAsync"/>, because the event is rewritten from
@@ -82,7 +126,7 @@ public sealed class CalendarSyncService(
         }
     }
 
-    private async Task PlaceAsync(Booking booking, CancellationToken cancellationToken)
+    private async Task PlaceAsync(Booking booking, bool keepIdentity, CancellationToken cancellationToken)
     {
         // Before anything is attempted, because this method can now run twice: a follow-up whose
         // mail step failed is retried whole, and a second insert under the same deterministic id
@@ -129,7 +173,10 @@ public sealed class CalendarSyncService(
         }
 
         placedAlready.ExternalEventId = placed.ExternalEventId;
-        placedAlready.CalendarUid = placed.CalendarUid;
+        // A resync places an event for a meeting the invitee was already told about under the
+        // booking's own UID. Recording the provider's here would make every later notice announce
+        // a second meeting.
+        placedAlready.CalendarUid = keepIdentity ? null : placed.CalendarUid;
         placedAlready.State = CalendarSyncState.Synced;
         placedAlready.LastError = null;
         placedAlready.UpdatedAt = Now();
