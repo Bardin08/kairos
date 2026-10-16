@@ -96,7 +96,8 @@ check "git hooks installed"          bash -c 'grep -q lefthook "$(git rev-parse 
 
 echo "== backend =="
 check "formatted"                    bash -c 'cd backend && dotnet format --verify-no-changes'
-check "builds"                       bash -c 'cd backend && dotnet build -warnaserror'
+# Restore apart from the build, as CI does: -warnaserror on an implicit restore turns NuGet audit findings into errors, overriding WarningsNotAsErrors in Directory.Build.props.
+check "builds"                       bash -c 'cd backend && dotnet restore && dotnet build --no-restore -warnaserror'
 if [ "$LAST_CHECK_OK" = yes ]; then
   check "tests pass"                 bash -c 'cd backend && dotnet test --no-build'
 else
