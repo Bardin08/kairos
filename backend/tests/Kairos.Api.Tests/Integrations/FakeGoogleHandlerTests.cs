@@ -52,6 +52,12 @@ public class FakeGoogleHandlerTests
     /// </summary>
     private const string UnstubbedUri = "https://www.googleapis.com/calendar/v3/colors";
 
+    private const string TokenUri = "https://oauth2.googleapis.com/token";
+
+    private const string InvalidGrant = "invalid_grant";
+
+    private const int OneTokenRequest = 1;
+
     /// <summary>
     /// The whole of finding one and half of finding two. A 503 has to reach the client library as
     /// a response so its own retry loop runs, and every attempt has to arrive here with a readable
@@ -140,6 +146,21 @@ public class FakeGoogleHandlerTests
 
         handler.UnstubbedUris.ShouldHaveSingleItem().ShouldBe(UnstubbedUri);
         handler.Requests.ShouldHaveSingleItem().Uri.ShouldBe(UnstubbedUri);
+    }
+
+    [Fact]
+    public async Task SendAsync_TheGrantIsRefused_AnswersInvalidGrantAndCountsTheRequest()
+    {
+        var handler = new FakeGoogleHandler().RefusingGrant();
+        using var client = new HttpClient(handler);
+
+        var response = await client.PostAsync(
+            TokenUri, new StringContent(string.Empty), TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken))
+            .ShouldContain(InvalidGrant);
+        handler.TokenRequests.ShouldBe(OneTokenRequest);
     }
 
     private static CalendarService CreateService(FakeGoogleHandler handler) =>

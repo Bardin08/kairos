@@ -31,10 +31,25 @@ public sealed class FakeGoogleHandler : HttpMessageHandler
     /// An access token that has not expired, so <c>UserCredential</c> stops asking. The value is
     /// never inspected — only that one came back.
     /// </summary>
-    private const string AccessTokenGrant =
-        """{"access_token":"not-a-real-access-token","token_type":"Bearer","expires_in":3600}""";
+    private static readonly string AccessTokenGrant =
+        $$"""{"access_token":"not-a-real-access-token","token_type":"Bearer","expires_in":{{AccessTokenLifetimeSeconds}}}""";
+
+    /// <summary>What Google's token endpoint answers a refresh token it no longer honours.</summary>
+    private const string RefusedGrant =
+        """{"error":"invalid_grant","error_description":"Token has been expired or revoked."}""";
+
+    /// <summary>
+    /// The access token's lifetime in <see cref="AccessTokenGrant"/>, public so a test that moves the
+    /// clock can move it past exactly this.
+    /// </summary>
+    public const int AccessTokenLifetimeSeconds = 3600;
 
     private readonly Dictionary<string, CannedResponse> _responses = [];
+
+    private bool _grantRefused;
+
+    /// <summary>Token requests counted apart from <see cref="Requests"/>, which leaves them out.</summary>
+    public int TokenRequests { get; private set; }
 
     /// <summary>
     /// Every request, in order, with its body already read. <c>Uri</c> is absolute and
@@ -69,6 +84,18 @@ public sealed class FakeGoogleHandler : HttpMessageHandler
         return this;
     }
 
+    public FakeGoogleHandler RefusingGrant()
+    {
+        _grantRefused = true;
+        return this;
+    }
+
+    public FakeGoogleHandler RestoringGrant()
+    {
+        _grantRefused = false;
+        return this;
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -82,7 +109,10 @@ public sealed class FakeGoogleHandler : HttpMessageHandler
         // make every "asked Google once" assertion wrong. Answered before the recording.
         if (uri.Contains(TokenPath, StringComparison.Ordinal))
         {
-            return Respond(HttpStatusCode.OK, AccessTokenGrant);
+            TokenRequests++;
+            return _grantRefused
+                ? Respond(HttpStatusCode.BadRequest, RefusedGrant)
+                : Respond(HttpStatusCode.OK, AccessTokenGrant);
         }
 
         Requests.Add((uri, path, body));

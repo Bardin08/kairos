@@ -9,6 +9,9 @@ using Kairos.Api.Persistence.Entities;
 
 using Microsoft.Extensions.Options;
 
+// Named as the composition root names it, where the bare IClock is NodaTime's.
+using GoogleClock = Google.Apis.Util.IClock;
+
 // Aliased because Google's factory interface collides by name with the one in System.Net.Http.
 using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
 
@@ -67,7 +70,8 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
     public GoogleClientFactory(
         IOptions<GoogleOptions> options,
         IServiceScopeFactory scopes,
-        GoogleHttpFactory httpClients)
+        GoogleHttpFactory httpClients,
+        GoogleClock googleClock)
     {
         _options = options.Value;
         _scopes = scopes;
@@ -88,6 +92,10 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
             // fake every Calendar call and still reach Google's real token endpoint to obtain the
             // credential that makes them — a network call in a unit test, and a flaky one.
             HttpClientFactory = httpClients,
+
+            // What UserCredential measures token age against. Injected so a test can age a token
+            // without waiting an hour.
+            Clock = googleClock,
         });
     }
 
@@ -218,6 +226,19 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         finally
         {
             _gate.Release();
+        }
+    }
+
+    public async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await GetCredentialAsync(cancellationToken);
+        }
+        catch (TokenResponseException exception) when (exception.Error?.Error == InvalidGrant)
+        {
+            // GetCredentialAsync has already written ReconnectRequired; rethrowing would make a
+            // recorded fault look like an unhandled one to the sweeper.
         }
     }
 

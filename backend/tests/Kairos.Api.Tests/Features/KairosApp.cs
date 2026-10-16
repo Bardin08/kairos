@@ -17,6 +17,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
+// Named as the composition root names it, where the bare IClock is NodaTime's.
+using GoogleClock = Google.Apis.Util.IClock;
+
 // Aliased because Google's factory interface collides by name with the one in System.Net.Http.
 using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
 
@@ -54,6 +57,10 @@ namespace Kairos.Api.Tests.Features;
 /// but never connected" — a real state of a fresh deployment — cannot be asked for here without
 /// also faking the transport.
 /// </param>
+/// <param name="googleClock">
+/// Google's clock, for a test that has to age an access token. Takes effect only with
+/// <paramref name="google"/>, like everything else Google here.
+/// </param>
 /// <param name="keyRingDirectory">
 /// Where the data-protection keys go, for a test standing a second host on the first one's ring the
 /// way a redeploy stands a new container on the old volume. A directory passed in belongs to the
@@ -68,6 +75,7 @@ public sealed class KairosApp(
     string? webRoot = null,
     string? publicBaseUrl = null,
     FakeGoogleHandler? google = null,
+    GoogleClock? googleClock = null,
     string? keyRingDirectory = null,
     string? secretKey = null)
     : WebApplicationFactory<KairosDbContext>
@@ -237,6 +245,12 @@ public sealed class KairosApp(
             builder.ConfigureServices(services =>
                 services.Replace(ServiceDescriptor.Singleton<GoogleHttpFactory>(
                     new FakeGoogleHttpFactory(google))));
+
+            if (googleClock is not null)
+            {
+                builder.ConfigureServices(services =>
+                    services.Replace(ServiceDescriptor.Singleton(googleClock)));
+            }
         }
     }
 

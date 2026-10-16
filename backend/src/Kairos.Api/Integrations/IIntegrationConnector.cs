@@ -33,4 +33,16 @@ public interface IIntegrationConnector
     /// caller is a browser redirect, so it ends on the page.
     /// </summary>
     public Task CompleteAsync(string code, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Asks the provider to renew the stored grant and records the answer on the credential,
+    /// healthy or withdrawn. Returns without asking anything when the provider is unconfigured,
+    /// unconnected or paused.
+    /// </summary>
+    /// <remarks>
+    /// While a cached access token is still fresh the provider is not asked, so a withdrawn grant
+    /// surfaces within one access-token lifetime, not on this call. Only a withdrawn grant is
+    /// swallowed; any other failure propagates unrecorded, so a network blip never reads as a revoke.
+    /// </remarks>
+    public Task RefreshAsync(CancellationToken cancellationToken);
 }
