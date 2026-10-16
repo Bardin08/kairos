@@ -22,6 +22,11 @@ updates:
     groups:
       react: { patterns: ["react", "react-dom", "@types/react*"] }
       vite: { patterns: ["vite", "@vitejs/*", "vitest"] }
+    # React stays on 19.2: 19.3 adds 8.6 kB gzipped to the booking route (ViewTransition, Fragment refs, Trusted Types) for features Kairos does not use, and React keeps patching 19.2 alongside it. Patches still arrive; lift this when a newer minor is needed or the budget moves.
+    ignore:
+      - { dependency-name: "react", update-types: ["version-update:semver-minor"] }
+      - { dependency-name: "react-dom", update-types: ["version-update:semver-minor"] }
+      - { dependency-name: "@types/react*", update-types: ["version-update:semver-minor"] }
 
   - package-ecosystem: github-actions
     directory: /
