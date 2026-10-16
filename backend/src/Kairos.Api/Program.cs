@@ -28,6 +28,9 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 using NodaTime;
 
+// Aliased to tell it from NodaTime's IClock.
+using GoogleClock = Google.Apis.Util.IClock;
+
 // Aliased because Google's factory interface collides by name with the one in System.Net.Http.
 using GoogleHttpFactory = Google.Apis.Http.IHttpClientFactory;
 
@@ -187,6 +190,9 @@ builder.Services.Configure<GoogleOptions>(builder.Configuration.GetSection(Googl
 // defaulted so a test can stand in front of the network without either Google class growing an
 // interface whose only implementation would wrap this line.
 builder.Services.AddSingleton<GoogleHttpFactory>(new Google.Apis.Http.HttpClientFactory());
+
+// Google's clock, not NodaTime's: it decides when a cached access token counts as stale.
+builder.Services.AddSingleton<GoogleClock>(Google.Apis.Util.SystemClock.Default);
 
 // Registered twice, resolved once: the endpoints see an IIntegrationConnector and never a Google
 // type, while Part B's calendar work asks for the factory by name. One instance either way,

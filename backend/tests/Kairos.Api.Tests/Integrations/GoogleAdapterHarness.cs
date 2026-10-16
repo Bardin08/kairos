@@ -2,12 +2,17 @@ using System.Text.Json;
 
 using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Google;
+using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 using Kairos.Api.Tests.Features;
 
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 using NodaTime;
+
+// Aliased to tell it from NodaTime's IClock.
+using GoogleClock = Google.Apis.Util.IClock;
 
 namespace Kairos.Api.Tests.Integrations;
 
@@ -55,9 +60,14 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
 
     public GoogleCalendarAdapter Adapter { get; }
 
-    public static async Task<GoogleAdapterHarness> CreateAsync(FakeGoogleHandler handler)
+    public GoogleClientFactory Clients =>
+        _scope.ServiceProvider.GetRequiredService<GoogleClientFactory>();
+
+    public static async Task<GoogleAdapterHarness> CreateAsync(
+        FakeGoogleHandler handler,
+        GoogleClock? clock = null)
     {
-        var app = new KairosApp(google: handler);
+        var app = new KairosApp(google: handler, googleClock: clock);
         var scope = app.Services.CreateScope();
         var harness = new GoogleAdapterHarness(app, scope);
 
@@ -116,6 +126,18 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
         _scope.ServiceProvider.GetRequiredService<IntegrationCredentialStore>()
             .SetEnabledAsync(
                 IntegrationProvider.Google, false, TestContext.Current.CancellationToken);
+
+    /// <summary>The stored Google credential row, read fresh so no tracked copy can go stale.</summary>
+    public async Task<IntegrationCredential> ReadCredentialAsync()
+    {
+        using var scope = _app.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<KairosDbContext>()
+            .IntegrationCredentials
+            .AsNoTracking()
+            .SingleAsync(
+                credential => credential.Provider == IntegrationProvider.Google,
+                TestContext.Current.CancellationToken);
+    }
 
     public ValueTask DisposeAsync()
     {
