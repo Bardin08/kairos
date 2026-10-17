@@ -16,6 +16,12 @@ They also pin one helper image, used only for its shell and the SQLite command l
 ALPINE=alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 ```
 
+Verifying a restore uses `scripts/restore-check.sh` from a checkout of this repository. Point at it once:
+
+```
+CHECK=/path/to/kairos/scripts/restore-check.sh
+```
+
 ## Backup
 
 Run this while Kairos is up. It needs nothing on the host but Docker.
@@ -133,8 +139,8 @@ Then stop Kairos, copy the database out of the volume, and compare it with the a
 docker stop kairos-restore-test
 mkdir after
 docker run --rm -v kairos-restore-test:/data:ro -v "$PWD/after:/out" "$ALPINE" sh -c 'cp /data/kairos.db* /out/'
-scripts/restore-check.sh restore/kairos.db > before.txt
-scripts/restore-check.sh after/kairos.db > after.txt
+"$CHECK" restore/kairos.db > before.txt
+"$CHECK" after/kairos.db > after.txt
 diff before.txt after.txt && echo "every table matches"
 ```
 
