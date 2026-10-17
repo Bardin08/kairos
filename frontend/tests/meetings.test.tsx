@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import Meetings from '../src/routes/admin/Meetings'
 import { ApiError, getSlots } from '../src/lib/api'
-import { cancelMeeting, listMeetings } from '../src/routes/admin/adminMeetings'
+import { cancelMeeting, listMeetings, resyncMeetings } from '../src/routes/admin/adminMeetings'
 import type { Meeting, MeetingProposal, Meetings as List } from '../src/routes/admin/adminMeetings'
 
 // The propose panel reads the PUBLIC slots endpoint. Mocked so opening the panel
@@ -21,6 +21,7 @@ vi.mock('../src/routes/admin/adminMeetings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/routes/admin/adminMeetings')>()),
   listMeetings: vi.fn(),
   cancelMeeting: vi.fn(),
+  resyncMeetings: vi.fn(),
 }))
 
 // Same file the running app loads, and the authority on which class names exist.
@@ -39,6 +40,9 @@ const END = '2026-09-07T09:45:00Z'
 const ORGANIZER_START = '11:00'
 const BOOKER_TIME = '18:00'
 const BOOKER_ZONE = 'Asia/Tokyo'
+
+const SERVER_ERROR = 500
+const RESYNC_FAILED = 'The resync could not be started.'
 
 const JOIN_URL = 'https://meet.example.com/abc-defg-hij'
 
@@ -60,6 +64,7 @@ const synced: Meeting = {
   calendarSynced: true,
   calendarProvider: 'google',
   calendarError: null,
+  calendarPlaced: true,
   proposal: null,
   conferenceUrl: null,
 }
@@ -78,6 +83,7 @@ const refused: Meeting = {
   calendarSynced: false,
   calendarProvider: 'google',
   calendarError: 'Request had insufficient authentication scopes.',
+  calendarPlaced: false,
 }
 
 /** Already off. Nothing on this row can be done to it a second time. */
@@ -94,6 +100,24 @@ const neverTried: Meeting = {
   calendarSynced: false,
   calendarProvider: null,
   calendarError: null,
+  calendarPlaced: false,
+}
+
+// Taken off the clock rather than written down: "upcoming" is the browser's now,
+// and a literal date would be a test that passes until the day it silently stops.
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const DAYS_AHEAD = 7
+const MEETING_MS = 45 * 60 * 1000
+
+/** Refused, and still ahead — the one kind of meeting a resync can place. */
+function refusedAhead(): Meeting {
+  const start = Date.now() + DAYS_AHEAD * MS_PER_DAY
+  return {
+    ...refused,
+    id: '0199a1f0-0000-7000-8000-000000000006',
+    start: new Date(start).toISOString(),
+    end: new Date(start + MEETING_MS).toISOString(),
+  }
 }
 
 function answer(meetings: Meeting[]): List {
@@ -457,4 +481,70 @@ test('an open hold is drawn on the row in the organizer zone, not the browser', 
 
   expect(within(row).getByText(new RegExp(PROPOSED_REMOTE_TIME))).toBeDefined()
   expect(within(row).queryByText(new RegExp(PROPOSED_WARSAW_TIME))).toBeNull()
+})
+
+test('a refused meeting still ahead offers a resync', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([refusedAhead()]))
+  render(<Meetings />)
+
+  expect(await screen.findByRole('button', { name: 'Resync' })).toBeDefined()
+})
+
+// A resync places only what a calendar refused to create and has not yet
+// happened. A refused move has an event already, and a resync leaves it alone.
+// A button over meetings it cannot touch is a button that does nothing.
+test('no resync is offered for a past refusal, a refused move, or a calendar nobody connected', async () => {
+  const aheadNeverTried = { ...refusedAhead(), calendarProvider: null, calendarError: null }
+  const aheadRefusedMove = { ...refusedAhead(), calendarPlaced: true }
+  vi.mocked(listMeetings).mockResolvedValue(answer([refused, aheadNeverTried, aheadRefusedMove]))
+  render(<Meetings />)
+
+  await screen.findAllByText(refused.participantName)
+
+  expect(screen.queryByRole('button', { name: 'Resync' })).toBeNull()
+})
+
+test('a resync is scoped to the chosen link, and the list reloads to say how each went', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([refusedAhead()]))
+  vi.mocked(resyncMeetings).mockResolvedValue(1)
+  render(<Meetings />)
+
+  fireEvent.change(await screen.findByLabelText('Filter by link'), {
+    target: { value: refused.linkId },
+  })
+  await waitFor(() =>
+    expect(vi.mocked(listMeetings)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ linkId: refused.linkId }),
+      expect.anything(),
+    ),
+  )
+  const loads = vi.mocked(listMeetings).mock.calls.length
+
+  fireEvent.click(screen.getByRole('button', { name: 'Resync' }))
+
+  expect(vi.mocked(resyncMeetings)).toHaveBeenCalledWith(refused.linkId)
+  await waitFor(() => expect(vi.mocked(listMeetings).mock.calls.length).toBeGreaterThan(loads))
+})
+
+test('a resync in flight cannot be pressed twice', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([refusedAhead()]))
+  vi.mocked(resyncMeetings).mockReturnValue(new Promise(() => {}))
+  render(<Meetings />)
+
+  const button = await screen.findByRole('button', { name: 'Resync' })
+  fireEvent.click(button)
+  fireEvent.click(button)
+
+  expect(vi.mocked(resyncMeetings)).toHaveBeenCalledTimes(1)
+})
+
+test('a resync that fails says so above the list rather than taking the list away', async () => {
+  vi.mocked(listMeetings).mockResolvedValue(answer([refusedAhead()]))
+  vi.mocked(resyncMeetings).mockRejectedValue(new ApiError(SERVER_ERROR, null, RESYNC_FAILED))
+  render(<Meetings />)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Resync' }))
+
+  expect(await screen.findByText(RESYNC_FAILED)).toBeDefined()
+  expect(screen.getByRole('table')).toBeDefined()
 })

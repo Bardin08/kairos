@@ -79,6 +79,11 @@ export type Meeting = {
   /** Lowercase provider name, or null when nothing was ever written. */
   calendarProvider: string | null
   calendarError: string | null
+  /**
+   * Whether the provider ever created the event. A refusal with one is a move or
+   * a withdrawal the calendar turned down, which a resync leaves alone.
+   */
+  calendarPlaced: boolean
   /** Null when nobody has ever suggested a new time for this meeting. */
   proposal: MeetingProposal | null
   /** Where to join, or null when this meeting has nowhere to be held. */
@@ -166,4 +171,17 @@ export function withdrawProposal(
     method: 'DELETE',
     signal,
   })
+}
+
+/**
+ * Places the upcoming meetings whose event the calendar refused and never
+ * created, on one link or on every link, and answers how many it attempted. The rows say how each attempt went,
+ * so the caller reloads the list rather than reading anything more from this.
+ */
+export function resyncMeetings(linkId: string | undefined, signal?: AbortSignal): Promise<number> {
+  const query = linkId === undefined ? '' : `?${new URLSearchParams({ linkId }).toString()}`
+  return adminRequest<{ attempted: number }>(`/admin/meetings/resync${query}`, {
+    method: 'POST',
+    signal,
+  }).then((answer) => answer.attempted)
 }

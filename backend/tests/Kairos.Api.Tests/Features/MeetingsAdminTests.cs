@@ -426,6 +426,109 @@ public class MeetingsAdminTests
         body.GetProperty("code").GetString().ShouldBe(MeetingsAdminEndpoints.RangeInvertedCode);
     }
 
+    /// <summary>
+    /// The press is scoped to the link the operator is looking at. Which meetings a resync selects
+    /// is <see cref="CalendarSyncService"/>'s and tested there; this pins that the filter reaches it.
+    /// </summary>
+    [Fact]
+    public async Task ResyncMeetings_ForOneLink_AnswersHowManyOfItsMeetingsWereAttempted()
+    {
+        using var app = NewApp();
+        app.Seed(context =>
+        {
+            RefusedMeeting(context, LinkId, FirstDay);
+            RefusedMeeting(context, LinkId, SecondDay);
+            RefusedMeeting(context, OtherLinkId, ThirdDay);
+        });
+        using var client = app.CreateOperatorClient();
+
+        var response = await client.PostAsync(
+            MeetingsUrl($"/resync?linkId={LinkId}"), content: null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var answer = await response.Content.ReadFromJsonAsync<ResyncResponse>(
+            TestContext.Current.CancellationToken);
+        answer.ShouldNotBeNull().Attempted.ShouldBe(TwoMeetings);
+    }
+
+    [Fact]
+    public async Task ResyncMeetings_WithoutASession_IsUnauthorizedRatherThanAnswering()
+    {
+        using var app = NewApp();
+
+        var response = await app.Client.PostAsync(
+            MeetingsUrl("/resync"), content: null, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>
+    /// A closed tab cancels the request, and a pass cancelled between the provider creating the
+    /// event and the save that records it would leave a placed event recorded as never created.
+    /// </summary>
+    [Fact]
+    public async Task ResyncMeetings_TheRequestIsAbandoned_DoesNotCancelThePass()
+    {
+        using var app = NewApp();
+        app.Seed(context => RefusedMeeting(context, LinkId, FirstDay));
+        var calendar = new WatchingCalendar();
+        var factory = app.OperatorFactory(services =>
+        {
+            services.RemoveAll<ICalendarWriter>();
+            services.AddScoped<ICalendarWriter>(_ => calendar);
+        });
+        using var client = factory.CreateClient();
+
+        (await client.PostAsync(MeetingsUrl("/resync"), content: null, TestContext.Current.CancellationToken))
+            .StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        calendar.CreateCouldBeCancelled.ShouldBe(false);
+    }
+
+    /// <summary>
+    /// A refused move or withdrawal is Failed too, but its event exists, and a resync leaves it
+    /// alone rather than create a second one. The row has to say which kind of refusal it is, or
+    /// the workbench offers a resync that can never place it.
+    /// </summary>
+    [Fact]
+    public async Task ListMeetings_TheCalendarRefusedAMove_ReadsPlacedWhereARefusedCreateDoesNot()
+    {
+        using var app = NewApp();
+        app.Seed(context =>
+        {
+            RefusedMeeting(context, LinkId, FirstDay);
+            RefusedMeeting(context, OtherLinkId, SecondDay, ExternalEventId);
+        });
+        using var client = app.CreateOperatorClient();
+
+        var meetings = (await ReadAsync(client)).Meetings;
+
+        meetings.Single(meeting => meeting.LinkId == LinkId).CalendarPlaced.ShouldBeFalse();
+        meetings.Single(meeting => meeting.LinkId == OtherLinkId).CalendarPlaced.ShouldBeTrue();
+    }
+
+    private const int TwoMeetings = 2;
+    private const string ExternalEventId = "event-that-still-exists";
+
+    /// <summary>
+    /// A seeded meeting the calendar refused: a create when <paramref name="eventId"/> is null, and
+    /// a move or withdrawal of an event that exists when it is not.
+    /// </summary>
+    private static void RefusedMeeting(
+        KairosDbContext context, Guid linkId, string day, string? eventId = null)
+    {
+        var meeting = Meeting(linkId, day);
+        context.Bookings.Add(meeting);
+        context.CalendarEntries.Add(new CalendarEntry
+        {
+            BookingId = meeting.Id,
+            Provider = IntegrationProvider.Google,
+            ExternalEventId = eventId,
+            State = CalendarSyncState.Failed,
+            LastError = Refusal,
+        });
+    }
+
     private static string MeetingsUrl(string query = "") =>
         $"{ApiVersions.V1}/admin/meetings{query}";
 
@@ -629,6 +732,33 @@ public class MeetingsAdminTests
 
         public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    /// <summary>Connected, refusing, and noting whether the create it was asked for could be cancelled.</summary>
+    private sealed class WatchingCalendar : ICalendarWriter
+    {
+        public bool? CreateCouldBeCancelled { get; private set; }
+
+        public IntegrationProvider Provider => IntegrationProvider.Google;
+
+        public Task<bool> IsConnectedAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public Task<PlacedEvent> CreateEventAsync(
+            CalendarEventRequest request,
+            CancellationToken cancellationToken)
+        {
+            CreateCouldBeCancelled = cancellationToken.CanBeCanceled;
+            return Task.FromException<PlacedEvent>(new InvalidOperationException(Refusal));
+        }
+
+        public Task UpdateEventAsync(
+            string externalEventId,
+            CalendarEventRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException(Refusal));
+
+        public Task CancelEventAsync(string externalEventId, CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException(Refusal));
     }
 
     /// <summary>
