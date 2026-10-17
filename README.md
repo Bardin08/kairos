@@ -95,7 +95,7 @@ Pin a release in production instead of `latest`: set `image: ghcr.io/bardin08/ka
 
 ## Development
 
-Running from source, the test harnesses and the build: [`docs/running-locally.md`](docs/running-locally.md). Contributor rules: [`AGENTS.md`](AGENTS.md).
+Running from source, the test harnesses and the build: [`docs/running-locally.md`](docs/running-locally.md). Contributor rules: [`AGENTS.md`](AGENTS.md). To build the image yourself instead of pulling it: `docker build -t kairos .` from the repository root, then set `image: kairos` in `compose.yaml`.
 
 ## License
 
