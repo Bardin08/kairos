@@ -87,7 +87,7 @@ Kairos listens on plain HTTP on 8080 and expects a proxy in front of it to termi
 
 Everything Kairos keeps is in the `kairos-data` volume, at `/var/lib/kairos`: one SQLite database with its `-wal` and `-shm` files, and `.aspnet/DataProtection-Keys/`, the keys that sign the operator's session cookie. The image sets `HOME=/var/lib/kairos` so that key ring lands on the volume and a recreated container keeps the operator signed in. If you move the database somewhere else, set `HOME` to the same directory.
 
-The keys are encrypted under `Security__SecretKey`, as are stored integration credentials. Back up the whole directory, and keep the secret key where you can find it for a restore: without it the keys and credentials cannot be read. Changing the secret key signs the operator out and disconnects integrations; delete `.aspnet/DataProtection-Keys/` when you do, since keys sealed under the old secret can no longer be read and only log errors until they expire. A documented backup and restore procedure is not written yet.
+The keys are encrypted under `Security__SecretKey`, as are stored integration credentials. Back up the whole directory, and keep the secret key where you can find it for a restore: without it the keys and credentials cannot be read. Changing the secret key signs the operator out and disconnects integrations; delete `.aspnet/DataProtection-Keys/` when you do, since keys sealed under the old secret can no longer be read and only log errors until they expire. How to take a backup, restore it, and check the restore brought every booking back: [`docs/backup-and-restore.md`](docs/backup-and-restore.md).
 
 ## Upgrading
 
