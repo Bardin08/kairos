@@ -135,6 +135,20 @@ public sealed class BookingMailer(
             cancellationToken);
 
     /// <summary>
+    /// The meeting has not moved; something about it has, today the join link a dead calendar grant
+    /// kept out of the confirmation. Same UID, advanced sequence, so the client updates what it holds.
+    /// </summary>
+    /// <returns>Whether the relay took it — see <see cref="SendConfirmationAsync"/>.</returns>
+    public Task<bool> SendUpdateAsync(
+        Booking booking,
+        MeetingIdentity identity,
+        string? joinUrl,
+        CancellationToken cancellationToken) =>
+        SendAsync(
+            BookingNotice.Update, booking, identity, manageToken: null, joinUrl,
+            previousStart: null, cancellationToken);
+
+    /// <summary>
     /// The operator has offered a new time. Nothing has moved; the invitee decides.
     /// </summary>
     /// <returns>
@@ -325,6 +339,7 @@ public sealed class BookingMailer(
             BookingNotice.Reschedule => Reschedule(booking, booker.Name, fact, manageUrl, joinUrl),
             BookingNotice.Cancellation => Cancellation(
                 booking, booker.Name, fact, manageUrl, BookUrl(settings.PublicBaseUrl!, booking.Link.Slug)),
+            BookingNotice.Update => Update(booking, booker.Name, fact, joinUrl),
             BookingNotice.Proposal => throw ComposedElsewhere(notice, nameof(ComposeProposalAsync)),
             BookingNotice.Reminder => throw ComposedElsewhere(notice, nameof(ComposeReminderAsync)),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),
@@ -522,6 +537,17 @@ public sealed class BookingMailer(
             Details = Details(booking, joinUrl),
         };
 
+    private static MailBody Update(Booking booking, string bookerName, MailFact fact, string? joinUrl) =>
+        new()
+        {
+            Headline = "Your meeting has a join link",
+            Fact = fact,
+            Sentence =
+                $"Hi {bookerName} — the video link was missing from your invitation to "
+                + $"{booking.Link.Name} and is below; your calendar entry has been updated in place.",
+            Details = Details(booking, joinUrl),
+        };
+
     /// <remarks>
     /// No join row, where the other two notices carry one: the meeting is off and there is nothing
     /// left to join. The way back is the secondary link, which is the public booking page rather
@@ -642,6 +668,7 @@ public sealed class BookingMailer(
             BookingNotice.Confirmation => "Confirmed",
             BookingNotice.Reschedule => "Moved",
             BookingNotice.Cancellation => "Cancelled",
+            BookingNotice.Update => "Updated",
             BookingNotice.Proposal => throw ComposedElsewhere(notice, nameof(ComposeProposalAsync)),
             BookingNotice.Reminder => throw ComposedElsewhere(notice, nameof(ComposeReminderAsync)),
             _ => throw new ArgumentOutOfRangeException(nameof(notice), notice, "Unknown booking notice."),

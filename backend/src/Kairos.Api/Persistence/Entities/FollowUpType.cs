@@ -5,4 +5,5 @@ public enum FollowUpType
     Created = 10,
     Rescheduled = 20,
     Cancelled = 30,
+    Updated = 40,
 }

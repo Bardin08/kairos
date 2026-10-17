@@ -1,3 +1,4 @@
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
 
@@ -27,6 +28,8 @@ public sealed class CalendarSyncService(
     ICalendarWriter calendars,
     IConferenceCreator conferences,
     IntegrationCredentialStore credentials,
+    FollowUpWriter followUps,
+    FollowUpSignal signal,
     KairosDbContext context,
     IClock clock,
     ILogger<CalendarSyncService> logger)
@@ -57,6 +60,9 @@ public sealed class CalendarSyncService(
     /// Bookings are read once, so one cancelled or moved while the pass is still placing earlier
     /// ones can be placed as it was read. Re-reading each booking before placing narrows that; it
     /// is worth doing once a pass is long enough for it to happen.
+    ///
+    /// Placing the event and queueing the invitee's update are two saves. If the second fails, that
+    /// invitee is never sent the update, because a later pass selects only entries with no event.
     /// </remarks>
     public async Task<int> ResyncAsync(Guid? linkId, CancellationToken cancellationToken)
     {
@@ -79,10 +85,41 @@ public sealed class CalendarSyncService(
 
         foreach (var booking in bookings)
         {
-            await GuardedAsync(booking.Id, () => PlaceAsync(booking, keepIdentity: true, cancellationToken));
+            await GuardedAsync(booking.Id, async () =>
+            {
+                await PlaceAsync(booking, keepIdentity: true, cancellationToken);
+                await QueueUpdateAsync(booking.Id, cancellationToken);
+            });
         }
 
+        signal.Nudge();
         return bookings.Count;
+    }
+
+    /// <summary>
+    /// The invitee was confirmed under the booking's own UID and with no join link. Once a
+    /// placement has produced one, they are owed a REQUEST at the next sequence carrying it.
+    /// </summary>
+    /// <remarks>
+    /// A conference is the test because none can exist before a resync places the event: a
+    /// refused create never reaches <see cref="AddConferenceAsync"/>. No conference means nothing
+    /// new to tell, whether the calendar refused again or only the conference did.
+    ///
+    /// The sequence and the row commit in one SaveChanges, so a crash between them cannot leave a
+    /// notice queued at a sequence the client already holds, or a sequence nobody will announce.
+    /// </remarks>
+    private async Task QueueUpdateAsync(Guid bookingId, CancellationToken cancellationToken)
+    {
+        if (!await context.ConferenceLinks.AnyAsync(row => row.BookingId == bookingId, cancellationToken))
+        {
+            return;
+        }
+
+        var booking = await context.Bookings.SingleAsync(row => row.Id == bookingId, cancellationToken);
+        booking.Sequence++;
+        followUps.Enqueue(bookingId, FollowUpType.Updated);
+
+        await context.SaveChangesAsync(CancellationToken.None);
     }
 
     /// <summary>

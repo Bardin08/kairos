@@ -263,7 +263,8 @@ public class MailInvariantTests
         {
             BookingNotice.Proposal => await mailer.ComposeProposalAsync(
                 booking, Proposal(), ProposalToken, TestContext.Current.CancellationToken),
-            BookingNotice.Confirmation or BookingNotice.Reschedule or BookingNotice.Cancellation =>
+            BookingNotice.Confirmation or BookingNotice.Reschedule or BookingNotice.Cancellation
+                or BookingNotice.Update =>
                 await mailer.ComposeAsync(
                     booking,
                     new MeetingIdentity(booking.Id.ToString(), Owner: null),

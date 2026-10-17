@@ -213,6 +213,22 @@ public sealed class FollowUpWorker(
                         break;
                     }
 
+                case FollowUpType.Updated:
+                    {
+                        // A REQUEST would put a meeting cancelled since the resync back on the
+                        // invitee's calendar. A moved one is Confirmed, read here at its new time.
+                        if (booking.Status != BookingStatus.Confirmed)
+                        {
+                            break;
+                        }
+
+                        var joinUrl = await JoinUrlAsync(context, booking.Id, cancellationToken);
+                        var identity = await identities.ResolveAsync(booking.Id, cancellationToken);
+                        await RequireSentAsync(followUp, mailer.SendUpdateAsync(
+                            booking, identity, joinUrl, cancellationToken));
+                        break;
+                    }
+
                 default:
                     throw new InvalidOperationException(
                         $"Follow-up {followUp.Id} has no handler for {followUp.Type}.");

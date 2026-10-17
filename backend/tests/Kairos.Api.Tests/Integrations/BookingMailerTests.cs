@@ -95,6 +95,9 @@ public class BookingMailerTests
     /// </summary>
     private const string PreviousTime = "Friday 4 September 2026, 09:00";
 
+    /// <summary>One past the confirmation's zero, as the resync that queues an update leaves it.</summary>
+    private const int UpdatedSequence = 1;
+
     private static readonly Instant Start = Instant.FromUtc(2026, 9, 7, 7, 0);
 
     /// <summary>Where a rescheduled meeting moved from — the Friday before, at an hour Warsaw shifts.</summary>
@@ -404,6 +407,27 @@ public class BookingMailerTests
 
         Plain(message).ShouldContain(PreviousTime);
         Html(message).ShouldContain(PreviousTime);
+    }
+
+    /// <summary>
+    /// The invitee already holds this meeting under the booking's own UID, from a confirmation a
+    /// dead calendar grant sent without a join link. A REQUEST under any other UID, or at the
+    /// sequence that confirmation carried, would be a second meeting or no update at all.
+    /// </summary>
+    [Fact]
+    public async Task ComposeAsync_AnUpdate_CarriesTheJoinUrlUnderTheBookingsOwnUid()
+    {
+        var booking = Booking(sequence: UpdatedSequence);
+
+        var message = await Compose(booking, notice: BookingNotice.Update, joinUrl: JoinUrl);
+        var ics = Ics(message);
+
+        Plain(message).ShouldContain(JoinUrl);
+        ics.ShouldContain($"UID:{booking.Id}");
+        ics.ShouldContain($"SEQUENCE:{UpdatedSequence}");
+        ics.ShouldContain("METHOD:REQUEST");
+        CalendarPart(message).ContentType.Parameters["method"].ShouldBe("REQUEST");
+        message.Subject.ShouldStartWith("Updated:");
     }
 
     /// <summary>
