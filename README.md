@@ -2,7 +2,7 @@
 
 Self-hosted booking links. You share a link, the person you sent it to picks a time that fits your calendar, and the meeting lands in both calendars. One operator per instance; invitees need no account.
 
-Kairos runs as one container with SQLite inside. It idles at about 76 MiB in that container. The image is built for `linux/arm64` with a Raspberry Pi in mind, though it has not been measured on one yet.
+Kairos runs as one container with SQLite inside. It idles at about 76 MiB in that container. The image is built for `linux/amd64` and `linux/arm64`, and the reference instance runs on a Raspberry Pi 5.
 
 ## What it does and does not do
 

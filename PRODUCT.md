@@ -74,7 +74,7 @@ The name *Kairos* — Greek, the opportune moment as opposed to chronological ti
 
 ## Evidence on Hand
 
-No customers, no testimonials, no pricing, no screenshots. One reference deployment, in use since 2026-08-28: a single arm64 container on a Raspberry Pi, running the image published at `ghcr.io/bardin08/kairos`. The measured figures that may be stated are the ones recorded in `docs/measurements.md` — idle memory inside a container held to the deployment's limit is under *The pod's limits*, and is quoted from there rather than restated here — plus the comparison Positioning draws: cal.diy at ~1.2 Gi steady with PostgreSQL. Everything else shown in a mockup is authored demonstration material and must be labelled as such. Invitee names, emails, and meeting subjects in any comp are invented.
+No customers, no testimonials, no pricing, no screenshots. One reference deployment, in use since 2026-08-28: a single arm64 container on a Raspberry Pi, running the image published at `ghcr.io/bardin08/kairos`. The measured figures that may be stated are the idle memory the README gives and the comparison Positioning draws: cal.diy at ~1.2 Gi steady with PostgreSQL. A new figure is stated only with the pull request that measured it. Everything else shown in a mockup is authored demonstration material and must be labelled as such. Invitee names, emails, and meeting subjects in any comp are invented.
 
 ## Product Principles
 
