@@ -7,6 +7,8 @@ namespace Kairos.Api.Tests.Integrations;
 
 public sealed class IntegrationSweeperTests
 {
+    private const int OneRefresh = 1;
+
     private const int TwoRefreshes = 2;
 
     /// <summary>
@@ -96,5 +98,27 @@ public sealed class IntegrationSweeperTests
         var links = harness.ReadConferenceLinks();
         links.Select(link => link.BookingId).ShouldBe(bookings.Select(booking => booking.Id), ignoreOrder: true);
         links.ShouldAllBe(link => link.JoinUrl == JoinUrl);
+    }
+
+    /// <summary>
+    /// A grant that stays withdrawn costs the tick its own refused refresh and nothing more: the
+    /// refused meetings wait for a tick on which the grant answers.
+    /// </summary>
+    [Fact]
+    public async Task SweepAsync_TheGrantIsStillWithdrawn_AsksTheProviderOnceAndPlacesNothing()
+    {
+        var handler = new FakeGoogleHandler().RefusingGrant();
+        await using var harness = await GoogleAdapterHarness.CreateAsync(handler);
+        foreach (var booking in harness.SeedUpcomingBookings(IncidentMeetings))
+        {
+            await harness.SyncAsync(booking);
+        }
+
+        var tokenRequestsBefore = handler.TokenRequests;
+        await harness.Resolve<IntegrationSweeper>().SweepAsync(TestContext.Current.CancellationToken);
+
+        (handler.TokenRequests - tokenRequestsBefore).ShouldBe(OneRefresh);
+        handler.Requests.ShouldBeEmpty();
+        harness.ReadEntries().ShouldAllBe(entry => entry.State == CalendarSyncState.Failed);
     }
 }

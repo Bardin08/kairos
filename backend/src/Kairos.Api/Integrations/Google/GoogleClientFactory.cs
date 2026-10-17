@@ -229,16 +229,18 @@ public sealed class GoogleClientFactory : IIntegrationConnector, IDisposable
         }
     }
 
-    public async Task RefreshAsync(CancellationToken cancellationToken)
+    public async Task<bool> RefreshAsync(CancellationToken cancellationToken)
     {
         try
         {
             await GetCredentialAsync(cancellationToken);
+            return true;
         }
         catch (TokenResponseException exception) when (exception.Error?.Error == InvalidGrant)
         {
             // GetCredentialAsync has already written ReconnectRequired; rethrowing would make a
             // recorded fault look like an unhandled one to the sweeper.
+            return false;
         }
     }
 
