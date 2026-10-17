@@ -299,6 +299,12 @@ builder.Services.AddHostedService<ProposalSweeper>();
 // the tick after it returns, right up until the meeting itself starts.
 builder.Services.AddHostedService<ReminderSweeper>();
 
+// Beside the sweepers rather than with the integrations above it: it is a clock asking a question
+// no request asks on a quiet day. No booking depends on it running, because a booking refreshes the
+// token it needs itself. A deployment where this never ticks leaves a dead grant unrecorded until
+// traffic finds it, and the meetings it refused with no event and no join link after a reconnect.
+builder.Services.AddHostedService<IntegrationSweeper>();
+
 builder.Services.AddRateLimitPolicies();
 
 builder.Services.AddHealthEndpoints();

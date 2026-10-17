@@ -46,6 +46,17 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
 
     private const int MeetingMinutes = 30;
 
+    private const string PatternName = "Weekdays";
+
+    private const string LinkSlug = "intro";
+
+    private const string LinkName = "Intro call";
+
+    private const string AttendeeTimeZone = "Europe/Warsaw";
+
+    /// <summary>Far enough ahead that every seeded meeting is still upcoming when a resync reads it.</summary>
+    private static readonly Duration UpcomingLead = Duration.FromDays(1);
+
     private readonly KairosApp _app;
     private readonly IServiceScope _scope;
     private readonly IntegrationSettingStore _settings;
@@ -62,6 +73,10 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
 
     public GoogleClientFactory Clients =>
         _scope.ServiceProvider.GetRequiredService<GoogleClientFactory>();
+
+    public T Resolve<T>()
+        where T : notnull =>
+        _scope.ServiceProvider.GetRequiredService<T>();
 
     public static async Task<GoogleAdapterHarness> CreateAsync(
         FakeGoogleHandler handler,
@@ -137,6 +152,86 @@ internal sealed class GoogleAdapterHarness : IAsyncDisposable
             .SingleAsync(
                 credential => credential.Provider == IntegrationProvider.Google,
                 TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Confirmed meetings on one link, back to back from <see cref="UpcomingLead"/> after the app's
+    /// own clock, returned with the link and the booker a sync reads.
+    /// </summary>
+    public IReadOnlyList<Booking> SeedUpcomingBookings(int count)
+    {
+        using var scope = _app.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<KairosDbContext>();
+        var now = scope.ServiceProvider.GetRequiredService<IClock>().GetCurrentInstant();
+        var meeting = Duration.FromMinutes(MeetingMinutes);
+
+        var link = new Link
+        {
+            Id = Guid.CreateVersion7(),
+            Slug = LinkSlug,
+            Name = LinkName,
+            Pattern = new Pattern { Id = Guid.CreateVersion7(), Name = PatternName },
+        };
+
+        var bookings = new List<Booking>();
+        for (var index = 0; index < count; index++)
+        {
+            var start = now.Plus(UpcomingLead).Plus(meeting * index);
+            var bookingId = Guid.CreateVersion7();
+            bookings.Add(new Booking
+            {
+                Id = bookingId,
+                Link = link,
+                StartUtc = start.ToUnixTimeSeconds(),
+                EndUtc = start.Plus(meeting).ToUnixTimeSeconds(),
+                Status = BookingStatus.Confirmed,
+                ManageTokenHash = bookingId.ToString(),
+                CreatedAt = now.ToUnixTimeSeconds(),
+                Participants =
+                [
+                    new BookingParticipant
+                    {
+                        Id = Guid.CreateVersion7(),
+                        BookingId = bookingId,
+                        Role = ParticipantRole.Booker,
+                        Name = AttendeeName,
+                        Email = AttendeeEmail,
+                        TimeZoneId = AttendeeTimeZone,
+                    },
+                ],
+            });
+        }
+
+        context.Bookings.AddRange(bookings);
+        context.SaveChanges();
+
+        return bookings;
+    }
+
+    /// <summary>The sync FollowUpWorker runs on a new booking, without the mail around it.</summary>
+    public async Task SyncAsync(Booking booking)
+    {
+        using var scope = _app.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<CalendarSyncService>()
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+    }
+
+    public IReadOnlyList<CalendarEntry> ReadEntries()
+    {
+        using var scope = _app.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<KairosDbContext>()
+            .CalendarEntries
+            .AsNoTracking()
+            .ToList();
+    }
+
+    public IReadOnlyList<ConferenceLink> ReadConferenceLinks()
+    {
+        using var scope = _app.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<KairosDbContext>()
+            .ConferenceLinks
+            .AsNoTracking()
+            .ToList();
     }
 
     public ValueTask DisposeAsync()
