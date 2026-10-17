@@ -64,6 +64,7 @@ const meeting: Meeting = {
   calendarSynced: true,
   calendarProvider: 'google',
   calendarError: null,
+  calendarPlaced: true,
   proposal: null,
   conferenceUrl: null,
 }

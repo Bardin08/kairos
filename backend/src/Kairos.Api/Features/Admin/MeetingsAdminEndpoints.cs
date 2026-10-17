@@ -99,6 +99,10 @@ public sealed record MeetingProposalResponse(Guid Id, string Start, string Expir
 /// may offer from <c>GET /links/{slug}/slots</c>, which takes no id at all. Without it the picker
 /// cannot ask, and the alternative is a round trip per row to turn an id back into the slug.
 /// </param>
+/// <param name="CalendarPlaced">
+/// Whether the provider ever created this meeting's event. A Failed row with one is a refused move
+/// or withdrawal, which a resync leaves alone, so the page offers a resync only where this is false.
+/// </param>
 /// <param name="Proposal">
 /// The newest hold on this meeting, or null when there has never been one. Null is what the row
 /// draws Propose off, which is why it is absent rather than a proposal in some resting state.
@@ -118,6 +122,7 @@ public sealed record MeetingResponse(
     bool CalendarSynced,
     string? CalendarProvider,
     string? CalendarError,
+    bool CalendarPlaced,
     MeetingProposalResponse? Proposal,
     string? ConferenceUrl);
 
@@ -132,6 +137,9 @@ public sealed record MeetingsResponse(
     string TimeZone,
     IReadOnlyList<MeetingLinkResponse> Links,
     IReadOnlyList<MeetingResponse> Meetings);
+
+/// <summary>How many refused meetings one press attempted; the rows on the list say how each went.</summary>
+public sealed record ResyncResponse(int Attempted);
 
 /// <summary>
 /// The operator's read of every meeting Kairos made, and the one fact a calendar cannot supply:
@@ -179,8 +187,14 @@ public static class MeetingsAdminEndpoints
         group.MapPost("/meetings/{id:guid}/proposals", ProposeAsync).WithName("ProposeMeeting");
         group.MapDelete("/meetings/{id:guid}/proposals/{proposalId:guid}", WithdrawAsync)
             .WithName("WithdrawProposal");
+        group.MapPost("/meetings/resync", ResyncAsync).WithName("ResyncMeetings");
         return group;
     }
+
+    private static async Task<ResyncResponse> ResyncAsync(Guid? linkId, CalendarSyncService calendars) =>
+        // Not the request's token: an operator who closed the tab is not a reason to lose the
+        // record of an event the provider has already created.
+        new(await calendars.ResyncAsync(linkId, CancellationToken.None));
 
     private static async Task<MeetingsResponse> ListAsync(
         [AsParameters] ListMeetingsRequest request,
@@ -281,7 +295,7 @@ public static class MeetingsAdminEndpoints
                 Calendar = context.CalendarEntries
                     .Where(entry => entry.BookingId == booking.Id)
                     .OrderByDescending(entry => entry.UpdatedAt)
-                    .Select(entry => new { entry.State, entry.Provider, entry.LastError })
+                    .Select(entry => new { entry.State, entry.Provider, entry.LastError, entry.ExternalEventId })
                     .FirstOrDefault(),
                 Conference = context.ConferenceLinks
                     .Where(conference => conference.BookingId == booking.Id)
@@ -306,7 +320,11 @@ public static class MeetingsAdminEndpoints
                 row.Booker?.TimeZoneId ?? string.Empty,
                 row.Calendar is null
                     ? null
-                    : new CalendarFacts(row.Calendar.State, row.Calendar.Provider, row.Calendar.LastError),
+                    : new CalendarFacts(
+                        row.Calendar.State,
+                        row.Calendar.Provider,
+                        row.Calendar.LastError,
+                        row.Calendar.ExternalEventId != null),
                 row.Proposal,
                 row.Conference,
                 now)),
@@ -564,7 +582,8 @@ public static class MeetingsAdminEndpoints
         var calendar = await context.CalendarEntries.AsNoTracking()
             .Where(entry => entry.BookingId == booking.Id)
             .OrderByDescending(entry => entry.UpdatedAt)
-            .Select(entry => new CalendarFacts(entry.State, entry.Provider, entry.LastError))
+            .Select(entry => new CalendarFacts(
+                entry.State, entry.Provider, entry.LastError, entry.ExternalEventId != null))
             .FirstOrDefaultAsync(cancellationToken);
 
         // Read back rather than taken from the write that just happened: propose has an insert in
@@ -639,6 +658,7 @@ public static class MeetingsAdminEndpoints
             calendar is not null && calendar.State == CalendarSyncState.Synced,
             calendar is null ? null : calendar.Provider.ToString().ToLowerInvariant(),
             calendar?.LastError,
+            calendar?.Placed ?? false,
             proposal is null
                 ? null
                 : new MeetingProposalResponse(
@@ -652,7 +672,8 @@ public static class MeetingsAdminEndpoints
     private static string Format(long unixSeconds) =>
         InstantPattern.ExtendedIso.Format(Instant.FromUnixTimeSeconds(unixSeconds));
 
-    private sealed record CalendarFacts(CalendarSyncState State, IntegrationProvider Provider, string? LastError);
+    private sealed record CalendarFacts(
+        CalendarSyncState State, IntegrationProvider Provider, string? LastError, bool Placed);
 
     /// <summary>
     /// The hold half of a row, as far as the projection reads it. The stored state rather than the

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import RecordTable, { type RecordColumn } from '../../components/RecordTable'
 import { localZone, todayIn, zonedDate, zonedTime } from '../../lib/time'
-import { listMeetings, type Meeting, type Meetings as List } from './adminMeetings'
+import { listMeetings, resyncMeetings, type Meeting, type Meetings as List } from './adminMeetings'
 import Failure from './Failure'
 import MeetingActions from './MeetingActions'
 import ProposePanel from './ProposePanel'
@@ -108,6 +108,22 @@ function whyNotSynced(meeting: Meeting): string {
 }
 
 /**
+ * What a resync can place: a confirmed meeting still ahead whose event the
+ * calendar refused and never created. One with no error was never attempted,
+ * because nothing was connected; one with an event is a refused move or
+ * withdrawal. A resync leaves both alone.
+ */
+function resyncable(meeting: Meeting): boolean {
+  return (
+    meeting.status === CONFIRMED &&
+    !meeting.calendarSynced &&
+    meeting.calendarError !== null &&
+    !meeting.calendarPlaced &&
+    Date.parse(meeting.start) > Date.now()
+  )
+}
+
+/**
  * Every meeting Kairos made, and the one fact a calendar cannot supply: the link
  * it came through.
  *
@@ -136,6 +152,10 @@ export default function Meetings() {
   // the measurement — so the page owns the state and the row only asks. The
   // meeting itself rather than its id: the picker needs the slug and the length.
   const [proposing, setProposing] = useState<Meeting | null>(null)
+  const [resyncing, setResyncing] = useState(false)
+  // Bumped to read the list again after a resync, whose answer is only a count:
+  // each row's own state is what says how its attempt went.
+  const [reads, setReads] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -146,6 +166,7 @@ export default function Meetings() {
       controller.signal,
     )
       .then((answer) => {
+        setFailure(null)
         setList(answer)
         setZone(answer.timeZone)
         setPhase('ready')
@@ -160,7 +181,16 @@ export default function Meetings() {
     // screen stay until the narrower set replaces them, so changing a filter
     // does not blink the table out and back.
     return () => controller.abort()
-  }, [period, linkId, zone])
+  }, [period, linkId, zone, reads])
+
+  function resync() {
+    setResyncing(true)
+    resyncMeetings(linkId === '' ? undefined : linkId)
+      .then(() => setReads((count) => count + 1))
+      // A failed press leaves the last read on screen under the failure rather than taking it away.
+      .catch((error: unknown) => setFailure(error))
+      .finally(() => setResyncing(false))
+  }
 
   // The write answers with the row as it now stands, in exactly the shape the
   // list draws. Applied in place rather than used as a cue to refetch: a second
@@ -319,6 +349,17 @@ export default function Meetings() {
             <option value={RECENT}>Last {RECENT_DAYS} days</option>
             <option value={ALL}>All</option>
           </select>
+          {list?.meetings.some(resyncable) === true && (
+            <button
+              className="btn"
+              type="button"
+              disabled={resyncing}
+              data-loading={resyncing || undefined}
+              onClick={resync}
+            >
+              Resync
+            </button>
+          )}
         </div>
       </div>
 
@@ -330,7 +371,7 @@ export default function Meetings() {
       {/* An icon as well as the red, the same way every other failure in this
           product is drawn, and an expired session gets a way back in rather
           than a status code. A table is rendered under it only if one arrived. */}
-      {phase === 'broken' && <Failure error={failure} className="mb-5" />}
+      <Failure error={failure} className="mb-5" />
 
       {phase === 'loading' && <p className="prose t-sm">Reading the meetings…</p>}
 
