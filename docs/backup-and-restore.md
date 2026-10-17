@@ -21,7 +21,7 @@ Run this while Kairos is up. It needs nothing on the host but Docker.
 
 ```
 mkdir -p backup
-docker run --rm -v "$VOLUME:/data" -v "$PWD/backup:/out" "$ALPINE" sh -c '
+docker run --rm -v "$VOLUME:/data" -v "$PWD/backup:/out" "$ALPINE" sh -ec '
   apk add --no-cache sqlite=3.49.2-r1 >/dev/null
   mkdir /stage && cp -R /data/.aspnet /stage/
   sqlite3 /data/kairos.db ".backup /stage/kairos.db"
@@ -29,6 +29,8 @@ docker run --rm -v "$VOLUME:/data" -v "$PWD/backup:/out" "$ALPINE" sh -c '
 ```
 
 `.backup` is SQLite's own online backup. It produces a consistent database even while Kairos is writing, which a plain copy of `kairos.db` does not: the database runs in WAL mode, and recent writes sit in `kairos.db-wal` until a checkpoint moves them. The volume is mounted read-write on purpose. SQLite needs to write the `-shm` file even to read a WAL database, so `:ro` makes the backup fail.
+
+The command stops at the first step that fails and writes no archive, so an incomplete backup cannot pass for a good one. The usual cause is an image released before the key ring moved onto the volume, v0.1.0 among them: there `.aspnet` is on the container's own layer, the volume holds only the database, and the backup stops at the first `cp`. Upgrade first: a newer image writes the key ring to the volume as it starts.
 
 Three things the command does not do for you:
 
@@ -44,7 +46,7 @@ Three things the command does not do for you:
 
 ```
 mkdir restore && tar -xzf backup/kairos-<stamp>.tar.gz -C restore
-docker run --rm --network none -v "$VOLUME:/data" -v "$PWD/restore:/restore:ro" "$ALPINE" sh -c '
+docker run --rm --network none -v "$VOLUME:/data" -v "$PWD/restore:/restore:ro" "$ALPINE" sh -ec '
   [ -z "$(ls -A /data)" ] || { echo "volume is not empty" >&2; exit 1; }
   cp /restore/kairos.db /data/ && cp -R /restore/.aspnet /data/
   rm -f /data/kairos.db-wal /data/kairos.db-shm
