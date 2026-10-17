@@ -36,13 +36,14 @@ public interface IIntegrationConnector
 
     /// <summary>
     /// Asks the provider to renew the stored grant and records the answer on the credential,
-    /// healthy or withdrawn. Returns without asking anything when the provider is unconfigured,
-    /// unconnected or paused.
+    /// healthy or withdrawn. Returns false only when the provider has withdrawn the grant, and true
+    /// otherwise, including when it asks nothing because the provider is unconfigured, unconnected
+    /// or paused.
     /// </summary>
     /// <remarks>
     /// While a cached access token is still fresh the provider is not asked, so a withdrawn grant
     /// surfaces within one access-token lifetime, not on this call. Only a withdrawn grant is
     /// swallowed; any other failure propagates unrecorded, so a network blip never reads as a revoke.
     /// </remarks>
-    public Task RefreshAsync(CancellationToken cancellationToken);
+    public Task<bool> RefreshAsync(CancellationToken cancellationToken);
 }

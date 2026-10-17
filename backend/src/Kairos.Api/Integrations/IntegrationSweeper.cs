@@ -18,9 +18,8 @@ public sealed class IntegrationSweeper(
     /// <summary>
     /// How long, past one access-token lifetime, a dead grant can go unrecorded on a day with no
     /// traffic, and how long a reconnect waits for its meetings to be placed. A healthy grant costs
-    /// at most one token refresh per tick. A dead one costs a refused token request per refused
-    /// meeting as well, up to <see cref="CalendarSyncService.MaxResyncPerPass"/>, because a refusal
-    /// leaves no cached credential for the next placement to reuse.
+    /// at most one token refresh per tick. A withdrawn one, once its cached token has lapsed, costs
+    /// one refused refresh and nothing else, because the resync waits for a tick the grant answers.
     /// </summary>
     public static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(15);
 
@@ -43,9 +42,18 @@ public sealed class IntegrationSweeper(
     /// <summary>One pass. Public so a test can drive it without a timer.</summary>
     public async Task SweepAsync(CancellationToken cancellationToken)
     {
+        var everyGrantAnswers = true;
         foreach (var connector in connectors)
         {
-            await connector.RefreshAsync(cancellationToken);
+            everyGrantAnswers &= await connector.RefreshAsync(cancellationToken);
+        }
+
+        // shortcut: a withdrawn grant on any connector holds back the calendar resync, which is
+        // right while the calendar is the only integration; revisit when a second provider such
+        // as Zoom arrives.
+        if (!everyGrantAnswers)
+        {
+            return;
         }
 
         using var scope = scopes.CreateScope();
