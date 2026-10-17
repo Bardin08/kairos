@@ -28,14 +28,17 @@ docker run --rm -i \
   -e SQLITE_PACKAGE="$SQLITE_PACKAGE" \
   "$ALPINE_IMAGE" sh -s <<'IN_CONTAINER'
 set -eu
+set -o pipefail
 apk add --no-cache "$SQLITE_PACKAGE" >/dev/null
 cp "/in/$DB_NAME" /tmp/kairos.db
 # A copy taken while Kairos runs may have committed rows still in the WAL.
 [ -f "/in/$DB_NAME-wal" ] && cp "/in/$DB_NAME-wal" /tmp/kairos.db-wal
 db=/tmp/kairos.db
-echo "migration=$(sqlite3 "$db" 'SELECT MigrationId FROM __EFMigrationsHistory ORDER BY MigrationId DESC LIMIT 1;')"
+migration="$(sqlite3 "$db" 'SELECT MigrationId FROM __EFMigrationsHistory ORDER BY MigrationId DESC LIMIT 1;')"
+echo "migration=$migration"
 sqlite3 "$db" "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;" |
   while read -r table; do
-    echo "$table=$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$table\";")"
+    count="$(sqlite3 "$db" "SELECT COUNT(*) FROM \"$table\";")"
+    echo "$table=$count"
   done
 IN_CONTAINER
