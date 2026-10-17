@@ -31,4 +31,10 @@ public enum BookingNotice
     /// proposal must not perform the move it asks about, and this has nothing to perform.
     /// </summary>
     Reminder = 50,
+
+    /// <summary>
+    /// The meeting has not moved and something about it has. A REQUEST like a reschedule, under
+    /// the same UID at an advanced sequence, so the client updates the event it already holds.
+    /// </summary>
+    Update = 60,
 }

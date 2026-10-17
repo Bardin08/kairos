@@ -1,3 +1,4 @@
+using Kairos.Api.Features.Bookings;
 using Kairos.Api.Integrations;
 using Kairos.Api.Persistence;
 using Kairos.Api.Persistence.Entities;
@@ -59,6 +60,9 @@ public class CalendarSyncTests
 
     private const int OneMeeting = 1;
     private const int NoMeetings = 0;
+
+    /// <summary>How far one notice advances a booking's sequence.</summary>
+    private const int SequenceStep = 1;
 
     /// <summary>
     /// The decision this task had to make, pinned so it cannot be undone by accident: a deployment
@@ -516,6 +520,56 @@ public class CalendarSyncTests
     }
 
     /// <summary>
+    /// The invitee was confirmed without a join link, and the placement that now carries one is
+    /// worth nothing to them until they are told. The sequence has to advance with the queued
+    /// notice, or their client discards the update as one it already holds.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_AMeetingTheCalendarRefused_QueuesTheInviteesUpdateAtTheNextSequence()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var seeded = booking.Sequence;
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        await Service(context, calendar, new StubConference())
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        context.FollowUps.AsNoTracking().Single().Type.ShouldBe(FollowUpType.Updated);
+        context.Bookings.AsNoTracking().Single().Sequence.ShouldBe(seeded + SequenceStep);
+    }
+
+    /// <summary>
+    /// The event is placed and the conference is not: there is no join link to tell anybody about,
+    /// and a notice saying so would be a second confirmation with nothing new in it.
+    /// </summary>
+    [Fact]
+    public async Task ResyncAsync_TheConferenceIsRefused_QueuesNothing()
+    {
+        using var database = new TestDatabase();
+        using var context = database.CreateContext();
+        var booking = Seed(context);
+        var seeded = booking.Sequence;
+        var calendar = new FakeCalendar { Failure = new InvalidOperationException(Refusal) };
+        await Service(context, calendar, new StubConference())
+            .SyncAsync(booking, TestContext.Current.CancellationToken);
+
+        calendar.Failure = null;
+        await Service(
+                context,
+                calendar,
+                new StubConference { Failure = new InvalidOperationException(Refusal) })
+            .ResyncAsync(linkId: null, TestContext.Current.CancellationToken);
+
+        context.FollowUps.AsNoTracking().ShouldBeEmpty();
+        context.Bookings.AsNoTracking().Single().Sequence.ShouldBe(seeded);
+    }
+
+    /// <summary>
     /// One more refused meeting than a pass takes: the pass stops at the cap. This pins the cap,
     /// not the order: SQLite returns these bookings in start order even without the OrderBy.
     /// </summary>
@@ -658,6 +712,8 @@ public class CalendarSyncTests
             calendars,
             conferences,
             new IntegrationCredentialStore(context, new SecretProtector(TestKey()), SystemClock.Instance),
+            new FollowUpWriter(context, new SecretProtector(TestKey()), new FixedClock(Now)),
+            new FollowUpSignal(),
             context,
             new FixedClock(Now),
             NullLogger<CalendarSyncService>.Instance);

@@ -20,7 +20,9 @@ public sealed class Booking
 
     public required string ManageTokenHash { get; set; }
 
-    /// <summary>Incremented on reschedule. The .ics SEQUENCE reads this.</summary>
+    /// <summary>
+    /// Advanced by every notice that revises the meeting. The .ics SEQUENCE reads this.
+    /// </summary>
     public int Sequence { get; set; }
 
     public long CreatedAt { get; set; }

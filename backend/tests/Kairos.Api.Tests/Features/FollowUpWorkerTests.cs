@@ -57,6 +57,7 @@ public class FollowUpWorkerTests
     private const string MailStep = "mail";
 
     private const int ReachedOnce = 1;
+    private const int NeverReached = 0;
     private const int OneAttempt = 1;
 
     /// <summary>Thirty-two zero bytes, base64 — a key a test can name, per FollowUpWriterTests.</summary>
@@ -207,6 +208,69 @@ public class FollowUpWorkerTests
         verify.FollowUps.AsNoTracking().ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// What a resync queues once the grant recovers: the join link the confirmation went without.
+    /// </summary>
+    [Fact]
+    public async Task DrainAsync_AnUpdatedFollowUp_MailsTheJoinUrlThenDeletesTheRow()
+    {
+        using var database = new TestDatabase();
+        using var seed = database.CreateContext();
+        var booking = SeedBooking(seed);
+        seed.ConferenceLinks.Add(new ConferenceLink
+        {
+            BookingId = booking.Id,
+            Provider = IntegrationProvider.Google,
+            ExternalId = ConferenceId,
+            JoinUrl = JoinUrl,
+            CreatedAt = CreatedAtUtc,
+        });
+        seed.SaveChanges();
+        SeedFollowUp(seed, booking.Id, FollowUpType.Updated, manageToken: null);
+
+        var relay = new CountingRelay();
+        using var provider = NewHost(database, relay, new FakeCalendar(), new StubConference());
+
+        await NewWorker(provider).DrainAsync(TestContext.Current.CancellationToken);
+
+        using var verify = database.CreateContext();
+        verify.FollowUps.AsNoTracking().ShouldBeEmpty();
+        relay.Sent.ShouldBe(ReachedOnce);
+        relay.Last.ShouldNotBeNull().TextBody.ShouldNotBeNull().ShouldContain(JoinUrl);
+    }
+
+    /// <summary>
+    /// Cancelled between the resync that queued the update and the pass that drains it. A REQUEST
+    /// now would put the meeting back on the invitee's calendar, and the row has nothing left to do.
+    /// </summary>
+    [Fact]
+    public async Task DrainAsync_AnUpdatedFollowUpForACancelledMeeting_SendsNothingAndDeletesTheRow()
+    {
+        using var database = new TestDatabase();
+        using var seed = database.CreateContext();
+        var booking = SeedBooking(seed);
+        booking.Status = BookingStatus.Cancelled;
+        seed.ConferenceLinks.Add(new ConferenceLink
+        {
+            BookingId = booking.Id,
+            Provider = IntegrationProvider.Google,
+            ExternalId = ConferenceId,
+            JoinUrl = JoinUrl,
+            CreatedAt = CreatedAtUtc,
+        });
+        seed.SaveChanges();
+        SeedFollowUp(seed, booking.Id, FollowUpType.Updated, manageToken: null);
+
+        var relay = new CountingRelay();
+        using var provider = NewHost(database, relay, new FakeCalendar(), new StubConference());
+
+        await NewWorker(provider).DrainAsync(TestContext.Current.CancellationToken);
+
+        using var verify = database.CreateContext();
+        verify.FollowUps.AsNoTracking().ShouldBeEmpty();
+        relay.Sent.ShouldBe(NeverReached);
+    }
+
     private static ServiceProvider NewHost(
         TestDatabase database,
         EmailSender relay,
@@ -236,6 +300,8 @@ public class FollowUpWorkerTests
         services.AddScoped<CalendarSyncService>();
         services.AddScoped<IntegrationCredentialStore>();
         services.AddScoped<MeetingIdentityResolver>();
+        services.AddScoped<FollowUpWriter>();
+        services.AddSingleton<FollowUpSignal>();
         services.AddSingleton(new SecretProtector(TestKey));
 
         return services.BuildServiceProvider();
@@ -341,14 +407,17 @@ public class FollowUpWorkerTests
             Task.FromResult(new ConferenceDetails(ConferenceId, new Uri(JoinUrl)));
     }
 
-    /// <summary>Takes everything and counts how many times.</summary>
+    /// <summary>Takes everything, counts how many times, and keeps the last message.</summary>
     private sealed class CountingRelay() : EmailSender(Options.Create(new EmailOptions()))
     {
         public int Sent { get; private set; }
 
+        public MimeMessage? Last { get; private set; }
+
         public override Task<string> SendAsync(MimeMessage message, CancellationToken cancellationToken)
         {
             Sent++;
+            Last = message;
             return Task.FromResult(RelayAccepted);
         }
     }
