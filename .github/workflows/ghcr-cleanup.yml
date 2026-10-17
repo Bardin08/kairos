@@ -1,0 +1,36 @@
+name: ghcr-cleanup
+
+# Manual only. Deletes sha-* and stale branch tags from the published image,
+# with their platform children, keeping releases, latest, main, and whatever
+# the caller names in `keep`. Dry run unless told otherwise.
+# Needs Package settings → Manage Actions access to give this repository the Admin role, or every delete answers 403.
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: Extra tags to keep, comma-separated (for example the tag a deployment pins)
+        required: false
+        default: ''
+      dry-run:
+        description: Log what would be deleted without deleting
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          package: kairos
+          delete-tags: 'sha-*,calendar-identity'
+          exclude-tags: ${{ inputs.keep != '' && format('v*,latest,main,{0}', inputs.keep) || 'v*,latest,main' }}
+          delete-untagged: true
+          dry-run: ${{ inputs.dry-run }}
+          validate: true

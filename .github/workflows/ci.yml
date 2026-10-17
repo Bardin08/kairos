@@ -118,9 +118,12 @@ jobs:
       # contents: read. This is the only job that publishes anything, and a
       # top-level packages: write would hand a registry token to every step of
       # every job — including the ones that check out and run a pull request's
-      # own code.
+      # own code. id-token and attestations are what the release attestation
+      # needs to sign through Sigstore and record the result.
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -164,7 +167,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -190,3 +194,18 @@ jobs:
           # to this cache anyway.
           cache-from: type=gha
           cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+          # A release carries its SBOM and full build provenance inside the
+          # image index; everything else keeps the default, so a pull request
+          # build and a push to main cost what they did.
+          sbom: ${{ github.ref_type == 'tag' }}
+          provenance: ${{ github.ref_type == 'tag' && 'mode=max' || '' }}
+
+      # Signed with the runner's OIDC identity and pushed beside the image, so
+      # `gh attestation verify oci://ghcr.io/bardin08/kairos:vX.Y.Z --owner Bardin08`
+      # proves a release was built by this workflow from this repository.
+      - if: github.ref_type == 'tag'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
