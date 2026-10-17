@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 
 using Kairos.Api.Features.Bookings;
+using Kairos.Api.Integrations;
 using Kairos.Api.Integrations.Google;
 using Kairos.Api.Persistence;
 using Kairos.Api.Security;
@@ -215,10 +216,13 @@ public sealed class KairosApp(
             // assumption. Removed here rather than left running: a test that needs the queue
             // worked drains it itself, the documented house pattern, and one that does not gets a
             // queue that sits still instead of a background pass timed against the assertion.
+            // IntegrationSweeper goes the same way so a test can resolve the one instance and drive
+            // its sweeps itself; a hosted registration is reachable only as an IHostedService.
             var hosted = services
                 .Where(descriptor =>
                     (descriptor.ServiceType == typeof(IHostedService))
-                    && (descriptor.ImplementationType == typeof(FollowUpWorker)))
+                    && ((descriptor.ImplementationType == typeof(FollowUpWorker))
+                        || (descriptor.ImplementationType == typeof(IntegrationSweeper))))
                 .ToList();
             foreach (var descriptor in hosted)
             {
@@ -226,6 +230,7 @@ public sealed class KairosApp(
             }
 
             services.AddSingleton<FollowUpWorker>();
+            services.AddSingleton<IntegrationSweeper>();
         });
 
         // A block rather than an early return, so what comes after it is unconditional by
