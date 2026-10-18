@@ -2,8 +2,9 @@
 
 Releases are tagged `vX.Y.Z` and published as `ghcr.io/bardin08/kairos:vX.Y.Z` for `linux/amd64` and `linux/arm64`.
 
-## Unreleased
+## v0.2.0
 
+- First public release: the repository is open and the image pulls without signing in.
 - Release images are signed: `gh attestation verify oci://ghcr.io/bardin08/kairos:<tag> --owner Bardin08`, with an SBOM and build provenance attached.
 - Build the image from source with `docker build`.
 
