@@ -25,8 +25,8 @@ You need Docker with Compose, and an OIDC provider you can register a client wit
 
    ```bash
    mkdir kairos && cd kairos
-   curl -fsSLO https://raw.githubusercontent.com/Bardin08/kairos/v0.2.0/compose.yaml
-   curl -fsSL https://raw.githubusercontent.com/Bardin08/kairos/v0.2.0/.env.example -o .env
+   curl -fsSLO https://raw.githubusercontent.com/Bardin08/kairos/v0.2.1/compose.yaml
+   curl -fsSL https://raw.githubusercontent.com/Bardin08/kairos/v0.2.1/.env.example -o .env
    openssl rand -base64 32   # paste as Security__SecretKey in .env
    ```
 
@@ -91,7 +91,7 @@ The keys are encrypted under `Security__SecretKey`, as are stored integration cr
 
 ## Upgrading
 
-Pin a release in production instead of `latest`: set `image: ghcr.io/bardin08/kairos:v0.2.0` in `compose.yaml`, then change the tag and run `docker compose pull && docker compose up -d` to upgrade.
+Pin a release in production instead of `latest`: set `image: ghcr.io/bardin08/kairos:v0.2.1` in `compose.yaml`, then change the tag and run `docker compose pull && docker compose up -d` to upgrade.
 
 ## Development
 
