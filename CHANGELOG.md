@@ -2,6 +2,10 @@
 
 Releases are tagged `vX.Y.Z` and published as `ghcr.io/bardin08/kairos:vX.Y.Z` for `linux/amd64` and `linux/arm64`.
 
+## v0.2.1
+
+- Dependency patches: ASP.NET Core 10.0.13 (OpenID Connect sign-in) and the Google Calendar client 1.77.
+
 ## v0.2.0
 
 - First public release: the repository is open and the image pulls without signing in.
