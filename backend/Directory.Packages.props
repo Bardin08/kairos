@@ -11,7 +11,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="[10.0.13]" />
     <!-- Pinned ahead of the tasks that reference them, so the version decision is made once
          and reviewed here rather than in whichever pull request happens to need it first. -->
-    <PackageVersion Include="Google.Apis.Calendar.v3" Version="[1.75.0.4206]" />
+    <PackageVersion Include="Google.Apis.Calendar.v3" Version="[1.77.0.4285]" />
     <PackageVersion Include="MailKit" Version="[4.18.1]" />
     <!-- Transitive through MimeKit, which still asks for 10.0.0: GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7 are fixed in 10.0.13. Drop once MimeKit references a fixed version. -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="[10.0.13]" />
