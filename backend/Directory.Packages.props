@@ -5,8 +5,8 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Brackets are an EXACT constraint, not a floor. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="[10.0.13]" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="[10.0.13]" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="[10.0.14]" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="[10.0.14]" />
     <PackageVersion Include="NodaTime" Version="[3.3.5]" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="[10.0.13]" />
     <!-- Pinned ahead of the tasks that reference them, so the version decision is made once
