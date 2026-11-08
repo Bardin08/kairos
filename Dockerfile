@@ -47,11 +47,11 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- the API ----------------------------------------------------------------
-# SDK 10.0.101 exactly, the version backend/global.json names. Not the floating
-# 10.0 tag: it currently carries 10.0.400, which is a different feature band,
-# and `rollForward: latestPatch` does not cross one — that image cannot build
-# this repository at all ("A compatible .NET SDK was not found", measured).
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.101-noble@sha256:5504edd1267dd4deab3443f960cfab219249c8bd935fbcc358f1c24aeae23fe0 AS backend
+# SDK 10.0.403 exactly, the version backend/global.json names. Not the floating
+# 10.0 tag: it moves between feature bands, and `rollForward: latestPatch` does
+# not cross one, so an image from another band cannot build this repository
+# at all ("A compatible .NET SDK was not found", measured).
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.403-noble@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS backend
 
 WORKDIR /src/backend
 
